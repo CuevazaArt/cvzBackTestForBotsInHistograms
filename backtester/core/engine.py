@@ -184,11 +184,17 @@ class BacktestEngine:
         result.final_equity = portfolio.total_equity(candles[-1].close) if candles else Decimal("0")
         result.peak_equity = max(result.equity_curve) if result.equity_curve else Decimal("0")
 
-        if result.peak_equity > 0:
-            drawdown = (result.peak_equity - result.final_equity) / result.peak_equity
-            result.max_drawdown_pct = drawdown * 100
-        else:
-            result.max_drawdown_pct = Decimal("0")
+        # Max drawdown: true peak-to-trough over the entire equity curve
+        max_dd = Decimal("0")
+        running_peak = Decimal("0")
+        for eq in result.equity_curve:
+            if eq > running_peak:
+                running_peak = eq
+            if running_peak > 0:
+                dd = (running_peak - eq) / running_peak
+                if dd > max_dd:
+                    max_dd = dd
+        result.max_drawdown_pct = max_dd * 100
 
         return result
 

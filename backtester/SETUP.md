@@ -123,7 +123,7 @@ El descargador respeta los límites (1200 req/min). Si recibes errores, intenta:
 ```
 backtester/
 ├── .vault/          ← Credenciales encriptadas (no commitear)
-├── data/            ← Base de datos de velas (SQLite)
+├── data/            ← Base de datos de velas (DuckDB columnar)
 ├── results/         ← Resultados de backtests y experimentos
 └── core/            ← Módulos internos
     ├── downloader.py    ← Descargar de Binance
