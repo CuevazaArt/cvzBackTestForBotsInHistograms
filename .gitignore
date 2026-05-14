@@ -1,0 +1,50 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Backtester runtime artifacts
+backtester/.vault/
+backtester/data/
+backtester/results/
+backtester/web/assets/js/lightweight-charts.standalone.production.js
+
+# Flutter
+flutter_app/.dart_tool/
+flutter_app/.flutter-plugins
+flutter_app/.flutter-plugins-dependencies
+flutter_app/build/
+flutter_app/windows/flutter/ephemeral/
+flutter_app/.idea/
+flutter_app/pubspec.lock
+
+# Env / secrets
+.env
+*.key
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

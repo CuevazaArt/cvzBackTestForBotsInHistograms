@@ -1,0 +1,9 @@
+cryptography==41.0.7
+requests==2.31.0
+rich==13.7.0
+
+# API server
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+websockets==13.0
