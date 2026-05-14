@@ -65,7 +65,7 @@
         <div id="osc-container"></div>
     </div>
 
-    <!-- Lightweight Charts Standalone (local — run setup to download) -->
+    <!-- Lightweight Charts Standalone -->
     <script src="assets/js/lightweight-charts.standalone.production.js"></script>
 
     <script>
@@ -560,6 +560,14 @@
         equitySeries.setData([]);
         volumeSeries.setData([]);
         candleSeries.setMarkers([]);
+
+        // Remove per-bot equity series (keep 'total' = equitySeries)
+        Object.entries(_botEquitySeries).forEach(([id, s]) => {
+            if (id !== 'total') chart.removeSeries(s);
+        });
+        // Reset map but keep total alias
+        for (const k in _botEquitySeries) if (k !== 'total') delete _botEquitySeries[k];
+        for (const k in _botColorIdx) delete _botColorIdx[k];
 
         Object.values(_overlaySeries).forEach(s => chart.removeSeries(s));
         for (const k in _overlaySeries) delete _overlaySeries[k];
