@@ -158,7 +158,15 @@ class _BacktestScreenState extends State<BacktestScreen> {
   void _showDownloadDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (_) => _DownloadDialog(apiService: widget.apiService),
+      builder: (_) => _DownloadDialog(
+        apiService: widget.apiService,
+        onCatalogSelect: (symbol, tf) {
+          setState(() {
+            _selectedSymbol = symbol;
+            _selectedTimeframe = tf;
+          });
+        },
+      ),
     );
   }
 }
@@ -323,7 +331,8 @@ class _DropdownChip<T> extends StatelessWidget {
 
 class _DownloadDialog extends StatefulWidget {
   final ApiService apiService;
-  const _DownloadDialog({required this.apiService});
+  final Function(String, String) onCatalogSelect;
+  const _DownloadDialog({required this.apiService, required this.onCatalogSelect});
 
   @override
   State<_DownloadDialog> createState() => _DownloadDialogState();
@@ -342,12 +351,38 @@ class _DownloadDialogState extends State<_DownloadDialog> {
   String? _msg;
   double _downloadProgress = 0.0;
   Timer? _pollTimer;
+  Timer? _healthTimer;
+  
+  List<SymbolEntry> _catalog = [];
+  int _apiWeight = 0;
 
   static const _timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
   @override
+  void initState() {
+    super.initState();
+    _refreshCatalog();
+    _healthTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollWeight());
+  }
+
+  Future<void> _refreshCatalog() async {
+    try {
+      final syms = await widget.apiService.listSymbols();
+      if (mounted) setState(() => _catalog = syms);
+    } catch (_) {}
+  }
+  
+  Future<void> _pollWeight() async {
+    try {
+      final h = await widget.apiService.checkHealth();
+      if (mounted) setState(() => _apiWeight = h.binanceWeight1m);
+    } catch (_) {}
+  }
+
+  @override
   void dispose() {
     _pollTimer?.cancel();
+    _healthTimer?.cancel();
     super.dispose();
   }
 
@@ -358,54 +393,134 @@ class _DownloadDialogState extends State<_DownloadDialog> {
       _downloadProgress = 0.0;
     });
     try {
-      final Map<String, dynamic> result;
       if (_useZip) {
-        result = await widget.apiService.downloadCandlesZip(
-          symbol: _symbolCtrl.text.trim().toUpperCase(),
-          timeframe: _tf,
-          year: int.parse(_yearCtrl.text.trim()),
-          month: int.parse(_monthCtrl.text.trim()),
-        );
+        // Parse month range
+        final monthStr = _monthCtrl.text.trim().toLowerCase();
+        List<int> months = [];
+        if (monthStr == 'all' || monthStr == '1-12') {
+          months = List.generate(12, (i) => i + 1);
+        } else if (monthStr.contains('-')) {
+          final parts = monthStr.split('-');
+          int start = int.parse(parts[0].trim());
+          int end = int.parse(parts[1].trim());
+          months = List.generate(end - start + 1, (i) => start + i);
+        } else if (monthStr.contains(',')) {
+          months = monthStr.split(',').map((e) => int.parse(e.trim())).toList();
+        } else {
+          months = [int.parse(monthStr)];
+        }
+
+        final year = int.parse(_yearCtrl.text.trim());
+        final symbol = _symbolCtrl.text.trim().toUpperCase();
+
+        setState(() {
+          _msg = 'Spawning ${months.length} parallel downloads...';
+        });
+
+        // Start all downloads in parallel
+        final jobIds = <String>[];
+        for (int m in months) {
+          final result = await widget.apiService.downloadCandlesZip(
+            symbol: symbol,
+            timeframe: _tf,
+            year: year,
+            month: m,
+          );
+          jobIds.add(result['id'] as String);
+        }
+
+        // Poll all jobs until done
+        int completed = 0;
+        int totalCandles = 0;
+        final Set<String> doneJobs = {};
+        
+        _pollTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+          try {
+            double totalProgress = 0;
+            bool hasError = false;
+            String? lastErr;
+
+            for (final id in jobIds) {
+              if (doneJobs.contains(id)) {
+                totalProgress += 1.0;
+                continue;
+              }
+              final status = await widget.apiService.getJob(id);
+              if (status.status == 'done') {
+                doneJobs.add(id);
+                completed++;
+                totalProgress += 1.0;
+                totalCandles += (status.result?['candles_added'] as num?)?.toInt() ?? 0;
+              } else if (status.status == 'error') {
+                hasError = true;
+                lastErr = status.message;
+                doneJobs.add(id); // Treat as done to stop polling it
+                completed++;
+              } else {
+                totalProgress += status.progress;
+              }
+            }
+
+            if (mounted) {
+              setState(() {
+                _downloadProgress = totalProgress / jobIds.length;
+                _msg = 'Downloading... $completed/${jobIds.length} done';
+              });
+            }
+
+            if (completed == jobIds.length) {
+              timer.cancel();
+              if (mounted) {
+                setState(() {
+                  _loading = false;
+                  if (hasError) {
+                    _msg = '⚠ Finished with some errors. Last: $lastErr';
+                  } else {
+                    _msg = '✓ Done: $totalCandles candles added.';
+                  }
+                  _refreshCatalog();
+                });
+              }
+            }
+          } catch (e) {
+            // Ignore temporary network errors during polling
+          }
+        });
+
       } else {
-        result = await widget.apiService.downloadCandles(
+        // REST API mode (single job)
+        final result = await widget.apiService.downloadCandles(
           symbol: _symbolCtrl.text.trim().toUpperCase(),
           timeframe: _tf,
           dateFrom: _fromCtrl.text.trim(),
           dateTo: _toCtrl.text.trim(),
         );
-      }
-      final jobId = result['id'] as String;
+        final jobId = result['id'] as String;
 
-      _pollTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-        try {
-          final status = await widget.apiService.getJob(jobId);
-          if (mounted) {
-            setState(() {
-              _downloadProgress = status.progress;
-              _msg = status.message ?? 'Downloading...';
-            });
-            if (status.status == 'done' || status.status == 'error') {
-              timer.cancel();
+        _pollTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+          try {
+            final status = await widget.apiService.getJob(jobId);
+            if (mounted) {
               setState(() {
-                _loading = false;
-                if (status.status == 'done') {
-                  _msg = '✓ Done: ${status.result?['candles_added'] ?? 0} candles';
-                } else {
-                  _msg = '✗ Error: ${status.message}';
-                }
+                _downloadProgress = status.progress;
+                _msg = status.message ?? 'Downloading...';
               });
+              if (status.status == 'done' || status.status == 'error') {
+                timer.cancel();
+                setState(() {
+                  _loading = false;
+                  if (status.status == 'done') {
+                    _msg = '✓ Done: ${status.result?['candles_added'] ?? 0} candles';
+                    _refreshCatalog();
+                  } else {
+                    _msg = '✗ Error: ${status.message}';
+                  }
+                });
+              }
             }
-          }
-        } catch (e) {
-          timer.cancel();
-          if (mounted) {
-            setState(() {
-              _loading = false;
-              _msg = '✗ Polling error: $e';
-            });
-          }
-        }
-      });
+          } catch (e) {}
+        });
+      }
     } catch (e) {
       setState(() {
         _loading = false;
@@ -418,116 +533,187 @@ class _DownloadDialogState extends State<_DownloadDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: const Color(0xFF1E222D),
-      title: const Text('Download Historical Data'),
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text('Data Manager'),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              const Text('API Weight (1m)', style: TextStyle(fontSize: 10, color: Color(0xFF787B86))),
+              Row(
+                children: [
+                  Icon(Icons.monitor_heart, size: 14, color: _apiWeight > 1000 ? const Color(0xFFef5350) : const Color(0xFF26a69a)),
+                  const SizedBox(width: 4),
+                  Text('$_apiWeight / 6000', style: TextStyle(fontSize: 12, color: _apiWeight > 1000 ? const Color(0xFFef5350) : const Color(0xFFD9D9D9))),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
       content: SizedBox(
-        width: 340,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        width: 600,
+        height: 400,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: _symbolCtrl,
-              decoration: const InputDecoration(labelText: 'Symbol'),
-            ),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              initialValue: _tf,
-              items: _timeframes
-                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) setState(() => _tf = v);
-              },
-              decoration: const InputDecoration(labelText: 'Timeframe'),
-            ),
-            const SizedBox(height: 12),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: true, label: Text('Bulk ZIP')),
-                ButtonSegment(value: false, label: Text('REST API')),
-              ],
-              selected: {_useZip},
-              onSelectionChanged: (Set<bool> newSelection) {
-                setState(() => _useZip = newSelection.first);
-              },
-            ),
-            const SizedBox(height: 12),
-            if (!_useZip)
-              Row(
+            // Left Side: Download Form
+            Expanded(
+              flex: 1,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _fromCtrl,
-                      decoration: const InputDecoration(labelText: 'From (YYYY-MM-DD)'),
-                    ),
+                  const Text('Download History', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _symbolCtrl,
+                    decoration: const InputDecoration(labelText: 'Symbol'),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    initialValue: _tf,
+                    items: _timeframes
+                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) setState(() => _tf = v);
+                    },
+                    decoration: const InputDecoration(labelText: 'Timeframe'),
+                  ),
+                  const SizedBox(height: 12),
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: true, label: Text('Bulk ZIP')),
+                      ButtonSegment(value: false, label: Text('REST API')),
+                    ],
+                    selected: {_useZip},
+                    onSelectionChanged: (Set<bool> newSelection) {
+                      setState(() => _useZip = newSelection.first);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  if (!_useZip)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _fromCtrl,
+                            decoration: const InputDecoration(labelText: 'From (YYYY-MM-DD)'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _toCtrl,
+                            decoration: const InputDecoration(labelText: 'To (YYYY-MM-DD)'),
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _yearCtrl,
+                            decoration: const InputDecoration(labelText: 'Year (YYYY)'),
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _monthCtrl,
+                            decoration: const InputDecoration(labelText: 'Month (e.g. 1, 1-12, all)'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _loading ? null : _download,
+                    icon: _loading
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.download, size: 16),
+                    label: const Text('Start Download'),
+                  ),
+                  if (_loading && _downloadProgress > 0) ...[
+                    const SizedBox(height: 16),
+                    LinearProgressIndicator(
+                      value: _downloadProgress,
+                      backgroundColor: const Color(0xFF2B2B43),
+                      color: const Color(0xFF26a69a),
+                    ),
+                  ],
+                  if (_msg != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _msg!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _msg!.startsWith('✓')
+                            ? const Color(0xFF26a69a)
+                            : (_msg!.startsWith('✗') ? const Color(0xFFef5350) : const Color(0xFFD9D9D9)),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const VerticalDivider(width: 24),
+            // Right Side: Catalog
+            Expanded(
+              flex: 1,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Local Histograms (DuckDB)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
                   Expanded(
-                    child: TextField(
-                      controller: _toCtrl,
-                      decoration: const InputDecoration(labelText: 'To (YYYY-MM-DD)'),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF131722),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ListView.builder(
+                        itemCount: _catalog.length,
+                        itemBuilder: (context, index) {
+                          final c = _catalog[index];
+                          return ListTile(
+                            dense: true,
+                            title: Text('${c.symbol} • ${c.timeframe}', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                            subtitle: Text('${c.candles} candles', style: const TextStyle(color: Color(0xFF787B86), fontSize: 11)),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.play_circle_outline, color: Color(0xFF26a69a)),
+                              tooltip: 'Load in Main Chart',
+                              onPressed: () {
+                                widget.onCatalogSelect(c.symbol, c.timeframe);
+                                Navigator.pop(context);
+                              },
+                            ),
+                            onTap: () {
+                              widget.onCatalogSelect(c.symbol, c.timeframe);
+                              Navigator.pop(context);
+                            },
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ],
-              )
-            else
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _yearCtrl,
-                      decoration: const InputDecoration(labelText: 'Year (YYYY)'),
-                      keyboardType: TextInputType.number,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: _monthCtrl,
-                      decoration: const InputDecoration(labelText: 'Month (1-12)'),
-                      keyboardType: TextInputType.number,
-                    ),
-                  ),
-                ],
               ),
-            if (_loading && _downloadProgress > 0) ...[
-              const SizedBox(height: 16),
-              LinearProgressIndicator(
-                value: _downloadProgress,
-                backgroundColor: const Color(0xFF2B2B43),
-                color: const Color(0xFF26a69a),
-              ),
-            ],
-            if (_msg != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _msg!,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _msg!.startsWith('✓')
-                      ? const Color(0xFF26a69a)
-                      : (_msg!.startsWith('✗') ? const Color(0xFFef5350) : const Color(0xFFD9D9D9)),
-                ),
-              ),
-            ],
+            ),
           ],
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Close'),
-        ),
-        FilledButton(
-          onPressed: _loading ? null : _download,
-          child: _loading
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Download'),
+          child: const Text('Close Manager'),
         ),
       ],
     );
   }
 }
+

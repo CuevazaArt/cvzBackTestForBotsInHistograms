@@ -46,8 +46,9 @@ def create_app() -> FastAPI:
     app.include_router(ws_router)
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
+    def health() -> dict[str, str | int]:
+        from backtester.core.downloader import BINANCE_USED_WEIGHT_1M
+        return {"status": "ok", "binance_weight_1m": BINANCE_USED_WEIGHT_1M}
 
     # Static web (Lightweight Charts module). Created in Phase 3.
     web_dir = Path(__file__).resolve().parents[1] / "web"

@@ -76,7 +76,8 @@ class BotParamsResponse {
 
 class HealthStatus {
   final bool ok;
-  const HealthStatus(this.ok);
+  final int binanceWeight1m;
+  const HealthStatus(this.ok, {this.binanceWeight1m = 0});
 }
 
 class JobStatus {
@@ -114,7 +115,11 @@ class ApiService {
       final res = await http.get(Uri.parse('$baseUrl/health')).timeout(
             const Duration(seconds: 3),
           );
-      return HealthStatus(res.statusCode == 200);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        return HealthStatus(true, binanceWeight1m: (data['binance_weight_1m'] as num?)?.toInt() ?? 0);
+      }
+      return const HealthStatus(false);
     } catch (_) {
       return const HealthStatus(false);
     }

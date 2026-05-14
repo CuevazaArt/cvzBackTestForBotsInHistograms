@@ -21,6 +21,9 @@ _LOG = logging.getLogger("backtester.downloader")
 REQUEST_DELAY = 0.1  # 100ms between requests (safe margin)
 
 
+# Global variable to track API weight across the application
+BINANCE_USED_WEIGHT_1M = 0
+
 class BinanceDownloader:
     """Download historical OHLCV data from Binance REST API."""
 
@@ -139,6 +142,16 @@ class BinanceDownloader:
                 headers=headers,
                 timeout=10,
             )
+            
+            # Track API Weight
+            weight_header = resp.headers.get("X-MBX-USED-WEIGHT-1M")
+            if weight_header:
+                global BINANCE_USED_WEIGHT_1M
+                try:
+                    BINANCE_USED_WEIGHT_1M = int(weight_header)
+                except ValueError:
+                    pass
+                    
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
