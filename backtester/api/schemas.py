@@ -76,8 +76,26 @@ class JobStatus(BaseModel):
 
 
 class IndicatorSpec(BaseModel):
+    """Flexible indicator spec — passes all fields except 'name' as kwargs."""
     name: str
-    period: int
+    # Common period-based params
+    period: Optional[int] = None
+    # MACD-specific
+    fast: Optional[int] = None
+    slow: Optional[int] = None
+    signal: Optional[int] = None
+    # Stochastic-specific
+    k_period: Optional[int] = None
+    d_period: Optional[int] = None
+    # Bollinger std multiplier
+    std_dev: Optional[float] = None
+
+    def to_kwargs(self) -> dict[str, Any]:
+        """Return all non-None non-name fields as a kwargs dict."""
+        return {
+            k: v for k, v in self.model_dump().items()
+            if k != "name" and v is not None
+        }
 
 
 class BotRunSpec(BaseModel):

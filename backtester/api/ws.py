@@ -98,12 +98,12 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 # Run the synchronous engine in a worker thread so the WS
                 # event loop stays responsive (and pings can fly through).
                 await asyncio.to_thread(
-                    engine.run, 
-                    bots=bots_instances, 
-                    candles=candles, 
-                    symbol=req.symbol.upper(), 
+                    engine.run,
+                    bots=bots_instances,
+                    candles=candles,
+                    symbol=req.symbol.upper(),
                     timeframe=req.timeframe,
-                    indicator_specs=[i.model_dump() for i in req.indicators]
+                    indicator_specs=[{"name": i.name, **i.to_kwargs()} for i in req.indicators]
                 )
 
             else:

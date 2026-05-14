@@ -29,6 +29,12 @@ class _BacktestScreenState extends State<BacktestScreen> {
   double _brickSize = 10.0;
   Map<String, Map<String, dynamic>> _botsParams = {};
 
+  // Indicator selector: each entry has 'name' + optional numeric params
+  List<Map<String, dynamic>> _selectedIndicators = [
+    {'name': 'ema', 'period': 9},
+    {'name': 'ema', 'period': 21},
+  ];
+
   bool _running = false;
   double _progress = 0;
   Map<String, dynamic>? _lastResult;
@@ -73,8 +79,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
   void _onWsEvent(WsEvent ev) {
     switch (ev.type) {
       case WsEventType.start:
-        final keys = List<String>.from(ev.data['indicators_keys'] ?? []);
-        _chartCtrl.initIndicators(keys);
+        final overlayKeys = List<String>.from(ev.data['indicators_keys'] ?? []);
+        final oscKeys     = List<String>.from(ev.data['oscillator_keys'] ?? []);
+        _chartCtrl.initIndicators(overlayKeys);
+        _chartCtrl.initOscillators(oscKeys);
       case WsEventType.candle:
         _chartCtrl.addCandle(ev.data);
       case WsEventType.trade:
@@ -114,18 +122,15 @@ class _BacktestScreenState extends State<BacktestScreen> {
       _wsError = null;
     });
     _chartCtrl.clear();
-    
+
     final bots = _selectedBots.map((b) => {'name': b, 'params': _botsParams[b] ?? {}}).toList();
-    
+
     _ws.runBacktest(
       bots: bots,
       symbol: _selectedSymbol!,
       timeframe: _selectedTimeframe,
       initialCash: _initialCash,
-      indicators: [
-        {'name': 'ema', 'period': 9},
-        {'name': 'ema', 'period': 21},
-      ]
+      indicators: _selectedIndicators,
     );
   }
 
@@ -149,6 +154,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           selectedFormula: _selectedFormula,
           selectedBots: _selectedBots,
           initialCash: _initialCash,
+          selectedIndicators: _selectedIndicators,
           running: _running,
           progress: _progress,
           wsError: _wsError,
@@ -167,6 +173,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           },
           onBotsChanged: (v) => setState(() => _selectedBots = v),
           onCashChanged: (v) => setState(() => _initialCash = v),
+          onIndicatorsChanged: (v) => setState(() => _selectedIndicators = v),
           onRun: _runBacktest,
           onDownload: () => _showDownloadDialog(context),
         ),
@@ -206,6 +213,7 @@ class _TopBar extends StatelessWidget {
   final String selectedFormula;
   final List<String> selectedBots;
   final double initialCash;
+  final List<Map<String, dynamic>> selectedIndicators;
   final bool running;
   final double progress;
   final String? wsError;
@@ -216,6 +224,7 @@ class _TopBar extends StatelessWidget {
   final ValueChanged<double> onBrickSizeChanged;
   final ValueChanged<List<String>> onBotsChanged;
   final ValueChanged<double> onCashChanged;
+  final ValueChanged<List<Map<String, dynamic>>> onIndicatorsChanged;
   final VoidCallback onRun;
   final VoidCallback onDownload;
 
@@ -227,6 +236,7 @@ class _TopBar extends StatelessWidget {
     required this.selectedFormula,
     required this.selectedBots,
     required this.initialCash,
+    required this.selectedIndicators,
     required this.running,
     required this.progress,
     this.wsError,
@@ -237,6 +247,7 @@ class _TopBar extends StatelessWidget {
     required this.onBrickSizeChanged,
     required this.onBotsChanged,
     required this.onCashChanged,
+    required this.onIndicatorsChanged,
     required this.onRun,
     required this.onDownload,
   });
@@ -363,6 +374,14 @@ class _TopBar extends StatelessWidget {
             label: Text('Bots (${selectedBots.length})'),
             style: TextButton.styleFrom(foregroundColor: const Color(0xFFD9D9D9)),
           ),
+          const SizedBox(width: 4),
+          // ── Indicator selector ────────────────────────────────
+          TextButton.icon(
+            onPressed: () => _showIndicatorDialog(context),
+            icon: const Icon(Icons.show_chart, size: 14),
+            label: Text('Ind (${selectedIndicators.length})'),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFD9D9D9)),
+          ),
           const SizedBox(width: 12),
           // Run
           FilledButton.icon(
@@ -406,6 +425,114 @@ class _TopBar extends StatelessWidget {
               style: const TextStyle(color: Color(0xFFef5350), fontSize: 11),
             ),
         ],
+      ),
+    );
+  }
+
+  // Available indicator presets — each maps to Python indicator name + default params
+  static const _indicatorPresets = [
+    {'label': 'EMA 9',        'spec': {'name': 'ema',   'period': 9}},
+    {'label': 'EMA 21',       'spec': {'name': 'ema',   'period': 21}},
+    {'label': 'EMA 50',       'spec': {'name': 'ema',   'period': 50}},
+    {'label': 'SMA 20',       'spec': {'name': 'sma',   'period': 20}},
+    {'label': 'SMA 200',      'spec': {'name': 'sma',   'period': 200}},
+    {'label': 'RSI 14',       'spec': {'name': 'rsi',   'period': 14}},
+    {'label': 'MACD (12/26/9)', 'spec': {'name': 'macd', 'fast': 12, 'slow': 26, 'signal': 9}},
+    {'label': 'BB 20',        'spec': {'name': 'bb',    'period': 20}},
+    {'label': 'Stoch 14',     'spec': {'name': 'stoch', 'k_period': 14, 'd_period': 3}},
+    {'label': 'VWAP',         'spec': {'name': 'vwap'}},
+  ];
+
+  void _showIndicatorDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          // Track which presets are currently active
+          bool isActive(Map<String, dynamic> spec) =>
+              selectedIndicators.any((s) => s.toString() == spec.toString());
+
+          void toggle(Map<String, dynamic> spec) {
+            final current = List<Map<String, dynamic>>.from(selectedIndicators);
+            if (isActive(spec)) {
+              current.removeWhere((s) => s.toString() == spec.toString());
+            } else {
+              current.add(Map<String, dynamic>.from(spec));
+            }
+            onIndicatorsChanged(current);
+            setDialogState(() {});
+          }
+
+          return AlertDialog(
+            title: const Text('Indicators'),
+            backgroundColor: const Color(0xFF1E222D),
+            content: SizedBox(
+              width: 320,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'OVERLAY (main chart)',
+                    style: TextStyle(color: Color(0xFF787B86), fontSize: 10, letterSpacing: 1),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8, runSpacing: 6,
+                    children: _indicatorPresets
+                        .where((p) => !['rsi', 'macd', 'stoch'].contains((p['spec'] as Map)['name']))
+                        .map((p) {
+                      final spec = Map<String, dynamic>.from(p['spec'] as Map);
+                      final active = isActive(spec);
+                      return FilterChip(
+                        label: Text(p['label'] as String,
+                            style: TextStyle(fontSize: 12, color: active ? Colors.black : const Color(0xFFD9D9D9))),
+                        selected: active,
+                        onSelected: (_) => toggle(spec),
+                        selectedColor: const Color(0xFF26a69a),
+                        backgroundColor: const Color(0xFF2B2B43),
+                        checkmarkColor: Colors.black,
+                        side: BorderSide.none,
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'OSCILLATORS (sub-panel)',
+                    style: TextStyle(color: Color(0xFF787B86), fontSize: 10, letterSpacing: 1),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8, runSpacing: 6,
+                    children: _indicatorPresets
+                        .where((p) => ['rsi', 'macd', 'stoch'].contains((p['spec'] as Map)['name']))
+                        .map((p) {
+                      final spec = Map<String, dynamic>.from(p['spec'] as Map);
+                      final active = isActive(spec);
+                      return FilterChip(
+                        label: Text(p['label'] as String,
+                            style: TextStyle(fontSize: 12, color: active ? Colors.black : const Color(0xFFD9D9D9))),
+                        selected: active,
+                        onSelected: (_) => toggle(spec),
+                        selectedColor: const Color(0xFFFFD700),
+                        backgroundColor: const Color(0xFF2B2B43),
+                        checkmarkColor: Colors.black,
+                        side: BorderSide.none,
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () { onIndicatorsChanged([]); setDialogState(() {}); },
+                child: const Text('Clear all', style: TextStyle(color: Color(0xFF787B86))),
+              ),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+            ],
+          );
+        },
       ),
     );
   }

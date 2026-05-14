@@ -107,7 +107,7 @@ class StreamingEngine(BacktestEngine):
             bots = [bots]
             
         # Calculate indicators before starting the simulation
-        from backtester.core.indicators import add_indicators
+        from backtester.core.indicators import add_indicators, is_oscillator
         ind_data = add_indicators(candles, indicator_specs or [])
 
         portfolio = Portfolio(cash=self.config.initial_cash)
@@ -116,12 +116,15 @@ class StreamingEngine(BacktestEngine):
         )
 
         # Tell the client we're starting
+        overlay_keys = [k for k in ind_data if not is_oscillator(k)]
+        oscillator_keys = [k for k in ind_data if is_oscillator(k)]
         self._emit("start", {
             "symbol": symbol,
             "timeframe": timeframe,
             "candles_total": len(candles),
             "initial_cash": float(self.config.initial_cash),
-            "indicators_keys": list(ind_data.keys()),
+            "indicators_keys": overlay_keys,
+            "oscillator_keys": oscillator_keys,
         })
 
         prev_closed_count = 0
