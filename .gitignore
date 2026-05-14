@@ -49,3 +49,9 @@ flutter_app/pubspec.lock
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Scratch / temp
+temp_repos/
+scratch_test.py
+apply_sdk_patch.bat
+*.scratch.py

@@ -63,6 +63,20 @@
         borderVisible: false,
         wickUpColor: '#26a69a', wickDownColor: '#ef5350',
     });
+    // Scale candles to top 75% of the pane
+    chart.priceScale('right').applyOptions({
+        scaleMargins: { top: 0.05, bottom: 0.25 },
+    });
+
+    const volumeSeries = chart.addHistogramSeries({
+        color: '#26a69a',
+        priceFormat: { type: 'volume' },
+        priceScaleId: 'volume',
+    });
+    chart.priceScale('volume').applyOptions({
+        scaleMargins: { top: 0.80, bottom: 0 },
+        visible: false,   // Don't show volume price axis — just the bars
+    });
 
     const equitySeries = chart.addLineSeries({
         color: '#2196F3',
@@ -71,7 +85,7 @@
         title: 'Equity',
     });
     chart.priceScale('equity').applyOptions({
-        scaleMargins: { top: 0.8, bottom: 0 },
+        scaleMargins: { top: 0.82, bottom: 0 },
         visible: true,
     });
 
@@ -160,16 +174,21 @@
         return rawCandle;
     }
 
-    /** Calculate Renko bricks from raw candles */
-    function _calculateRenko(candles, brickSize) {
-        if (!candles || candles.length === 0) return [];
+    /** Calculate Renko bricks from raw candles.
+     *  @param candles   Raw OHLCV candles.
+     *  @param brickSize Brick size in price units.
+     *  @param prevBrick Previous last brick (for incremental mode). If null, starts fresh.
+     *  @returns { bricks, lastBrick } so the caller can persist state.
+     */
+    function _calculateRenko(candles, brickSize, prevBrick = null) {
+        if (!candles || candles.length === 0) return { bricks: [], lastBrick: prevBrick };
         const renkoBricks = [];
-        _renkoLastBrick = null;
-        
+        let lastBrick = prevBrick;
+
         for (let i = 0; i < candles.length; i++) {
             const raw = candles[i];
-            if (!_renkoLastBrick) {
-                _renkoLastBrick = {
+            if (!lastBrick) {
+                lastBrick = {
                     time: raw.time,
                     open: raw.close,
                     close: raw.close,
@@ -179,44 +198,41 @@
                 };
                 continue;
             }
-            
-            let diff = raw.close - _renkoLastBrick.close;
+
+            let diff = raw.close - lastBrick.close;
             let bricksToForm = 0;
             let direction = 0;
-            
-            if (_renkoLastBrick.trend >= 0 && diff >= brickSize) {
+
+            if (lastBrick.trend >= 0 && diff >= brickSize) {
                 bricksToForm = Math.floor(diff / brickSize);
                 direction = 1;
-            } else if (_renkoLastBrick.trend <= 0 && -diff >= brickSize) {
+            } else if (lastBrick.trend <= 0 && -diff >= brickSize) {
                 bricksToForm = Math.floor(-diff / brickSize);
                 direction = -1;
-            } else if (_renkoLastBrick.trend > 0 && -diff >= brickSize * 2) {
+            } else if (lastBrick.trend > 0 && -diff >= brickSize * 2) {
                 bricksToForm = Math.floor((-diff) / brickSize);
                 direction = -1;
-            } else if (_renkoLastBrick.trend < 0 && diff >= brickSize * 2) {
+            } else if (lastBrick.trend < 0 && diff >= brickSize * 2) {
                 bricksToForm = Math.floor(diff / brickSize);
                 direction = 1;
             }
-            
-            if (bricksToForm > 0) {
-                for (let b = 0; b < bricksToForm; b++) {
-                    const newClose = _renkoLastBrick.close + (direction * brickSize);
-                    const newOpen = _renkoLastBrick.close;
-                    const newBrick = {
-                        // Offset slightly to avoid duplicate timestamps if multiple bricks form on the same candle
-                        time: raw.time + (b * 0.001), 
-                        open: newOpen,
-                        close: newClose,
-                        high: Math.max(newOpen, newClose),
-                        low: Math.min(newOpen, newClose),
-                        trend: direction
-                    };
-                    renkoBricks.push(newBrick);
-                    _renkoLastBrick = newBrick;
-                }
+
+            for (let b = 0; b < bricksToForm; b++) {
+                const newClose = lastBrick.close + (direction * brickSize);
+                const newOpen = lastBrick.close;
+                const newBrick = {
+                    time: raw.time + (b * 1),  // each brick gets a unique timestamp offset (+1s)
+                    open: newOpen,
+                    close: newClose,
+                    high: Math.max(newOpen, newClose),
+                    low: Math.min(newOpen, newClose),
+                    trend: direction
+                };
+                renkoBricks.push(newBrick);
+                lastBrick = newBrick;
             }
         }
-        return renkoBricks;
+        return { bricks: renkoBricks, lastBrick };
     }
 
     window.setChartFormula = function(formula, config) {
@@ -225,12 +241,13 @@
         _haPrev = null;
         _renkoLastBrick = null;
         _candleData.length = 0;
-        
+
         if (_rawCandles.length > 0) {
             if (currentFormula === 'renko') {
-                const transformed = _calculateRenko(_rawCandles, currentBrickSize);
-                _candleData.push(...transformed);
-                candleSeries.setData(transformed);
+                const { bricks, lastBrick } = _calculateRenko(_rawCandles, currentBrickSize);
+                _renkoLastBrick = lastBrick;
+                _candleData.push(...bricks);
+                candleSeries.setData(bricks);
             } else {
                 const transformed = _rawCandles.map((c, i) => _applyFormula(c, i === 0));
                 _candleData.push(...transformed);
@@ -255,12 +272,21 @@
 
     window.addCandle = function(data) {
         _rawCandles.push(data);
-        
+
+        // Volume bar
+        const isUp = data.close >= data.open;
+        volumeSeries.update({
+            time: data.time,
+            value: data.volume,
+            color: isUp ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
+        });
+
         if (currentFormula === 'renko') {
-            // Re-run renko incrementally for the new candle
-            const newBricks = _calculateRenko([data], currentBrickSize);
-            if (newBricks.length > 0) {
-                newBricks.forEach(b => {
+            // Incremental: pass current lastBrick so state is preserved
+            const { bricks, lastBrick } = _calculateRenko([data], currentBrickSize, _renkoLastBrick);
+            _renkoLastBrick = lastBrick;
+            if (bricks.length > 0) {
+                bricks.forEach(b => {
                     _candleData.push(b);
                     candleSeries.update(b);
                 });
@@ -270,7 +296,7 @@
             _candleData.push(displayData);
             candleSeries.update(displayData);
         }
-        
+
         if (data.indicators) {
             Object.keys(data.indicators).forEach(key => {
                 if (_indicatorSeries[key] && data.indicators[key] !== null) {
@@ -286,18 +312,27 @@
         _candleData.length = 0;
         _haPrev = null;
         _renkoLastBrick = null;
-        
+
         if (currentFormula === 'renko') {
-            const transformed = _calculateRenko(_rawCandles, currentBrickSize);
-            _candleData.push(...transformed);
-            candleSeries.setData(transformed);
+            const { bricks, lastBrick } = _calculateRenko(_rawCandles, currentBrickSize);
+            _renkoLastBrick = lastBrick;
+            _candleData.push(...bricks);
+            candleSeries.setData(bricks);
         } else {
             const displayData = _rawCandles.map((c, i) => _applyFormula(c, i === 0));
             _candleData.push(...displayData);
             candleSeries.setData(displayData);
         }
-        
-        // Re-set indicator data
+
+        // Volume
+        const volData = dataArray.map(c => ({
+            time: c.time,
+            value: c.volume,
+            color: c.close >= c.open ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
+        }));
+        volumeSeries.setData(volData);
+
+        // Indicators
         const indData = {};
         dataArray.forEach(c => {
             if (c.indicators) {
@@ -309,7 +344,6 @@
                 });
             }
         });
-        
         Object.keys(indData).forEach(k => {
             if (_indicatorSeries[k]) {
                 _indicatorSeries[k].setData(indData[k]);
@@ -349,13 +383,15 @@
         _equityData.length = 0;
         _tradeMarkers.length = 0;
         _haPrev = null;
+        _renkoLastBrick = null;
         candleSeries.setData([]);
         equitySeries.setData([]);
+        volumeSeries.setData([]);
         candleSeries.setMarkers([]);
-        
+
         Object.values(_indicatorSeries).forEach(series => chart.removeSeries(series));
         for (const key in _indicatorSeries) delete _indicatorSeries[key];
-        
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
     };
 

@@ -243,8 +243,8 @@ class BacktestEngine:
 
         # Apply slippage (sell at lower price)
         fill_price = candle.close * (1 - self.config.slippage_pct / 100)
-        revenue = qty * fill_price
-        fee = revenue * self.config.taker_fee_pct / 100
+        total_revenue = qty * fill_price
+        total_fee = total_revenue * self.config.taker_fee_pct / 100
 
         # Close positions FIFO
         qty_remaining = qty
@@ -253,10 +253,16 @@ class BacktestEngine:
                 break
 
             qty_to_close = min(qty_remaining, pos.qty)
-            pnl = qty_to_close * (fill_price - pos.entry_price)
-            pnl_pct = ((fill_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price > 0 else Decimal("0")
+            # Prorate fee by fraction of total qty being closed at this position
+            prorated_fee = total_fee * (qty_to_close / qty) if qty > 0 else Decimal("0")
+            revenue_this = qty_to_close * fill_price
 
-            portfolio.cash += qty_to_close * fill_price - fee
+            pnl = qty_to_close * (fill_price - pos.entry_price) - prorated_fee
+            pnl_pct = (
+                (fill_price - pos.entry_price) / pos.entry_price * 100
+            ) if pos.entry_price > 0 else Decimal("0")
+
+            portfolio.cash += revenue_this - prorated_fee
 
             trade = Trade(
                 entry_price=pos.entry_price,
@@ -268,7 +274,7 @@ class BacktestEngine:
                 exit_time=candle.timestamp_ms,
                 pnl=pnl,
                 pnl_pct=pnl_pct,
-                fee_usdt=fee,
+                fee_usdt=prorated_fee,
                 reason=f"SELL@{fill_price}",
             )
             portfolio.closed_trades.append(trade)
