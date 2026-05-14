@@ -56,6 +56,13 @@ class DownloadRequest(BaseModel):
     date_to: str      # "YYYY-MM-DD"
 
 
+class DownloadZipRequest(BaseModel):
+    symbol: str
+    timeframe: str
+    year: int
+    month: int
+
+
 class JobStatus(BaseModel):
     id: str
     kind: str          # "download" | "experiment"

@@ -334,28 +334,83 @@ class _DownloadDialogState extends State<_DownloadDialog> {
   String _tf = '1h';
   final _fromCtrl = TextEditingController(text: '2024-01-01');
   final _toCtrl = TextEditingController(text: '2024-12-31');
+  final _yearCtrl = TextEditingController(text: '2024');
+  final _monthCtrl = TextEditingController(text: '1');
+  
+  bool _useZip = true;
   bool _loading = false;
   String? _msg;
+  double _downloadProgress = 0.0;
+  Timer? _pollTimer;
 
   static const _timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
 
   Future<void> _download() async {
     setState(() {
       _loading = true;
-      _msg = null;
+      _msg = 'Initializing download...';
+      _downloadProgress = 0.0;
     });
     try {
-      final result = await widget.apiService.downloadCandles(
-        symbol: _symbolCtrl.text.trim().toUpperCase(),
-        timeframe: _tf,
-        dateFrom: _fromCtrl.text.trim(),
-        dateTo: _toCtrl.text.trim(),
-      );
-      setState(() => _msg = '✓ Job started: ${result['id'] ?? result}');
+      final Map<String, dynamic> result;
+      if (_useZip) {
+        result = await widget.apiService.downloadCandlesZip(
+          symbol: _symbolCtrl.text.trim().toUpperCase(),
+          timeframe: _tf,
+          year: int.parse(_yearCtrl.text.trim()),
+          month: int.parse(_monthCtrl.text.trim()),
+        );
+      } else {
+        result = await widget.apiService.downloadCandles(
+          symbol: _symbolCtrl.text.trim().toUpperCase(),
+          timeframe: _tf,
+          dateFrom: _fromCtrl.text.trim(),
+          dateTo: _toCtrl.text.trim(),
+        );
+      }
+      final jobId = result['id'] as String;
+
+      _pollTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+        try {
+          final status = await widget.apiService.getJob(jobId);
+          if (mounted) {
+            setState(() {
+              _downloadProgress = status.progress;
+              _msg = status.message ?? 'Downloading...';
+            });
+            if (status.status == 'done' || status.status == 'error') {
+              timer.cancel();
+              setState(() {
+                _loading = false;
+                if (status.status == 'done') {
+                  _msg = '✓ Done: ${status.result?['candles_added'] ?? 0} candles';
+                } else {
+                  _msg = '✗ Error: ${status.message}';
+                }
+              });
+            }
+          }
+        } catch (e) {
+          timer.cancel();
+          if (mounted) {
+            setState(() {
+              _loading = false;
+              _msg = '✗ Polling error: $e';
+            });
+          }
+        }
+      });
     } catch (e) {
-      setState(() => _msg = '✗ $e');
-    } finally {
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _msg = '✗ $e';
+      });
     }
   }
 
@@ -384,24 +439,64 @@ class _DownloadDialogState extends State<_DownloadDialog> {
               },
               decoration: const InputDecoration(labelText: 'Timeframe'),
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _fromCtrl,
-                    decoration: const InputDecoration(labelText: 'From'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _toCtrl,
-                    decoration: const InputDecoration(labelText: 'To'),
-                  ),
-                ),
+            const SizedBox(height: 12),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: true, label: Text('Bulk ZIP')),
+                ButtonSegment(value: false, label: Text('REST API')),
               ],
+              selected: {_useZip},
+              onSelectionChanged: (Set<bool> newSelection) {
+                setState(() => _useZip = newSelection.first);
+              },
             ),
+            const SizedBox(height: 12),
+            if (!_useZip)
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _fromCtrl,
+                      decoration: const InputDecoration(labelText: 'From (YYYY-MM-DD)'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _toCtrl,
+                      decoration: const InputDecoration(labelText: 'To (YYYY-MM-DD)'),
+                    ),
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _yearCtrl,
+                      decoration: const InputDecoration(labelText: 'Year (YYYY)'),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _monthCtrl,
+                      decoration: const InputDecoration(labelText: 'Month (1-12)'),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
+            if (_loading && _downloadProgress > 0) ...[
+              const SizedBox(height: 16),
+              LinearProgressIndicator(
+                value: _downloadProgress,
+                backgroundColor: const Color(0xFF2B2B43),
+                color: const Color(0xFF26a69a),
+              ),
+            ],
             if (_msg != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -410,7 +505,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                   fontSize: 12,
                   color: _msg!.startsWith('✓')
                       ? const Color(0xFF26a69a)
-                      : const Color(0xFFef5350),
+                      : (_msg!.startsWith('✗') ? const Color(0xFFef5350) : const Color(0xFFD9D9D9)),
                 ),
               ),
             ],

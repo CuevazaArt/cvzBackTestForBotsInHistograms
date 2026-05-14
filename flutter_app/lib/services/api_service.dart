@@ -40,6 +40,30 @@ class HealthStatus {
   const HealthStatus(this.ok);
 }
 
+class JobStatus {
+  final String id;
+  final String status; // "pending" | "running" | "done" | "error"
+  final double progress;
+  final String? message;
+  final Map<String, dynamic>? result;
+  
+  const JobStatus({
+    required this.id,
+    required this.status,
+    required this.progress,
+    this.message,
+    this.result,
+  });
+
+  factory JobStatus.fromJson(Map<String, dynamic> j) => JobStatus(
+        id: j['id'] as String,
+        status: j['status'] as String,
+        progress: (j['progress'] as num?)?.toDouble() ?? 0.0,
+        message: j['message'] as String?,
+        result: j['result'] as Map<String, dynamic>?,
+      );
+}
+
 /// HTTP client for the FastAPI backend
 class ApiService {
   final String baseUrl;
@@ -89,5 +113,31 @@ class ApiService {
     );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> downloadCandlesZip({
+    required String symbol,
+    required String timeframe,
+    required int year,
+    required int month,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/candles/download/zip'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'year': year,
+        'month': month,
+      }),
+    );
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<JobStatus> getJob(String jobId) async {
+    final res = await http.get(Uri.parse('$baseUrl/api/jobs/$jobId'));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    return JobStatus.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 }

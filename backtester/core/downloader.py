@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 import duckdb
 import time
+import zipfile
+import io
+import csv
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -141,6 +144,51 @@ class BinanceDownloader:
         except Exception as e:
             _LOG.error(f"Failed to fetch {symbol}: {e}")
             return []
+
+    def download_vision_zip(
+        self,
+        symbol: str,
+        timeframe: str,
+        year: int,
+        month: int,
+    ) -> int:
+        """
+        Download a monthly CSV zip from data.binance.vision and insert to DB.
+        URL format: https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1h/BTCUSDT-1h-2024-01.zip
+        """
+        if timeframe not in self.TIMEFRAMES:
+            raise ValueError(f"Invalid timeframe: {timeframe}")
+
+        month_str = f"{month:02d}"
+        filename = f"{symbol}-{timeframe}-{year}-{month_str}.zip"
+        url = f"https://data.binance.vision/data/spot/monthly/klines/{symbol}/{timeframe}/{filename}"
+
+        _LOG.info(f"Downloading ZIP: {url}")
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code == 404:
+                _LOG.warning(f"Data not available for {symbol} {timeframe} {year}-{month_str}")
+                return 0
+            resp.raise_for_status()
+            
+            with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                # The zip should contain one csv file
+                csv_filename = z.namelist()[0]
+                with z.open(csv_filename) as f:
+                    content = f.read().decode('utf-8')
+                    
+            reader = csv.reader(io.StringIO(content))
+            klines = []
+            for row in reader:
+                if not row:
+                    continue
+                klines.append(row)
+                
+            return self._save_batch(symbol, timeframe, klines)
+            
+        except Exception as e:
+            _LOG.error(f"Failed to download/process ZIP for {symbol}: {e}")
+            return 0
 
     def _save_batch(
         self,
