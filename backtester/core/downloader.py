@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
+import duckdb
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -33,23 +33,25 @@ class BinanceDownloader:
 
     def __init__(self, db_path: Path, api_key: Optional[str] = None) -> None:
         self.db_path = Path(db_path)
+        if self.db_path.suffix == ".db":
+            self.db_path = self.db_path.with_suffix(".duckdb")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.api_key = api_key
         self._init_db()
 
     def _init_db(self) -> None:
         """Create candles table if not exists."""
-        with sqlite3.connect(self.db_path) as conn:
+        with duckdb.connect(str(self.db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS candles (
-                    symbol TEXT,
-                    timeframe TEXT,
-                    timestamp_ms INTEGER PRIMARY KEY,
-                    open REAL,
-                    high REAL,
-                    low REAL,
-                    close REAL,
-                    volume REAL,
+                    symbol VARCHAR,
+                    timeframe VARCHAR,
+                    timestamp_ms BIGINT,
+                    open DOUBLE,
+                    high DOUBLE,
+                    low DOUBLE,
+                    close DOUBLE,
+                    volume DOUBLE,
                     UNIQUE(symbol, timeframe, timestamp_ms)
                 )
             """)
@@ -146,33 +148,33 @@ class BinanceDownloader:
         timeframe: str,
         klines: list[list],
     ) -> int:
-        """Save batch to SQLite, returning inserted count."""
+        """Save batch to DuckDB, returning inserted count."""
         if not klines:
             return 0
 
-        with sqlite3.connect(self.db_path) as conn:
-            inserted = 0
-            for k in klines:
-                try:
-                    conn.execute("""
-                        INSERT INTO candles
-                        (symbol, timeframe, timestamp_ms, open, high, low, close, volume)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        symbol,
-                        timeframe,
-                        int(k[0]),
-                        float(k[1]),
-                        float(k[2]),
-                        float(k[3]),
-                        float(k[4]),
-                        float(k[7]),
-                    ))
-                    inserted += 1
-                except sqlite3.IntegrityError:
-                    pass  # Candle already exists
-            conn.commit()
-        return inserted
+        # Transform to tuple list for executemany
+        data = [
+            (
+                symbol,
+                timeframe,
+                int(k[0]),
+                float(k[1]),
+                float(k[2]),
+                float(k[3]),
+                float(k[4]),
+                float(k[7]),
+            )
+            for k in klines
+        ]
+
+        with duckdb.connect(str(self.db_path)) as conn:
+            conn.executemany("""
+                INSERT INTO candles
+                (symbol, timeframe, timestamp_ms, open, high, low, close, volume)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (symbol, timeframe, timestamp_ms) DO NOTHING
+            """, data)
+        return len(klines)
 
     def load_candles(
         self,
@@ -191,8 +193,7 @@ class BinanceDownloader:
             end_ms: optional inclusive upper bound (epoch ms)
             limit: optional row cap
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        with duckdb.connect(str(self.db_path)) as conn:
             clauses = ["symbol = ?", "timeframe = ?"]
             params: list = [symbol, timeframe]
             if start_ms is not None:
@@ -209,21 +210,24 @@ class BinanceDownloader:
             if limit:
                 query += " LIMIT ?"
                 params.append(int(limit))
-            rows = conn.execute(query, params).fetchall()
-            return [dict(row) for row in rows]
+            
+            df = conn.execute(query, params).df()
+            # Convert pandas DataFrame to list of dicts for backward compatibility
+            return df.to_dict('records')
 
     def list_symbols(self) -> list[dict]:
         """List distinct (symbol, timeframe) pairs available with row counts."""
-        with sqlite3.connect(self.db_path) as conn:
-            rows = conn.execute(
+        with duckdb.connect(str(self.db_path)) as conn:
+            df = conn.execute(
                 "SELECT symbol, timeframe, COUNT(*) AS n, "
                 "MIN(timestamp_ms) AS first_ms, MAX(timestamp_ms) AS last_ms "
                 "FROM candles GROUP BY symbol, timeframe ORDER BY symbol, timeframe"
-            ).fetchall()
+            ).df()
+            
             return [
-                {"symbol": r[0], "timeframe": r[1], "candles": r[2],
-                 "first_ms": r[3], "last_ms": r[4]}
-                for r in rows
+                {"symbol": r['symbol'], "timeframe": r['timeframe'], "candles": r['n'],
+                 "first_ms": r['first_ms'], "last_ms": r['last_ms']}
+                for _, r in df.iterrows()
             ]
 
     def _parse_date(self, date_str: str) -> int:

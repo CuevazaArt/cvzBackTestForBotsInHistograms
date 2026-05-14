@@ -21,6 +21,7 @@ htmlcov/
 backtester/.vault/
 backtester/data/
 backtester/results/
+*.duckdb
 backtester/web/assets/js/lightweight-charts.standalone.production.js
 
 # Flutter

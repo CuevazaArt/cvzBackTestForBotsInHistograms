@@ -10,7 +10,7 @@ Plataforma minimalista para **backtesting ágil de bots de trading** sobre hist�
 | **Visualización de gráficos** | TradingView Lightweight Charts (vanilla JS) dentro de WebView |
 | **Backend** | Python 3.11+ con FastAPI + WebSocket — `backtester/api/` |
 | **Motor de backtest** | Engine propio con fees + slippage realistas — `backtester/core/` |
-| **Persistencia** | SQLite (velas + resultados) |
+| **Persistencia** | DuckDB (velas columnar) + JSON (resultados) |
 
 ## Estructura
 
@@ -42,6 +42,10 @@ cd backtester
 python -m venv ..\.venv
 ..\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
+# Configurar credenciales (copiar .env.example a .env y llenar keys)
+copy ..\.env.example ..\.env
+
 uvicorn backtester.api.server:app --host 127.0.0.1 --port 8000
 
 # Flutter shell (otra terminal, cuando esté creado)

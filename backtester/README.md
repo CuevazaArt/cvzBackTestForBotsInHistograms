@@ -9,14 +9,14 @@ Una plataforma **mínima, rápida y flexible** para backtesting de bots de tradi
 - **Bots parametrizables** que puedes modificar en la interfaz
 - **Runner paralelo** para probar cientos de configuraciones rápidamente
 - **CLI minimalista** con editor interactivo de parámetros
-- **Almacén de resultados** en SQLite para análisis posterior
+- **Almacén de resultados** en DuckDB para análisis analítico de alto rendimiento
 
 ## 📁 Estructura
 
 ```
 backtester/
 ├── data/
-│   └── candles.db          # Históricos de velas (SQLite)
+│   └── candles.duckdb      # Históricos de velas (DuckDB columnar)
 ├── results/
 │   └── backtests.db        # Resultados de backtests
 ├── core/
@@ -156,7 +156,7 @@ Cada backtest guarda:
 - **Métricas**: Sharpe, max drawdown, win rate, profit factor
 - **Parámetros**: configuración exacta usada
 
-Accede en: `backtester/results/backtests.db`
+Accede en: `backtester/results/` (JSON exports)
 
 ## ⚡ Paralelizar experimentos
 
@@ -253,11 +253,11 @@ export BINANCE_API_SECRET="..."
 ## 📈 Next Steps
 
 - [x] Optimización automática de parámetros (Optuna + Nevergrad)
+- [x] **DuckDB como motor analítico nativo** — storage columnar para velas históricas
 - [ ] Agregar más indicadores (Bollinger, MACD, Stochastic)
 - [ ] Soporte para órdenes limitadas vs market
-- [ ] Dashboard nativo (Flutter Desktop + TradingView Lightweight Charts)
+- [ ] Dashboard nativo (Flutter Desktop + TradingView Lightweight Charts + Canvas custom)
 - [ ] Exportar a PDF/Excel
-- [ ] **DuckDB analítico opcional** (mediano-largo plazo) — capa de lectura para queries ad-hoc sobre resultados; storage primario (`candles.db`) sigue en SQLite
 
 ## 🛠️ Troubleshooting
 

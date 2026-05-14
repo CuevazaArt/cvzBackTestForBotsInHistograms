@@ -47,7 +47,7 @@ python backtester/main.py --download-candles ETHUSDT 4h 2024-06-01 2024-12-31
 python backtester/main.py --download-candles BNBUSDT 1d 2023-01-01 2024-12-31
 ```
 
-Las velas se guardan en `backtester/data/candles.db` (SQLite).
+Las velas se guardan en `backtester/data/candles.duckdb` (DuckDB columnar).
 
 ## 4. Probar interactivamente
 
