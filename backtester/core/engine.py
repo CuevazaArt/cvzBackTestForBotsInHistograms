@@ -185,14 +185,19 @@ class BacktestEngine:
 
         for candle in candles:
             for bot, portfolio, bot_id in zip(bots, portfolios, names):
-                orders = bot.on_candle(candle, portfolio)
+                try:
+                    orders = bot.on_candle(candle, portfolio)
+                except Exception as exc:  # noqa: BLE001
+                    _LOG.exception("[%s] on_candle crashed; skipping candle", bot_id)
+                    orders = []
                 for order in orders:
                     side = order.get("side", "").upper()
                     qty = Decimal(str(order.get("qty", 0)))
+                    reason = order.get("reason") or side
                     if side == "BUY":
-                        self._process_buy(candle, portfolio, qty, result, bot_id=bot_id)
+                        self._process_buy(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
                     elif side == "SELL":
-                        self._process_sell(candle, portfolio, qty, result, bot_id=bot_id)
+                        self._process_sell(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
 
             # Global equity = sum of all bot portfolios
             total_equity = sum(p.total_equity(candle.close) for p in portfolios)
@@ -251,6 +256,7 @@ class BacktestEngine:
         qty: Decimal,
         result: BacktestResult,
         bot_id: str = "",
+        reason: str = "BUY",
     ) -> None:
         """Execute buy order."""
         if qty <= 0:
@@ -281,6 +287,7 @@ class BacktestEngine:
         qty: Decimal,
         result: BacktestResult,
         bot_id: str = "",
+        reason: str = "SELL",
     ) -> None:
         """Execute sell order."""
         if qty <= 0 or not portfolio.positions:
@@ -319,7 +326,7 @@ class BacktestEngine:
                 pnl=pnl,
                 pnl_pct=pnl_pct,
                 fee_usdt=prorated_fee,
-                reason=f"SELL@{fill_price}",
+                reason=reason,
                 bot_id=bot_id,
             )
             portfolio.closed_trades.append(trade)

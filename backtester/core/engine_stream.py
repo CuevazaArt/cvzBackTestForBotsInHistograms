@@ -156,14 +156,23 @@ class StreamingEngine(BacktestEngine):
                 for bi, (bot, portfolio, bot_id) in enumerate(
                     zip(bots, portfolios, names)
                 ):
-                    orders = bot.on_candle(candle, portfolio)
+                    try:
+                        orders = bot.on_candle(candle, portfolio)
+                    except Exception as exc:  # noqa: BLE001
+                        _LOG.exception("[%s] on_candle crashed; skipping candle", bot_id)
+                        self._emit("error", {
+                            "message": f"[{bot_id}] {type(exc).__name__}: {exc}",
+                            "fatal": False,
+                        })
+                        orders = []
                     for order in orders:
                         side = order.get("side", "").upper()
                         qty  = Decimal(str(order.get("qty", 0)))
+                        reason = order.get("reason") or side
                         if side == "BUY":
-                            self._process_buy(candle, portfolio, qty, result, bot_id=bot_id)
+                            self._process_buy(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
                         elif side == "SELL":
-                            self._process_sell(candle, portfolio, qty, result, bot_id=bot_id)
+                            self._process_sell(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
 
                     # Emit newly closed trades for this bot
                     new_trades = portfolio.closed_trades[prev_closed[bi]:]

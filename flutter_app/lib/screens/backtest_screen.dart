@@ -1,9 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:backtester_shell/services/api_service.dart';
+import 'package:backtester_shell/services/presets_service.dart';
 import 'package:backtester_shell/services/ws_service.dart';
 import 'package:backtester_shell/widgets/chart_webview.dart';
 import 'package:backtester_shell/widgets/results_panel.dart';
+import 'package:backtester_shell/widgets/trades_table.dart';
 import 'package:backtester_shell/widgets/mini_weight_chart.dart';
 
 /// Main backtest workspace: controls + chart + results.
@@ -17,10 +22,12 @@ class BacktestScreen extends StatefulWidget {
 
 class _BacktestScreenState extends State<BacktestScreen> {
   final WsService _ws = WsService();
+  final PresetsService _presets = PresetsService();
   final ChartWebViewController _chartCtrl = ChartWebViewController();
 
   List<SymbolEntry> _symbols = [];
   List<BotInfo> _bots = [];
+  Map<String, BotParamsResponse> _botParamSpecs = {};
   String? _selectedSymbol;
   String _selectedTimeframe = '1h';
   List<String> _selectedBots = [];
@@ -29,7 +36,6 @@ class _BacktestScreenState extends State<BacktestScreen> {
   double _brickSize = 10.0;
   Map<String, Map<String, dynamic>> _botsParams = {};
 
-  // Indicator selector: each entry has 'name' + optional numeric params
   List<Map<String, dynamic>> _selectedIndicators = [
     {'name': 'ema', 'period': 9},
     {'name': 'ema', 'period': 21},
@@ -38,8 +44,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
   bool _running = false;
   double _progress = 0;
   Map<String, dynamic>? _lastResult;
-  Map<String, dynamic>? _perBotResult;   // {bot_id: {...metrics}}
+  Map<String, dynamic>? _perBotResult;
   String? _wsError;
+  final List<TradeRow> _trades = [];
 
   StreamSubscription<WsEvent>? _wsSub;
 
@@ -58,6 +65,23 @@ class _BacktestScreenState extends State<BacktestScreen> {
         setState(() {
           _symbols = syms;
           _bots = bots;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _fetchBotParams(String botName) async {
+    if (_botParamSpecs.containsKey(botName)) return;
+    try {
+      final spec = await widget.apiService.getBotParams(botName);
+      if (mounted) {
+        setState(() {
+          _botParamSpecs[botName] = spec;
+          if (!_botsParams.containsKey(botName)) {
+            _botsParams[botName] = {
+              for (final e in spec.params.entries) e.key: e.value.defaultValue,
+            };
+          }
         });
       }
     } catch (_) {}
@@ -90,6 +114,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
         _chartCtrl.addCandle(ev.data);
       case WsEventType.trade:
         _chartCtrl.addTradeMarker(ev.data);
+        if (mounted) {
+          setState(() => _trades.add(TradeRow.fromWs(ev.data)));
+        }
       case WsEventType.equity:
         _chartCtrl.addEquityPoint(ev.data);
       case WsEventType.progress:
@@ -112,6 +139,19 @@ class _BacktestScreenState extends State<BacktestScreen> {
             _wsError = ev.data['message'] as String?;
           });
         }
+      case WsEventType.reconnecting:
+        final attempt = ev.data['attempt'];
+        final max = ev.data['max'];
+        if (mounted) setState(() => _wsError = 'Reconnecting ($attempt/$max)…');
+      case WsEventType.reconnected:
+        if (mounted) setState(() => _wsError = null);
+      case WsEventType.disconnected:
+        if (mounted) {
+          setState(() {
+            if (_running) _running = false;
+            _wsError = ev.data['message'] as String? ?? 'Connection lost';
+          });
+        }
       default:
         break;
     }
@@ -119,11 +159,18 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   void _runBacktest() {
     if (_selectedSymbol == null || _selectedBots.isEmpty || _running) return;
+    if (!_ws.isConnected) {
+      setState(() => _wsError = 'Not connected to backend. Reconnecting…');
+      _connectWs();
+      return;
+    }
     setState(() {
       _running = true;
       _progress = 0;
       _lastResult = null;
+      _perBotResult = null;
       _wsError = null;
+      _trades.clear();
     });
     _chartCtrl.clear();
 
@@ -138,6 +185,183 @@ class _BacktestScreenState extends State<BacktestScreen> {
     );
   }
 
+  // ── Exports ────────────────────────────────────────────────────
+
+  Future<void> _exportBundle() async {
+    if (_lastResult == null) return;
+    final dir = Directory('${Directory.current.path}/exports');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+    final subDir = Directory('${dir.path}/run_$ts');
+    subDir.createSync();
+
+    // trades.csv
+    final tradesCsv = StringBuffer()
+      ..writeln('bot_id,entry_time,exit_time,entry_price,exit_price,qty,pnl,pnl_pct,fee_usdt,reason');
+    for (final t in _trades) {
+      final eT = DateTime.fromMillisecondsSinceEpoch(t.entryTime * 1000, isUtc: true);
+      final xT = DateTime.fromMillisecondsSinceEpoch(t.exitTime * 1000, isUtc: true);
+      tradesCsv.writeln([
+        t.botId, eT.toIso8601String(), xT.toIso8601String(),
+        t.entryPrice.toStringAsFixed(6),
+        t.exitPrice.toStringAsFixed(6),
+        t.qty.toStringAsFixed(8),
+        t.pnl.toStringAsFixed(4),
+        t.pnlPct.toStringAsFixed(4),
+        t.feeUsdt.toStringAsFixed(4),
+        t.reason,
+      ].join(','));
+    }
+    await File('${subDir.path}/trades.csv').writeAsString(tradesCsv.toString());
+
+    // summary.json (global + per-bot + config)
+    final config = {
+      'symbol': _selectedSymbol,
+      'timeframe': _selectedTimeframe,
+      'initial_cash': _initialCash,
+      'bots': _selectedBots.map((b) => {'name': b, 'params': _botsParams[b] ?? {}}).toList(),
+      'indicators': _selectedIndicators,
+    };
+    final summary = {
+      'config': config,
+      'global': _lastResult,
+      'per_bot': _perBotResult,
+      'trades_count': _trades.length,
+      'exported_at': DateTime.now().toIso8601String(),
+    };
+    await File('${subDir.path}/summary.json')
+        .writeAsString(const JsonEncoder.withIndent('  ').convert(summary));
+
+    await Clipboard.setData(ClipboardData(text: subDir.path));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: const Color(0xFF26a69a),
+        content: Text('Bundle saved → ${subDir.path} (path copied)',
+            style: const TextStyle(color: Colors.black, fontSize: 12)),
+        duration: const Duration(seconds: 4),
+      ));
+    }
+  }
+
+  // ── Presets ────────────────────────────────────────────────────
+
+  Future<void> _savePresetDialog() async {
+    if (_selectedSymbol == null || _selectedBots.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Select symbol and bots before saving a preset'),
+      ));
+      return;
+    }
+    final ctrl = TextEditingController(
+        text: '${_selectedSymbol}_${_selectedTimeframe}_${_selectedBots.join("-")}');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E222D),
+        title: const Text('Save preset'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(labelText: 'Preset name'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    final preset = BacktestPreset(
+      name: name,
+      symbol: _selectedSymbol!,
+      timeframe: _selectedTimeframe,
+      initialCash: _initialCash,
+      botNames: List<String>.from(_selectedBots),
+      botsParams: {for (final b in _selectedBots) b: Map<String, dynamic>.from(_botsParams[b] ?? {})},
+      indicators: List<Map<String, dynamic>>.from(_selectedIndicators),
+      createdAt: DateTime.now().toIso8601String(),
+    );
+    await _presets.save(preset);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: const Color(0xFF26a69a),
+        content: Text('Preset "$name" saved',
+            style: const TextStyle(color: Colors.black, fontSize: 12)),
+      ));
+    }
+  }
+
+  Future<void> _loadPresetDialog() async {
+    final presets = await _presets.list();
+    if (!mounted) return;
+    final selected = await showDialog<BacktestPreset>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E222D),
+        title: const Text('Load preset'),
+        content: SizedBox(
+          width: 380,
+          height: 320,
+          child: presets.isEmpty
+              ? Center(
+                  child: Text('No presets saved yet.\nFolder: ${_presets.dirPath}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Color(0xFF787B86), fontSize: 12)),
+                )
+              : ListView.builder(
+                  itemCount: presets.length,
+                  itemBuilder: (c, i) {
+                    final p = presets[i];
+                    return ListTile(
+                      dense: true,
+                      title: Text(p.name, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                      subtitle: Text(
+                          '${p.symbol} • ${p.timeframe} • ${p.botNames.join(", ")}',
+                          style: const TextStyle(color: Color(0xFF787B86), fontSize: 11)),
+                      onTap: () => Navigator.pop(ctx, p),
+                      trailing: IconButton(
+                        iconSize: 16,
+                        icon: const Icon(Icons.delete_outline, color: Color(0xFFef5350)),
+                        onPressed: () async {
+                          await _presets.delete(p.name);
+                          if (ctx.mounted) Navigator.pop(ctx, null);
+                          _loadPresetDialog();
+                        },
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+    if (selected != null) _applyPreset(selected);
+  }
+
+  void _applyPreset(BacktestPreset p) {
+    setState(() {
+      _selectedSymbol = p.symbol;
+      _selectedTimeframe = p.timeframe;
+      _initialCash = p.initialCash;
+      _selectedBots = List<String>.from(p.botNames);
+      _botsParams = {for (final e in p.botsParams.entries) e.key: Map<String, dynamic>.from(e.value)};
+      _selectedIndicators = List<Map<String, dynamic>>.from(p.indicators);
+    });
+    for (final b in _selectedBots) {
+      _fetchBotParams(b);
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      backgroundColor: const Color(0xFF26a69a),
+      content: Text('Loaded preset "${p.name}"',
+          style: const TextStyle(color: Colors.black, fontSize: 12)),
+    ));
+  }
+
   @override
   void dispose() {
     _wsSub?.cancel();
@@ -149,7 +373,6 @@ class _BacktestScreenState extends State<BacktestScreen> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // ── Top bar ─────────────────────────────────────────────
         _TopBar(
           symbols: _symbols,
           bots: _bots,
@@ -162,6 +385,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           running: _running,
           progress: _progress,
           wsError: _wsError,
+          wsStatus: _ws.status,
           onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
           onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
           onFormulaChanged: (v) {
@@ -175,22 +399,35 @@ class _BacktestScreenState extends State<BacktestScreen> {
               _chartCtrl.setChartFormula(_selectedFormula, brickSize: _brickSize);
             }
           },
-          onBotsChanged: (v) => setState(() => _selectedBots = v),
+          onBotsChanged: (v) {
+            setState(() => _selectedBots = v);
+            for (final b in v) {
+              _fetchBotParams(b);
+            }
+          },
           onCashChanged: (v) => setState(() => _initialCash = v),
           onIndicatorsChanged: (v) => setState(() => _selectedIndicators = v),
+          botParamSpecs: _botParamSpecs,
+          botsParamValues: _botsParams,
+          onBotParamChanged: (botName, params) =>
+              setState(() => _botsParams[botName] = params),
           onRun: _runBacktest,
           onDownload: () => _showDownloadDialog(context),
+          onSavePreset: _savePresetDialog,
+          onLoadPreset: _loadPresetDialog,
+          onReconnect: _connectWs,
         ),
-        // ── Chart (main area) ────────────────────────────────────
         Expanded(flex: 3, child: ChartWebView(controller: _chartCtrl)),
         const Divider(height: 1),
-        // ── Results panel ─────────────────────────────────────
-        if (_lastResult != null)
+        if (_lastResult != null || _trades.isNotEmpty)
           SizedBox(
-            height: _perBotResult != null && _perBotResult!.length > 1 ? 200 : 130,
+            height: 260,
             child: ResultsPanel(
-              data: _lastResult!,
+              data: _lastResult ?? {},
               perBot: _perBotResult,
+              trades: _trades,
+              onExportAll: _lastResult != null ? _exportBundle : null,
+              onSavePreset: _selectedSymbol != null && _selectedBots.isNotEmpty ? _savePresetDialog : null,
             ),
           ),
       ],
@@ -227,6 +464,7 @@ class _TopBar extends StatelessWidget {
   final bool running;
   final double progress;
   final String? wsError;
+  final ValueNotifier<WsStatus> wsStatus;
   final ValueChanged<String?> onSymbolChanged;
   final ValueChanged<String> onTimeframeChanged;
   final ValueChanged<String> onFormulaChanged;
@@ -235,8 +473,14 @@ class _TopBar extends StatelessWidget {
   final ValueChanged<List<String>> onBotsChanged;
   final ValueChanged<double> onCashChanged;
   final ValueChanged<List<Map<String, dynamic>>> onIndicatorsChanged;
+  final Map<String, BotParamsResponse> botParamSpecs;
+  final Map<String, Map<String, dynamic>> botsParamValues;
+  final void Function(String botName, Map<String, dynamic> params) onBotParamChanged;
   final VoidCallback onRun;
   final VoidCallback onDownload;
+  final VoidCallback onSavePreset;
+  final VoidCallback onLoadPreset;
+  final VoidCallback onReconnect;
 
   const _TopBar({
     required this.symbols,
@@ -250,6 +494,7 @@ class _TopBar extends StatelessWidget {
     required this.running,
     required this.progress,
     this.wsError,
+    required this.wsStatus,
     required this.onSymbolChanged,
     required this.onTimeframeChanged,
     required this.onFormulaChanged,
@@ -258,23 +503,27 @@ class _TopBar extends StatelessWidget {
     required this.onBotsChanged,
     required this.onCashChanged,
     required this.onIndicatorsChanged,
+    required this.botParamSpecs,
+    required this.botsParamValues,
+    required this.onBotParamChanged,
     required this.onRun,
     required this.onDownload,
+    required this.onSavePreset,
+    required this.onLoadPreset,
+    required this.onReconnect,
   });
 
   static const _timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
   @override
   Widget build(BuildContext context) {
-    final distinctSymbols = symbols.map((s) => s.symbol).toSet().toList()
-      ..sort();
+    final distinctSymbols = symbols.map((s) => s.symbol).toSet().toList()..sort();
     return Container(
       height: 48,
       color: const Color(0xFF1E222D),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
-          // Symbol
           _DropdownChip<String>(
             value: selectedSymbol,
             hint: 'Symbol',
@@ -282,7 +531,6 @@ class _TopBar extends StatelessWidget {
             onChanged: onSymbolChanged,
           ),
           const SizedBox(width: 8),
-          // Timeframe
           _DropdownChip<String>(
             value: selectedTimeframe,
             hint: 'TF',
@@ -292,7 +540,6 @@ class _TopBar extends StatelessWidget {
             },
           ),
           const SizedBox(width: 8),
-          // Formula
           _DropdownChip<String>(
             value: selectedFormula,
             hint: 'Chart',
@@ -325,87 +572,42 @@ class _TopBar extends StatelessWidget {
             ),
           ],
           const SizedBox(width: 8),
-          // Bots Multiple Selection
           TextButton.icon(
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) {
-                  return AlertDialog(
-                    title: const Text('Select Bots & Wallet'),
-                    backgroundColor: const Color(0xFF1E222D),
-                    content: StatefulBuilder(
-                      builder: (context, setStateDialog) {
-                        return SizedBox(
-                          width: 300,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TextFormField(
-                                initialValue: initialCash.toString(),
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(labelText: 'Initial Cash / Wallet'),
-                                onChanged: (v) {
-                                  final val = double.tryParse(v);
-                                  if (val != null) onCashChanged(val);
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              ...bots.map((b) {
-                                final isSelected = selectedBots.contains(b.name);
-                                return CheckboxListTile(
-                                  title: Text(b.name),
-                                  value: isSelected,
-                                  onChanged: (checked) {
-                                    final newList = List<String>.from(selectedBots);
-                                    if (checked == true) {
-                                      newList.add(b.name);
-                                    } else {
-                                      newList.remove(b.name);
-                                    }
-                                    onBotsChanged(newList);
-                                    setStateDialog(() {});
-                                  },
-                                );
-                              }).toList(),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
-                    ],
-                  );
-                },
-              );
-            },
+            onPressed: () => _showBotsDialog(context),
             icon: const Icon(Icons.smart_toy, size: 14),
             label: Text('Bots (${selectedBots.length})'),
             style: TextButton.styleFrom(foregroundColor: const Color(0xFFD9D9D9)),
           ),
           const SizedBox(width: 4),
-          // ── Indicator selector ────────────────────────────────
           TextButton.icon(
             onPressed: () => _showIndicatorDialog(context),
             icon: const Icon(Icons.show_chart, size: 14),
             label: Text('Ind (${selectedIndicators.length})'),
             style: TextButton.styleFrom(foregroundColor: const Color(0xFFD9D9D9)),
           ),
-          const SizedBox(width: 12),
-          // Run
+          const SizedBox(width: 4),
+          // ── Presets ─────────────────────────────────────────────
+          PopupMenuButton<String>(
+            tooltip: 'Presets',
+            icon: const Icon(Icons.bookmarks_outlined, size: 16, color: Color(0xFFD9D9D9)),
+            color: const Color(0xFF1E222D),
+            onSelected: (v) {
+              if (v == 'save') onSavePreset();
+              if (v == 'load') onLoadPreset();
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(value: 'save', child: Text('Save current as preset')),
+              PopupMenuItem(value: 'load', child: Text('Load preset…')),
+            ],
+          ),
+          const SizedBox(width: 8),
           FilledButton.icon(
-            onPressed: running || selectedSymbol == null || selectedBots.isEmpty
-                ? null
-                : onRun,
+            onPressed: running || selectedSymbol == null || selectedBots.isEmpty ? null : onRun,
             icon: running
                 ? const SizedBox(
                     width: 14,
                     height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
                 : const Icon(Icons.play_arrow, size: 16),
             label: Text(running ? '${progress.toStringAsFixed(0)}%' : 'Run'),
@@ -416,7 +618,6 @@ class _TopBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Download
           OutlinedButton.icon(
             onPressed: onDownload,
             icon: const Icon(Icons.download, size: 14),
@@ -429,17 +630,97 @@ class _TopBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          if (wsError != null)
-            Text(
-              '⚠ $wsError',
-              style: const TextStyle(color: Color(0xFFef5350), fontSize: 11),
-            ),
+          // ── Connection status indicator ─────────────────────────
+          _ConnStatus(status: wsStatus, error: wsError, onRetry: onReconnect),
         ],
       ),
     );
   }
 
-  // Available indicator presets — each maps to Python indicator name + default params
+  void _showBotsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Select Bots & Wallet'),
+          backgroundColor: const Color(0xFF1E222D),
+          content: StatefulBuilder(
+            builder: (context, setStateDialog) {
+              return SizedBox(
+                width: 380,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 520),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextFormField(
+                          initialValue: initialCash.toString(),
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Initial Cash / Wallet'),
+                          onChanged: (v) {
+                            final val = double.tryParse(v);
+                            if (val != null) onCashChanged(val);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        ...bots.map((b) {
+                          final isSelected = selectedBots.contains(b.name);
+                          final spec = botParamSpecs[b.name];
+                          final vals = botsParamValues[b.name] ?? {};
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CheckboxListTile(
+                                title: Text(b.name),
+                                subtitle: b.description != null
+                                    ? Text(b.description!,
+                                        style: const TextStyle(fontSize: 11, color: Color(0xFF787B86)))
+                                    : null,
+                                value: isSelected,
+                                onChanged: (checked) {
+                                  final newList = List<String>.from(selectedBots);
+                                  if (checked == true) {
+                                    newList.add(b.name);
+                                  } else {
+                                    newList.remove(b.name);
+                                  }
+                                  onBotsChanged(newList);
+                                  setStateDialog(() {});
+                                },
+                              ),
+                              if (isSelected && spec != null && spec.params.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                                  child: _BotParamEditor(
+                                    botName: b.name,
+                                    spec: spec,
+                                    values: vals,
+                                    onChanged: (newVals) {
+                                      onBotParamChanged(b.name, newVals);
+                                      setStateDialog(() {});
+                                    },
+                                  ),
+                                ),
+                            ],
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+          ],
+        );
+      },
+    );
+  }
+
   static const _indicatorPresets = [
     {'label': 'EMA 9',        'spec': {'name': 'ema',   'period': 9}},
     {'label': 'EMA 21',       'spec': {'name': 'ema',   'period': 21}},
@@ -458,7 +739,6 @@ class _TopBar extends StatelessWidget {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
-          // Track which presets are currently active
           bool isActive(Map<String, dynamic> spec) =>
               selectedIndicators.any((s) => s.toString() == spec.toString());
 
@@ -482,10 +762,8 @@ class _TopBar extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'OVERLAY (main chart)',
-                    style: TextStyle(color: Color(0xFF787B86), fontSize: 10, letterSpacing: 1),
-                  ),
+                  const Text('OVERLAY (main chart)',
+                      style: TextStyle(color: Color(0xFF787B86), fontSize: 10, letterSpacing: 1)),
                   const SizedBox(height: 6),
                   Wrap(
                     spacing: 8, runSpacing: 6,
@@ -507,10 +785,8 @@ class _TopBar extends StatelessWidget {
                     }).toList(),
                   ),
                   const SizedBox(height: 14),
-                  const Text(
-                    'OSCILLATORS (sub-panel)',
-                    style: TextStyle(color: Color(0xFF787B86), fontSize: 10, letterSpacing: 1),
-                  ),
+                  const Text('OSCILLATORS (sub-panel)',
+                      style: TextStyle(color: Color(0xFF787B86), fontSize: 10, letterSpacing: 1)),
                   const SizedBox(height: 6),
                   Wrap(
                     spacing: 8, runSpacing: 6,
@@ -548,6 +824,58 @@ class _TopBar extends StatelessWidget {
   }
 }
 
+class _ConnStatus extends StatelessWidget {
+  final ValueNotifier<WsStatus> status;
+  final String? error;
+  final VoidCallback onRetry;
+  const _ConnStatus({required this.status, required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<WsStatus>(
+      valueListenable: status,
+      builder: (ctx, s, _) {
+        final (color, label) = switch (s) {
+          WsStatus.connected => (const Color(0xFF26a69a), 'Connected'),
+          WsStatus.connecting => (const Color(0xFFFFD740), 'Connecting…'),
+          WsStatus.reconnecting => (const Color(0xFFFF9800), 'Reconnecting…'),
+          WsStatus.disconnected => (const Color(0xFFef5350), 'Offline'),
+        };
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (error != null) ...[
+              Container(
+                constraints: const BoxConstraints(maxWidth: 240),
+                child: Text(
+                  '⚠ $error',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xFFef5350), fontSize: 11),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(color: color, fontSize: 11)),
+            if (s == WsStatus.disconnected) ...[
+              const SizedBox(width: 4),
+              IconButton(
+                iconSize: 14,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                tooltip: 'Retry connection',
+                icon: const Icon(Icons.refresh, color: Color(0xFFD9D9D9)),
+                onPressed: onRetry,
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _DropdownChip<T> extends StatelessWidget {
   final T? value;
   final String hint;
@@ -565,23 +893,117 @@ class _DropdownChip<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     return DropdownButton<T>(
       value: value,
-      hint: Text(
-        hint,
-        style: const TextStyle(color: Color(0xFF787B86), fontSize: 13),
-      ),
-      items: items
-          .map(
-            (e) => DropdownMenuItem(
-              value: e,
-              child: Text(e.toString(), style: const TextStyle(fontSize: 13)),
-            ),
-          )
-          .toList(),
+      hint: Text(hint, style: const TextStyle(color: Color(0xFF787B86), fontSize: 13)),
+      items: items.map(
+        (e) => DropdownMenuItem(value: e, child: Text(e.toString(), style: const TextStyle(fontSize: 13))),
+      ).toList(),
       onChanged: onChanged,
       underline: const SizedBox(),
       isDense: true,
       style: const TextStyle(color: Color(0xFFD9D9D9)),
       dropdownColor: const Color(0xFF1E222D),
+    );
+  }
+}
+
+// ── Bot param editor ─────────────────────────────────────────────
+
+class _BotParamEditor extends StatefulWidget {
+  final String botName;
+  final BotParamsResponse spec;
+  final Map<String, dynamic> values;
+  final ValueChanged<Map<String, dynamic>> onChanged;
+
+  const _BotParamEditor({
+    required this.botName,
+    required this.spec,
+    required this.values,
+    required this.onChanged,
+  });
+
+  @override
+  State<_BotParamEditor> createState() => _BotParamEditorState();
+}
+
+class _BotParamEditorState extends State<_BotParamEditor> {
+  late Map<String, dynamic> _vals;
+
+  @override
+  void initState() {
+    super.initState();
+    _vals = {
+      for (final e in widget.spec.params.entries)
+        e.key: widget.values[e.key] ?? e.value.defaultValue,
+    };
+  }
+
+  @override
+  void didUpdateWidget(_BotParamEditor old) {
+    super.didUpdateWidget(old);
+    if (old.values != widget.values) {
+      _vals = {
+        for (final e in widget.spec.params.entries)
+          e.key: widget.values[e.key] ?? e.value.defaultValue,
+      };
+    }
+  }
+
+  void _update(String key, dynamic val) {
+    setState(() => _vals[key] = val);
+    widget.onChanged(Map<String, dynamic>.from(_vals));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 6,
+      children: widget.spec.params.entries.map((e) {
+        final key  = e.key;
+        final p    = e.value;
+        final cur  = _vals[key] ?? p.defaultValue;
+        final isInt = p.type == 'int';
+
+        return SizedBox(
+          width: 130,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(key.replaceAll('_', ' '),
+                  style: const TextStyle(color: Color(0xFF787B86), fontSize: 10)),
+              if (p.min != null && p.max != null) ...[
+                Slider(
+                  value: (cur as num).toDouble().clamp(p.min!, p.max!),
+                  min: p.min!,
+                  max: p.max!,
+                  divisions: p.step != null
+                      ? ((p.max! - p.min!) / p.step!).round().clamp(1, 200)
+                      : null,
+                  label: isInt
+                      ? cur.toString()
+                      : (cur as num).toStringAsFixed(3),
+                  onChanged: (v) => _update(key, isInt ? v.round() : double.parse(v.toStringAsFixed(4))),
+                  activeColor: const Color(0xFF26a69a),
+                ),
+                Text(
+                  isInt ? '${(cur as num).toInt()}' : '${(cur as num).toStringAsFixed(3)}',
+                  style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11),
+                ),
+              ] else
+                TextFormField(
+                  initialValue: cur.toString(),
+                  style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 12),
+                  decoration: const InputDecoration(isDense: true, border: InputBorder.none),
+                  onChanged: (v) {
+                    final parsed = isInt ? int.tryParse(v) : double.tryParse(v);
+                    if (parsed != null) _update(key, parsed);
+                  },
+                ),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 }
@@ -604,14 +1026,14 @@ class _DownloadDialogState extends State<_DownloadDialog> {
   final _toCtrl = TextEditingController(text: '2024-12-31');
   final _yearCtrl = TextEditingController(text: '2024');
   final _monthCtrl = TextEditingController(text: '1');
-  
+
   bool _useZip = true;
   bool _loading = false;
   String? _msg;
   double _downloadProgress = 0.0;
   Timer? _pollTimer;
   Timer? _healthTimer;
-  
+
   List<SymbolEntry> _catalog = [];
   int _apiWeight = 0;
 
@@ -630,7 +1052,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
       if (mounted) setState(() => _catalog = syms);
     } catch (_) {}
   }
-  
+
   Future<void> _pollWeight() async {
     try {
       final h = await widget.apiService.checkHealth();
@@ -647,13 +1069,12 @@ class _DownloadDialogState extends State<_DownloadDialog> {
 
   void _download() async {
     setState(() {
-      _loading = true; // Still keep loading to show progress bar, but we can allow triggering again
+      _loading = true;
       _msg = 'Initializing download...';
       _downloadProgress = 0.0;
     });
     try {
       if (_useZip) {
-        // Parse month range
         final monthStr = _monthCtrl.text.trim().toLowerCase();
         List<int> months = [];
         if (monthStr == 'all' || monthStr == '1-12') {
@@ -676,7 +1097,6 @@ class _DownloadDialogState extends State<_DownloadDialog> {
           _msg = 'Spawning ${months.length} parallel downloads...';
         });
 
-        // Start all downloads in parallel
         final jobIds = <String>[];
         for (int m in months) {
           final result = await widget.apiService.downloadCandlesZip(
@@ -688,11 +1108,10 @@ class _DownloadDialogState extends State<_DownloadDialog> {
           jobIds.add(result['id'] as String);
         }
 
-        // Poll all jobs until done
         int completed = 0;
         int totalCandles = 0;
         final Set<String> doneJobs = {};
-        
+
         _pollTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
           try {
             double totalProgress = 0;
@@ -713,7 +1132,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
               } else if (status.status == 'error') {
                 hasError = true;
                 lastErr = status.message;
-                doneJobs.add(id); // Treat as done to stop polling it
+                doneJobs.add(id);
                 completed++;
               } else {
                 totalProgress += status.progress;
@@ -742,12 +1161,11 @@ class _DownloadDialogState extends State<_DownloadDialog> {
               }
             }
           } catch (e) {
-            // Ignore temporary network errors during polling
+            // Ignore polling errors
           }
         });
 
       } else {
-        // REST API mode (single job)
         final result = await widget.apiService.downloadCandles(
           symbol: _symbolCtrl.text.trim().toUpperCase(),
           timeframe: _tf,
@@ -817,7 +1235,6 @@ class _DownloadDialogState extends State<_DownloadDialog> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Left Side: Download Form
             Expanded(
               flex: 1,
               child: Column(
@@ -831,10 +1248,8 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
-                    initialValue: _tf,
-                    items: _timeframes
-                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                        .toList(),
+                    value: _tf,
+                    items: _timeframes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
                     onChanged: (v) {
                       if (v != null) setState(() => _tf = v);
                     },
@@ -905,27 +1320,25 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                   ],
                   if (_msg != null) ...[
                     const SizedBox(height: 12),
-                    Text(
-                      _msg!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _msg!.startsWith('✓')
-                            ? const Color(0xFF26a69a)
-                            : (_msg!.startsWith('✗') ? const Color(0xFFef5350) : const Color(0xFFD9D9D9)),
-                      ),
-                    ),
+                    Text(_msg!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _msg!.startsWith('✓')
+                              ? const Color(0xFF26a69a)
+                              : (_msg!.startsWith('✗') ? const Color(0xFFef5350) : const Color(0xFFD9D9D9)),
+                        )),
                   ],
                 ],
               ),
             ),
             const VerticalDivider(width: 24),
-            // Right Side: Catalog
             Expanded(
               flex: 1,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Local Histograms (DuckDB)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  const Text('Local Histograms (DuckDB)',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Expanded(
                     child: Container(
@@ -939,8 +1352,10 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                           final c = _catalog[index];
                           return ListTile(
                             dense: true,
-                            title: Text('${c.symbol} • ${c.timeframe}', style: const TextStyle(color: Colors.white, fontSize: 13)),
-                            subtitle: Text('${c.candles} candles', style: const TextStyle(color: Color(0xFF787B86), fontSize: 11)),
+                            title: Text('${c.symbol} • ${c.timeframe}',
+                                style: const TextStyle(color: Colors.white, fontSize: 13)),
+                            subtitle: Text('${c.candles} candles',
+                                style: const TextStyle(color: Color(0xFF787B86), fontSize: 11)),
                             trailing: IconButton(
                               icon: const Icon(Icons.play_circle_outline, color: Color(0xFF26a69a)),
                               tooltip: 'Load in Main Chart',
@@ -973,4 +1388,3 @@ class _DownloadDialogState extends State<_DownloadDialog> {
     );
   }
 }
-
