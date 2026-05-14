@@ -15,6 +15,7 @@ class ChartWebViewController {
   void clear() => _state?._callJs('clearChart', {});
   void initIndicators(List<String> keys) => _state?._callJs('initIndicators', keys);
   void initOscillators(List<String> keys) => _state?._callJs('initOscillators', keys);
+  void initBotSeries(List<String> botIds) => _state?._callJs('initBotSeries', botIds);
   void setChartFormula(String formula, {double? brickSize}) {
     if (_state != null) {
       final configJs = brickSize != null ? '{"brickSize": $brickSize}' : 'null';

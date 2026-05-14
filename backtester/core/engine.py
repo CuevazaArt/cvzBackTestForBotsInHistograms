@@ -41,6 +41,7 @@ class Position:
     qty: Decimal
     entry_idx: int
     entry_time: int
+    bot_id: str = ""
 
 
 @dataclass
@@ -57,6 +58,7 @@ class Trade:
     pnl_pct: Decimal
     fee_usdt: Decimal
     reason: str
+    bot_id: str = ""
 
 
 @dataclass
@@ -110,6 +112,8 @@ class BacktestResult:
     final_equity: Decimal = Decimal("0")
     peak_equity: Decimal = Decimal("0")
     max_drawdown_pct: Decimal = Decimal("0")
+    # Per-bot breakdown: {bot_id: {metric: value, ...}}
+    per_bot: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
         """Compute performance metrics."""
@@ -147,48 +151,61 @@ class BacktestEngine:
 
     def run(
         self,
-        bots: BacktestBot | list[BacktestBot],
+        bots: "BacktestBot | list[BacktestBot]",
         candles: list[Candle],
-        symbol: str = "SYMBOL",
-        timeframe: str = "1h",
+        symbol: str = "",
+        timeframe: str = "",
+        indicator_specs: list[dict[str, Any]] | None = None,
+        bot_names: list[str] | None = None,
     ) -> BacktestResult:
-        """Run backtest on candles."""
+        """Run backtest.
+
+        Each bot receives its own isolated Portfolio slice so individual
+        performance can be measured independently.
+        """
         if not isinstance(bots, list):
             bots = [bots]
-            
-        portfolio = Portfolio(cash=self.config.initial_cash)
+
+        n = len(bots)
+        capital_per_bot = self.config.initial_cash / Decimal(n)
+
+        # Assign names
+        names = list(bot_names or [])
+        for i in range(len(names), n):
+            names.append(f"{bots[i].__class__.__name__}_{i}")
+
+        # One Portfolio per bot
+        portfolios = [Portfolio(cash=capital_per_bot) for _ in range(n)]
+
         result = BacktestResult(
             symbol=symbol,
             timeframe=timeframe,
             candles_processed=len(candles),
         )
 
-        for idx, candle in enumerate(candles):
-            # Get orders from bots
-            for bot in bots:
+        for candle in candles:
+            for bot, portfolio, bot_id in zip(bots, portfolios, names):
                 orders = bot.on_candle(candle, portfolio)
-
-                # Process orders
                 for order in orders:
                     side = order.get("side", "").upper()
                     qty = Decimal(str(order.get("qty", 0)))
-
                     if side == "BUY":
-                        self._process_buy(candle, portfolio, qty, result)
+                        self._process_buy(candle, portfolio, qty, result, bot_id=bot_id)
                     elif side == "SELL":
-                        self._process_sell(candle, portfolio, qty, result)
+                        self._process_sell(candle, portfolio, qty, result, bot_id=bot_id)
 
-            # Update equity curve
-            current_equity = portfolio.total_equity(candle.close)
-            portfolio.equity_curve.append(current_equity)
-            result.equity_curve.append(current_equity)
+            # Global equity = sum of all bot portfolios
+            total_equity = sum(p.total_equity(candle.close) for p in portfolios)
+            result.equity_curve.append(total_equity)
 
-        # Compute final stats
-        result.trades = portfolio.closed_trades
-        result.final_equity = portfolio.total_equity(candles[-1].close) if candles else Decimal("0")
+        # Merge all trades into global result
+        result.trades = [t for p in portfolios for t in p.closed_trades]
+        result.final_equity = sum(
+            p.total_equity(candles[-1].close) for p in portfolios
+        ) if candles else Decimal("0")
         result.peak_equity = max(result.equity_curve) if result.equity_curve else Decimal("0")
 
-        # Max drawdown: true peak-to-trough over the entire equity curve
+        # True peak-to-trough max drawdown on global equity
         max_dd = Decimal("0")
         running_peak = Decimal("0")
         for eq in result.equity_curve:
@@ -200,6 +217,31 @@ class BacktestEngine:
                     max_dd = dd
         result.max_drawdown_pct = max_dd * 100
 
+        # Per-bot breakdown
+        from backtester.core.metrics import compute_metrics  # avoid circular at module level
+        for bot_id, portfolio in zip(names, portfolios):
+            bot_trades = portfolio.closed_trades
+            wins = [t for t in bot_trades if t.pnl > 0]
+            total_pnl = sum(t.pnl for t in bot_trades)
+            total_fees = sum(t.fee_usdt for t in bot_trades)
+            gross_profit = sum(t.pnl for t in wins)
+            gross_loss   = abs(sum(t.pnl for t in bot_trades if t.pnl < 0))
+            final_eq = float(portfolio.total_equity(
+                candles[-1].close if candles else Decimal("0")
+            ))
+            result.per_bot[bot_id] = {
+                "bot_id":           bot_id,
+                "trades":           len(bot_trades),
+                "wins":             len(wins),
+                "win_rate_pct":     float(len(wins) / len(bot_trades) * 100) if bot_trades else 0.0,
+                "total_return_pct": float((final_eq - float(capital_per_bot)) / float(capital_per_bot) * 100),
+                "total_pnl":        float(total_pnl),
+                "total_fees_usdt":  float(total_fees),
+                "profit_factor":    float(gross_profit / gross_loss) if gross_loss > 0 else 0.0,
+                "final_equity":     final_eq,
+                "initial_cash":     float(capital_per_bot),
+            }
+
         return result
 
     def _process_buy(
@@ -208,6 +250,7 @@ class BacktestEngine:
         portfolio: Portfolio,
         qty: Decimal,
         result: BacktestResult,
+        bot_id: str = "",
     ) -> None:
         """Execute buy order."""
         if qty <= 0:
@@ -219,7 +262,7 @@ class BacktestEngine:
         fee = cost * self.config.taker_fee_pct / 100
 
         if portfolio.cash < cost + fee:
-            _LOG.warning(f"Insufficient cash for buy: need {cost + fee}, have {portfolio.cash}")
+            _LOG.warning(f"[{bot_id}] Insufficient cash: need {cost + fee:.2f}, have {portfolio.cash:.2f}")
             return
 
         portfolio.cash -= cost + fee
@@ -228,6 +271,7 @@ class BacktestEngine:
             qty=qty,
             entry_idx=len(result.equity_curve),
             entry_time=candle.timestamp_ms,
+            bot_id=bot_id,
         ))
 
     def _process_sell(
@@ -236,6 +280,7 @@ class BacktestEngine:
         portfolio: Portfolio,
         qty: Decimal,
         result: BacktestResult,
+        bot_id: str = "",
     ) -> None:
         """Execute sell order."""
         if qty <= 0 or not portfolio.positions:
@@ -253,7 +298,6 @@ class BacktestEngine:
                 break
 
             qty_to_close = min(qty_remaining, pos.qty)
-            # Prorate fee by fraction of total qty being closed at this position
             prorated_fee = total_fee * (qty_to_close / qty) if qty > 0 else Decimal("0")
             revenue_this = qty_to_close * fill_price
 
@@ -276,6 +320,7 @@ class BacktestEngine:
                 pnl_pct=pnl_pct,
                 fee_usdt=prorated_fee,
                 reason=f"SELL@{fill_price}",
+                bot_id=bot_id,
             )
             portfolio.closed_trades.append(trade)
 

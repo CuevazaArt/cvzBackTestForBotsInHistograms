@@ -3,6 +3,9 @@
 Used by `/ws` to push candles, trades, equity points and progress to the
 Flutter shell / browser so the user can watch the bot "draw" on the chart
 in real time.
+
+Multi-bot: each bot gets an isolated Portfolio slice (capital / n_bots).
+Events include `bot_id` so the frontend can color-code by strategy.
 """
 
 from __future__ import annotations
@@ -30,12 +33,13 @@ class StreamingEngine(BacktestEngine):
     """Same logic as BacktestEngine but emits live events while running.
 
     Events emitted:
-        candle    — per processed candle (throttled by `candle_every`)
-        trade     — when a trade is closed
-        equity    — equity curve point (throttled by `equity_every`)
-        progress  — % completion (throttled by `progress_every`)
-        result    — final summary at end
-        error     — on exceptions
+        start    — metadata before first candle
+        candle   — per processed candle (throttled by `candle_every`)
+        trade    — when a trade is closed (includes bot_id)
+        equity   — equity curve point (global + per-bot, throttled)
+        progress — % completion
+        result   — final summary with per_bot breakdown
+        error    — on exceptions
     """
 
     def __init__(
@@ -54,15 +58,15 @@ class StreamingEngine(BacktestEngine):
         self._equity_every = max(equity_every, 1)
         self._progress_every = max(progress_every, 1)
 
-    # ---- helpers ----
+    # ── helpers ───────────────────────────────────────────────────
 
-    def _emit_candle(self, candle: Candle, indicators: dict[str, float] = None) -> None:
+    def _emit_candle(self, candle: Candle, indicators: dict | None = None) -> None:
         payload = {
-            "time": candle.timestamp_ms // 1000,
-            "open": float(candle.open),
-            "high": float(candle.high),
-            "low": float(candle.low),
-            "close": float(candle.close),
+            "time":   candle.timestamp_ms // 1000,
+            "open":   float(candle.open),
+            "high":   float(candle.high),
+            "low":    float(candle.low),
+            "close":  float(candle.close),
             "volume": float(candle.volume),
         }
         if indicators:
@@ -71,29 +75,34 @@ class StreamingEngine(BacktestEngine):
 
     def _emit_trade(self, t: Trade) -> None:
         self._emit("trade", {
-            "entry_time": t.entry_time // 1000,
-            "exit_time": t.exit_time // 1000,
+            "entry_time":  t.entry_time // 1000,
+            "exit_time":   t.exit_time // 1000,
             "entry_price": float(t.entry_price),
-            "exit_price": float(t.exit_price),
-            "qty": float(t.qty),
-            "pnl": float(t.pnl),
-            "pnl_pct": float(t.pnl_pct),
-            "fee_usdt": float(t.fee_usdt),
-            "reason": t.reason,
+            "exit_price":  float(t.exit_price),
+            "qty":         float(t.qty),
+            "pnl":         float(t.pnl),
+            "pnl_pct":     float(t.pnl_pct),
+            "fee_usdt":    float(t.fee_usdt),
+            "reason":      t.reason,
+            "bot_id":      t.bot_id,          # ← new: used by JS to color markers
         })
 
-    def _emit_equity(self, ts_ms: int, value: Decimal) -> None:
-        self._emit("equity", {"time": ts_ms // 1000, "value": float(value)})
+    def _emit_equity(self, ts_ms: int, value: Decimal, bot_id: str = "total") -> None:
+        self._emit("equity", {
+            "time":   ts_ms // 1000,
+            "value":  float(value),
+            "bot_id": bot_id,                 # ← "total" | "BotName_0" | ...
+        })
 
     def _emit_progress(self, idx: int) -> None:
         pct = (idx / self._total * 100.0) if self._total else 0.0
         self._emit("progress", {
-            "candles_done": idx,
+            "candles_done":  idx,
             "candles_total": self._total,
-            "percent": pct,
+            "percent":       pct,
         })
 
-    # ---- main loop (mirrors BacktestEngine.run with hooks) ----
+    # ── main loop (multi-bot, with hooks) ─────────────────────────
 
     def run(
         self,
@@ -101,81 +110,98 @@ class StreamingEngine(BacktestEngine):
         candles: list[Candle],
         symbol: str = "SYMBOL",
         timeframe: str = "1h",
-        indicator_specs: list[dict] = None,
+        indicator_specs: list[dict] | None = None,
+        bot_names: list[str] | None = None,
     ) -> BacktestResult:
         if not isinstance(bots, list):
             bots = [bots]
-            
-        # Calculate indicators before starting the simulation
+
+        n = len(bots)
+        capital_per_bot = self.config.initial_cash / Decimal(n)
+
+        # Assign stable names (used as series IDs in the frontend)
+        names: list[str] = list(bot_names or [])
+        for i in range(len(names), n):
+            names.append(f"{bots[i].__class__.__name__}_{i}")
+
+        portfolios = [Portfolio(cash=capital_per_bot) for _ in range(n)]
+        prev_closed = [0] * n   # track new trades per bot
+
+        # Calculate indicators (pre-run, full series)
         from backtester.core.indicators import add_indicators, is_oscillator
         ind_data = add_indicators(candles, indicator_specs or [])
 
-        portfolio = Portfolio(cash=self.config.initial_cash)
         result = BacktestResult(
             symbol=symbol, timeframe=timeframe, candles_processed=len(candles),
         )
 
-        # Tell the client we're starting
-        overlay_keys = [k for k in ind_data if not is_oscillator(k)]
+        overlay_keys    = [k for k in ind_data if not is_oscillator(k)]
         oscillator_keys = [k for k in ind_data if is_oscillator(k)]
+
+        # ── start event includes bot metadata for the frontend ────
         self._emit("start", {
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "candles_total": len(candles),
-            "initial_cash": float(self.config.initial_cash),
+            "symbol":          symbol,
+            "timeframe":       timeframe,
+            "candles_total":   len(candles),
+            "initial_cash":    float(self.config.initial_cash),
             "indicators_keys": overlay_keys,
             "oscillator_keys": oscillator_keys,
+            "bot_ids":         names,         # ← new: frontend creates one equity series per bot
         })
-
-        prev_closed_count = 0
 
         try:
             for idx, candle in enumerate(candles):
-                # 1. Bots make decision
-                for bot in bots:
-                    orders = bot.on_candle(candle, portfolio)
 
-                    # 2. Engine fills (slippage + fees)
+                # ── 1. Each bot decides on its own portfolio ──────
+                for bi, (bot, portfolio, bot_id) in enumerate(
+                    zip(bots, portfolios, names)
+                ):
+                    orders = bot.on_candle(candle, portfolio)
                     for order in orders:
                         side = order.get("side", "").upper()
-                        qty = Decimal(str(order.get("qty", 0)))
+                        qty  = Decimal(str(order.get("qty", 0)))
                         if side == "BUY":
-                            self._process_buy(candle, portfolio, qty, result)
+                            self._process_buy(candle, portfolio, qty, result, bot_id=bot_id)
                         elif side == "SELL":
-                            self._process_sell(candle, portfolio, qty, result)
+                            self._process_sell(candle, portfolio, qty, result, bot_id=bot_id)
 
-                # 3. Equity update
-                current_equity = portfolio.total_equity(candle.close)
-                portfolio.equity_curve.append(current_equity)
-                result.equity_curve.append(current_equity)
+                    # Emit newly closed trades for this bot
+                    new_trades = portfolio.closed_trades[prev_closed[bi]:]
+                    for t in new_trades:
+                        self._emit_trade(t)
+                    prev_closed[bi] = len(portfolio.closed_trades)
 
-                # 4. Emit events (throttled)
+                # ── 2. Global equity = sum of all portfolios ──────
+                total_equity = sum(p.total_equity(candle.close) for p in portfolios)
+                result.equity_curve.append(total_equity)
+
+                # ── 3. Throttled events ───────────────────────────
                 if idx % self._candle_every == 0:
                     inds = {k: v[idx] for k, v in ind_data.items() if v[idx] is not None}
-                    self._emit_candle(candle, indicators=inds)
-
-                # New trades closed during this candle
-                if len(portfolio.closed_trades) > prev_closed_count:
-                    for t in portfolio.closed_trades[prev_closed_count:]:
-                        self._emit_trade(t)
-                    prev_closed_count = len(portfolio.closed_trades)
+                    self._emit_candle(candle, indicators=inds if inds else None)
 
                 if idx % self._equity_every == 0:
-                    self._emit_equity(candle.timestamp_ms, current_equity)
+                    # Global curve
+                    self._emit_equity(candle.timestamp_ms, total_equity, bot_id="total")
+                    # Per-bot curves (sampled same cadence)
+                    for portfolio, bot_id in zip(portfolios, names):
+                        bot_eq = portfolio.total_equity(candle.close)
+                        self._emit_equity(candle.timestamp_ms, bot_eq, bot_id=bot_id)
 
                 if idx % self._progress_every == 0:
                     self._emit_progress(idx)
 
-            # ---- finalize ----
-            result.trades = portfolio.closed_trades
-            result.final_equity = (
-                portfolio.total_equity(candles[-1].close) if candles else Decimal("0")
-            )
+            # ── finalize ─────────────────────────────────────────
+            result.trades = [t for p in portfolios for t in p.closed_trades]
+            result.final_equity = sum(
+                p.total_equity(candles[-1].close) for p in portfolios
+            ) if candles else Decimal("0")
             result.peak_equity = (
                 max(result.equity_curve) if result.equity_curve else Decimal("0")
             )
+
+            # True peak-to-trough max drawdown on global equity
             if result.peak_equity > 0:
-                # Max drawdown: true peak-to-trough over the entire equity curve
                 max_dd = Decimal("0")
                 running_peak = Decimal("0")
                 for eq in result.equity_curve:
@@ -186,22 +212,49 @@ class StreamingEngine(BacktestEngine):
                         if dd > max_dd:
                             max_dd = dd
                 result.max_drawdown_pct = max_dd * 100
-            else:
-                result.max_drawdown_pct = Decimal("0")
 
-            # Force one last progress + equity point
+            # Per-bot breakdown (mirrors engine.py logic)
+            for bot_id, portfolio in zip(names, portfolios):
+                bot_trades   = portfolio.closed_trades
+                wins         = [t for t in bot_trades if t.pnl > 0]
+                gross_profit = sum(t.pnl for t in wins)
+                gross_loss   = abs(sum(t.pnl for t in bot_trades if t.pnl < 0))
+                final_eq     = float(portfolio.total_equity(
+                    candles[-1].close if candles else Decimal("0")
+                ))
+                result.per_bot[bot_id] = {
+                    "bot_id":           bot_id,
+                    "trades":           len(bot_trades),
+                    "wins":             len(wins),
+                    "win_rate_pct":     float(len(wins) / len(bot_trades) * 100) if bot_trades else 0.0,
+                    "total_return_pct": float((final_eq - float(capital_per_bot)) / float(capital_per_bot) * 100),
+                    "total_pnl":        float(sum(t.pnl for t in bot_trades)),
+                    "total_fees_usdt":  float(sum(t.fee_usdt for t in bot_trades)),
+                    "profit_factor":    float(gross_profit / gross_loss) if gross_loss > 0 else 0.0,
+                    "final_equity":     final_eq,
+                    "initial_cash":     float(capital_per_bot),
+                }
+
+            # Force one last progress + final equity point
             self._emit_progress(len(candles))
             if candles:
-                self._emit_equity(candles[-1].timestamp_ms, result.final_equity)
+                self._emit_equity(candles[-1].timestamp_ms, result.final_equity, bot_id="total")
+                for portfolio, bot_id in zip(portfolios, names):
+                    self._emit_equity(
+                        candles[-1].timestamp_ms,
+                        portfolio.total_equity(candles[-1].close),
+                        bot_id=bot_id,
+                    )
 
             self._emit("result", {
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "summary": result.summary(),
-                "trades": len(result.trades),
-                "final_equity": float(result.final_equity),
-                "peak_equity": float(result.peak_equity),
+                "symbol":           symbol,
+                "timeframe":        timeframe,
+                "summary":          result.summary(),
+                "trades":           len(result.trades),
+                "final_equity":     float(result.final_equity),
+                "peak_equity":      float(result.peak_equity),
                 "max_drawdown_pct": float(result.max_drawdown_pct),
+                "per_bot":          result.per_bot,          # ← new
             })
 
         except Exception as exc:

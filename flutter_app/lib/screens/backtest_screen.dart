@@ -38,6 +38,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
   bool _running = false;
   double _progress = 0;
   Map<String, dynamic>? _lastResult;
+  Map<String, dynamic>? _perBotResult;   // {bot_id: {...metrics}}
   String? _wsError;
 
   StreamSubscription<WsEvent>? _wsSub;
@@ -81,8 +82,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
       case WsEventType.start:
         final overlayKeys = List<String>.from(ev.data['indicators_keys'] ?? []);
         final oscKeys     = List<String>.from(ev.data['oscillator_keys'] ?? []);
+        final botIds      = List<String>.from(ev.data['bot_ids'] ?? []);
         _chartCtrl.initIndicators(overlayKeys);
         _chartCtrl.initOscillators(oscKeys);
+        _chartCtrl.initBotSeries(['total', ...botIds]);
       case WsEventType.candle:
         _chartCtrl.addCandle(ev.data);
       case WsEventType.trade:
@@ -98,6 +101,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           setState(() {
             _running = false;
             _lastResult = ev.data;
+            _perBotResult = ev.data['per_bot'] as Map<String, dynamic>?;
             _progress = 100;
           });
         }
@@ -180,9 +184,15 @@ class _BacktestScreenState extends State<BacktestScreen> {
         // ── Chart (main area) ────────────────────────────────────
         Expanded(flex: 3, child: ChartWebView(controller: _chartCtrl)),
         const Divider(height: 1),
-        // ── Results panel ────────────────────────────────────────
+        // ── Results panel ─────────────────────────────────────
         if (_lastResult != null)
-          SizedBox(height: 150, child: ResultsPanel(data: _lastResult!)),
+          SizedBox(
+            height: _perBotResult != null && _perBotResult!.length > 1 ? 200 : 130,
+            child: ResultsPanel(
+              data: _lastResult!,
+              perBot: _perBotResult,
+            ),
+          ),
       ],
     );
   }

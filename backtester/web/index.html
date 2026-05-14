@@ -209,6 +209,25 @@
     let _haPrev         = null;
     let _renkoLastBrick = null;
 
+    // Bot color palette (distinct, accessible)
+    const BOT_COLORS = [
+        '#2196F3', // blue   — total / first bot
+        '#FF9800', // orange
+        '#E040FB', // purple
+        '#00E676', // green
+        '#FF5252', // red
+        '#FFD740', // amber
+        '#40C4FF', // light blue
+        '#69F0AE', // teal
+    ];
+
+    // Per-bot equity series {bot_id: LineSeries}
+    const _botEquitySeries = {};
+
+    // Global equity series ("total") — already created above as equitySeries
+    // We also keep a map entry so addEquityPoint can route it
+    _botEquitySeries['total'] = equitySeries;
+
     // Overlay indicators on main chart (price scale)
     const _overlaySeries  = {};
     // Oscillator indicators on sub-chart
@@ -216,6 +235,9 @@
 
     const _overlayColors  = ['#F23645', '#2962FF', '#FF9800', '#00BCD4', '#9C27B0'];
     const _oscColors      = ['#FFD700', '#FF6B6B', '#4FC3F7', '#81C784', '#CE93D8'];
+
+    // Map bot_id -> color index for trade markers
+    const _botColorIdx = {};
 
     // ── Heikin Ashi ────────────────────────────────────────────
     function _applyFormula(rawCandle, isFirst) {
@@ -474,14 +496,41 @@
         });
     };
 
+    // ── Bridge: initBotSeries — called once at 'start' event ──
+    window.initBotSeries = function(botIds) {
+        // Skip 'total' — that's the main equitySeries already registered
+        botIds.filter(id => id !== 'total').forEach((id, i) => {
+            if (!_botEquitySeries[id]) {
+                const color = BOT_COLORS[(i + 1) % BOT_COLORS.length];
+                _botEquitySeries[id] = chart.addLineSeries({
+                    color,
+                    lineWidth: 1,
+                    lineStyle: 1,              // dashed to differ from 'total'
+                    priceScaleId: 'equity',
+                    title: id,
+                    lastValueVisible: true,
+                });
+                _botColorIdx[id] = (i + 1) % BOT_COLORS.length;
+            }
+        });
+    };
+
     // ── Bridge: addEquityPoint ─────────────────────────────────
     window.addEquityPoint = function(data) {
-        _equityData.push({ time: data.time, value: data.value });
-        equitySeries.update({ time: data.time, value: data.value });
+        const series = _botEquitySeries[data.bot_id || 'total'];
+        if (series) {
+            _equityData.push({ time: data.time, value: data.value });
+            series.update({ time: data.time, value: data.value });
+        }
     };
 
     // ── Bridge: addTradeMarker ─────────────────────────────────
     window.addTradeMarker = function(data) {
+        const botId  = data.bot_id || 'total';
+        const cidx   = _botColorIdx[botId] || 0;
+        const buyColor  = BOT_COLORS[cidx];
+        const sellColor = data.pnl >= 0 ? '#26a69a' : '#ef5350';
+
         _tradeMarkers.push({
             entryTime:  data.entry_time,
             exitTime:   data.exit_time,
@@ -492,8 +541,8 @@
         const existing = candleSeries.markers() || [];
         candleSeries.setMarkers([
             ...existing,
-            { time: data.entry_time, position: 'belowBar', color: '#26a69a', shape: 'arrowUp',   text: 'B' },
-            { time: data.exit_time,  position: 'aboveBar', color: data.pnl >= 0 ? '#26a69a' : '#ef5350', shape: 'arrowDown', text: 'S' },
+            { time: data.entry_time, position: 'belowBar', color: buyColor,  shape: 'arrowUp',   text: 'B' },
+            { time: data.exit_time,  position: 'aboveBar', color: sellColor, shape: 'arrowDown',  text: 'S' },
         ]);
         _redrawCanvas();
     };
