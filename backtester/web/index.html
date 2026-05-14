@@ -128,17 +128,193 @@
     // 3. JS Bridge — called by Flutter via executeScript()
     // ────────────────────────────────────────────────────────────
 
-    /** Add one OHLCV candle (streaming, bar by bar). */
-    window.addCandle = function(data) {
-        _candleData.push(data);
-        candleSeries.update(data);
+    let currentFormula = 'ohlc'; // 'ohlc' | 'heikin_ashi' | 'renko'
+    let currentBrickSize = 10;
+    const _rawCandles = []; // Store raw data for recalculation on formula switch
+    let _haPrev = null;
+    let _renkoLastBrick = null;
+    const _indicatorSeries = {}; // Map of key -> lineSeries
+    const _indicatorColors = ['#F23645', '#2962FF', '#FF9800', '#00BCD4', '#9C27B0'];
+
+    /** Apply selected formula to a single raw candle (for Heikin Ashi) */
+    function _applyFormula(rawCandle, isFirst) {
+        if (currentFormula === 'heikin_ashi') {
+            if (isFirst || !_haPrev) {
+                _haPrev = {
+                    time: rawCandle.time,
+                    open: (rawCandle.open + rawCandle.close) / 2,
+                    close: (rawCandle.open + rawCandle.high + rawCandle.low + rawCandle.close) / 4,
+                    high: rawCandle.high,
+                    low: rawCandle.low
+                };
+                return _haPrev;
+            }
+            const haClose = (rawCandle.open + rawCandle.high + rawCandle.low + rawCandle.close) / 4;
+            const haOpen = (_haPrev.open + _haPrev.close) / 2;
+            const haHigh = Math.max(rawCandle.high, haOpen, haClose);
+            const haLow = Math.min(rawCandle.low, haOpen, haClose);
+
+            _haPrev = { time: rawCandle.time, open: haOpen, high: haHigh, low: haLow, close: haClose };
+            return _haPrev;
+        }
+        return rawCandle;
+    }
+
+    /** Calculate Renko bricks from raw candles */
+    function _calculateRenko(candles, brickSize) {
+        if (!candles || candles.length === 0) return [];
+        const renkoBricks = [];
+        _renkoLastBrick = null;
+        
+        for (let i = 0; i < candles.length; i++) {
+            const raw = candles[i];
+            if (!_renkoLastBrick) {
+                _renkoLastBrick = {
+                    time: raw.time,
+                    open: raw.close,
+                    close: raw.close,
+                    high: raw.close,
+                    low: raw.close,
+                    trend: 0
+                };
+                continue;
+            }
+            
+            let diff = raw.close - _renkoLastBrick.close;
+            let bricksToForm = 0;
+            let direction = 0;
+            
+            if (_renkoLastBrick.trend >= 0 && diff >= brickSize) {
+                bricksToForm = Math.floor(diff / brickSize);
+                direction = 1;
+            } else if (_renkoLastBrick.trend <= 0 && -diff >= brickSize) {
+                bricksToForm = Math.floor(-diff / brickSize);
+                direction = -1;
+            } else if (_renkoLastBrick.trend > 0 && -diff >= brickSize * 2) {
+                bricksToForm = Math.floor((-diff) / brickSize);
+                direction = -1;
+            } else if (_renkoLastBrick.trend < 0 && diff >= brickSize * 2) {
+                bricksToForm = Math.floor(diff / brickSize);
+                direction = 1;
+            }
+            
+            if (bricksToForm > 0) {
+                for (let b = 0; b < bricksToForm; b++) {
+                    const newClose = _renkoLastBrick.close + (direction * brickSize);
+                    const newOpen = _renkoLastBrick.close;
+                    const newBrick = {
+                        // Offset slightly to avoid duplicate timestamps if multiple bricks form on the same candle
+                        time: raw.time + (b * 0.001), 
+                        open: newOpen,
+                        close: newClose,
+                        high: Math.max(newOpen, newClose),
+                        low: Math.min(newOpen, newClose),
+                        trend: direction
+                    };
+                    renkoBricks.push(newBrick);
+                    _renkoLastBrick = newBrick;
+                }
+            }
+        }
+        return renkoBricks;
+    }
+
+    window.setChartFormula = function(formula, config) {
+        currentFormula = formula;
+        if (config && config.brickSize) currentBrickSize = config.brickSize;
+        _haPrev = null;
+        _renkoLastBrick = null;
+        _candleData.length = 0;
+        
+        if (_rawCandles.length > 0) {
+            if (currentFormula === 'renko') {
+                const transformed = _calculateRenko(_rawCandles, currentBrickSize);
+                _candleData.push(...transformed);
+                candleSeries.setData(transformed);
+            } else {
+                const transformed = _rawCandles.map((c, i) => _applyFormula(c, i === 0));
+                _candleData.push(...transformed);
+                candleSeries.setData(transformed);
+            }
+        }
     };
 
-    /** Bulk-load an array of candles (initial load). */
+    window.initIndicators = function(keys) {
+        keys.forEach((key, i) => {
+            if (!_indicatorSeries[key]) {
+                const color = _indicatorColors[i % _indicatorColors.length];
+                _indicatorSeries[key] = chart.addLineSeries({
+                    color: color,
+                    lineWidth: 2,
+                    priceScaleId: 'right',
+                    title: key.toUpperCase(),
+                });
+            }
+        });
+    };
+
+    window.addCandle = function(data) {
+        _rawCandles.push(data);
+        
+        if (currentFormula === 'renko') {
+            // Re-run renko incrementally for the new candle
+            const newBricks = _calculateRenko([data], currentBrickSize);
+            if (newBricks.length > 0) {
+                newBricks.forEach(b => {
+                    _candleData.push(b);
+                    candleSeries.update(b);
+                });
+            }
+        } else {
+            const displayData = _applyFormula(data, _rawCandles.length === 1);
+            _candleData.push(displayData);
+            candleSeries.update(displayData);
+        }
+        
+        if (data.indicators) {
+            Object.keys(data.indicators).forEach(key => {
+                if (_indicatorSeries[key] && data.indicators[key] !== null) {
+                    _indicatorSeries[key].update({ time: data.time, value: data.indicators[key] });
+                }
+            });
+        }
+    };
+
     window.setCandles = function(dataArray) {
+        _rawCandles.length = 0;
+        _rawCandles.push(...dataArray);
         _candleData.length = 0;
-        _candleData.push(...dataArray);
-        candleSeries.setData(dataArray);
+        _haPrev = null;
+        _renkoLastBrick = null;
+        
+        if (currentFormula === 'renko') {
+            const transformed = _calculateRenko(_rawCandles, currentBrickSize);
+            _candleData.push(...transformed);
+            candleSeries.setData(transformed);
+        } else {
+            const displayData = _rawCandles.map((c, i) => _applyFormula(c, i === 0));
+            _candleData.push(...displayData);
+            candleSeries.setData(displayData);
+        }
+        
+        // Re-set indicator data
+        const indData = {};
+        dataArray.forEach(c => {
+            if (c.indicators) {
+                Object.keys(c.indicators).forEach(k => {
+                    if (!indData[k]) indData[k] = [];
+                    if (c.indicators[k] !== null) {
+                        indData[k].push({ time: c.time, value: c.indicators[k] });
+                    }
+                });
+            }
+        });
+        
+        Object.keys(indData).forEach(k => {
+            if (_indicatorSeries[k]) {
+                _indicatorSeries[k].setData(indData[k]);
+            }
+        });
     };
 
     /** Add an equity curve point. */
@@ -168,12 +344,18 @@
 
     /** Clear all series and overlay data. */
     window.clearChart = function() {
+        _rawCandles.length = 0;
         _candleData.length = 0;
         _equityData.length = 0;
         _tradeMarkers.length = 0;
+        _haPrev = null;
         candleSeries.setData([]);
         equitySeries.setData([]);
         candleSeries.setMarkers([]);
+        
+        Object.values(_indicatorSeries).forEach(series => chart.removeSeries(series));
+        for (const key in _indicatorSeries) delete _indicatorSeries[key];
+        
         ctx.clearRect(0, 0, canvas.width, canvas.height);
     };
 

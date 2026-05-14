@@ -53,12 +53,30 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     _send("error", {"message": f"Bad config: {exc}"})
                     continue
 
+                if not req.bots:
+                    _send("error", {"message": "At least one bot is required"})
+                    continue
+
                 # Imported lazily so engine_stream is not required at boot
                 from backtester.core.engine_stream import StreamingEngine
 
-                bot_cls = ctx.bot_registry.get(req.bot)
-                if bot_cls is None:
-                    _send("error", {"message": f"Unknown bot '{req.bot}'"})
+                bots_instances = []
+                has_error = False
+                for b in req.bots:
+                    bot_cls = ctx.bot_registry.get(b.name)
+                    if bot_cls is None:
+                        _send("error", {"message": f"Unknown bot '{b.name}'"})
+                        has_error = True
+                        break
+                    try:
+                        bot = bot_cls(**b.params)
+                        bots_instances.append(bot)
+                    except TypeError as e:
+                        _send("error", {"message": f"Invalid params for {b.name}: {e}"})
+                        has_error = True
+                        break
+                        
+                if has_error:
                     continue
 
                 rows = ctx.downloader.load_candles(
@@ -75,17 +93,17 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     taker_fee_pct=Decimal(str(req.taker_fee_pct)),
                     slippage_pct=Decimal(str(req.slippage_pct)),
                 )
-                try:
-                    bot = bot_cls(**req.params)
-                except TypeError as e:
-                    _send("error", {"message": f"Invalid params: {e}"})
-                    continue
 
                 engine = StreamingEngine(cfg, on_event=_send, total=len(candles))
                 # Run the synchronous engine in a worker thread so the WS
                 # event loop stays responsive (and pings can fly through).
                 await asyncio.to_thread(
-                    engine.run, bot, candles, req.symbol.upper(), req.timeframe,
+                    engine.run, 
+                    bots=bots_instances, 
+                    candles=candles, 
+                    symbol=req.symbol.upper(), 
+                    timeframe=req.timeframe,
+                    indicator_specs=[i.model_dump() for i in req.indicators]
                 )
 
             else:

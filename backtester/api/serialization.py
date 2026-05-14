@@ -58,16 +58,14 @@ def equity_curve_dto(result: BacktestResult, candles: list) -> list[EquityPoint]
 
 
 def result_to_response(
-    bot_name: str,
-    params: dict[str, Any],
+    bots: list[dict],
     result: BacktestResult,
     candles: list,
 ) -> BacktestResponse:
     return BacktestResponse(
         symbol=result.symbol,
         timeframe=result.timeframe,
-        bot=bot_name,
-        params=params,
+        bots=bots,
         summary=result.summary(),
         trades=[trade_to_dto(t) for t in result.trades],
         equity_curve=equity_curve_dto(result, candles),

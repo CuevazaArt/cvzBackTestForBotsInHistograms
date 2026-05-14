@@ -75,11 +75,21 @@ class JobStatus(BaseModel):
 # ───────────────────────── Backtest ─────────────────────────
 
 
+class IndicatorSpec(BaseModel):
+    name: str
+    period: int
+
+
+class BotRunSpec(BaseModel):
+    name: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class BacktestRequest(BaseModel):
-    bot: str
+    bots: list[BotRunSpec]
+    indicators: list[IndicatorSpec] = Field(default_factory=list)
     symbol: str
     timeframe: str
-    params: dict[str, Any] = Field(default_factory=dict)
     start_ms: Optional[int] = None
     end_ms: Optional[int] = None
     initial_cash: float = 10000.0
@@ -107,8 +117,7 @@ class EquityPoint(BaseModel):
 class BacktestResponse(BaseModel):
     symbol: str
     timeframe: str
-    bot: str
-    params: dict[str, Any]
+    bots: list[BotRunSpec]
     summary: dict[str, Any]
     trades: list[TradeDTO]
     equity_curve: list[EquityPoint]

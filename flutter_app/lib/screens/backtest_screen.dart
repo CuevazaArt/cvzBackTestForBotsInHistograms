@@ -23,8 +23,11 @@ class _BacktestScreenState extends State<BacktestScreen> {
   List<BotInfo> _bots = [];
   String? _selectedSymbol;
   String _selectedTimeframe = '1h';
-  String? _selectedBot;
-  Map<String, dynamic> _botParams = {};
+  List<String> _selectedBots = [];
+  double _initialCash = 10000.0;
+  String _selectedFormula = 'ohlc';
+  double _brickSize = 10.0;
+  Map<String, Map<String, dynamic>> _botsParams = {};
 
   bool _running = false;
   double _progress = 0;
@@ -69,6 +72,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   void _onWsEvent(WsEvent ev) {
     switch (ev.type) {
+      case WsEventType.start:
+        final keys = List<String>.from(ev.data['indicators_keys'] ?? []);
+        _chartCtrl.initIndicators(keys);
       case WsEventType.candle:
         _chartCtrl.addCandle(ev.data);
       case WsEventType.trade:
@@ -100,7 +106,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
   }
 
   void _runBacktest() {
-    if (_selectedSymbol == null || _selectedBot == null || _running) return;
+    if (_selectedSymbol == null || _selectedBots.isEmpty || _running) return;
     setState(() {
       _running = true;
       _progress = 0;
@@ -108,11 +114,18 @@ class _BacktestScreenState extends State<BacktestScreen> {
       _wsError = null;
     });
     _chartCtrl.clear();
+    
+    final bots = _selectedBots.map((b) => {'name': b, 'params': _botsParams[b] ?? {}}).toList();
+    
     _ws.runBacktest(
-      bot: _selectedBot!,
+      bots: bots,
       symbol: _selectedSymbol!,
       timeframe: _selectedTimeframe,
-      params: _botParams,
+      initialCash: _initialCash,
+      indicators: [
+        {'name': 'ema', 'period': 9},
+        {'name': 'ema', 'period': 21},
+      ]
     );
   }
 
@@ -133,16 +146,27 @@ class _BacktestScreenState extends State<BacktestScreen> {
           bots: _bots,
           selectedSymbol: _selectedSymbol,
           selectedTimeframe: _selectedTimeframe,
-          selectedBot: _selectedBot,
+          selectedFormula: _selectedFormula,
+          selectedBots: _selectedBots,
+          initialCash: _initialCash,
           running: _running,
           progress: _progress,
           wsError: _wsError,
           onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
           onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
-          onBotChanged: (v) => setState(() {
-            _selectedBot = v;
-            _botParams = {};
-          }),
+          onFormulaChanged: (v) {
+            setState(() => _selectedFormula = v);
+            _chartCtrl.setChartFormula(v, brickSize: _brickSize);
+          },
+          brickSize: _brickSize,
+          onBrickSizeChanged: (v) {
+            setState(() => _brickSize = v);
+            if (_selectedFormula == 'renko') {
+              _chartCtrl.setChartFormula(_selectedFormula, brickSize: _brickSize);
+            }
+          },
+          onBotsChanged: (v) => setState(() => _selectedBots = v),
+          onCashChanged: (v) => setState(() => _initialCash = v),
           onRun: _runBacktest,
           onDownload: () => _showDownloadDialog(context),
         ),
@@ -179,13 +203,19 @@ class _TopBar extends StatelessWidget {
   final List<BotInfo> bots;
   final String? selectedSymbol;
   final String selectedTimeframe;
-  final String? selectedBot;
+  final String selectedFormula;
+  final List<String> selectedBots;
+  final double initialCash;
   final bool running;
   final double progress;
   final String? wsError;
   final ValueChanged<String?> onSymbolChanged;
   final ValueChanged<String> onTimeframeChanged;
-  final ValueChanged<String?> onBotChanged;
+  final ValueChanged<String> onFormulaChanged;
+  final double brickSize;
+  final ValueChanged<double> onBrickSizeChanged;
+  final ValueChanged<List<String>> onBotsChanged;
+  final ValueChanged<double> onCashChanged;
   final VoidCallback onRun;
   final VoidCallback onDownload;
 
@@ -194,13 +224,19 @@ class _TopBar extends StatelessWidget {
     required this.bots,
     required this.selectedSymbol,
     required this.selectedTimeframe,
-    required this.selectedBot,
+    required this.selectedFormula,
+    required this.selectedBots,
+    required this.initialCash,
     required this.running,
     required this.progress,
     this.wsError,
     required this.onSymbolChanged,
     required this.onTimeframeChanged,
-    required this.onBotChanged,
+    required this.onFormulaChanged,
+    required this.brickSize,
+    required this.onBrickSizeChanged,
+    required this.onBotsChanged,
+    required this.onCashChanged,
     required this.onRun,
     required this.onDownload,
   });
@@ -235,17 +271,102 @@ class _TopBar extends StatelessWidget {
             },
           ),
           const SizedBox(width: 8),
-          // Bot
+          // Formula
           _DropdownChip<String>(
-            value: selectedBot,
-            hint: 'Bot',
-            items: bots.map((b) => b.name).toList(),
-            onChanged: onBotChanged,
+            value: selectedFormula,
+            hint: 'Chart',
+            items: const ['ohlc', 'heikin_ashi', 'renko'],
+            onChanged: (v) {
+              if (v != null) onFormulaChanged(v);
+            },
+          ),
+          if (selectedFormula == 'renko') ...[
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 60,
+              child: TextFormField(
+                initialValue: brickSize.toString(),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  hintText: 'Size',
+                  filled: true,
+                  fillColor: Color(0xFF2B2B43),
+                  border: OutlineInputBorder(borderSide: BorderSide.none),
+                ),
+                onChanged: (v) {
+                  final val = double.tryParse(v);
+                  if (val != null && val > 0) onBrickSizeChanged(val);
+                },
+              ),
+            ),
+          ],
+          const SizedBox(width: 8),
+          // Bots Multiple Selection
+          TextButton.icon(
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) {
+                  return AlertDialog(
+                    title: const Text('Select Bots & Wallet'),
+                    backgroundColor: const Color(0xFF1E222D),
+                    content: StatefulBuilder(
+                      builder: (context, setStateDialog) {
+                        return SizedBox(
+                          width: 300,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TextFormField(
+                                initialValue: initialCash.toString(),
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(labelText: 'Initial Cash / Wallet'),
+                                onChanged: (v) {
+                                  final val = double.tryParse(v);
+                                  if (val != null) onCashChanged(val);
+                                },
+                              ),
+                              const SizedBox(height: 16),
+                              ...bots.map((b) {
+                                final isSelected = selectedBots.contains(b.name);
+                                return CheckboxListTile(
+                                  title: Text(b.name),
+                                  value: isSelected,
+                                  onChanged: (checked) {
+                                    final newList = List<String>.from(selectedBots);
+                                    if (checked == true) {
+                                      newList.add(b.name);
+                                    } else {
+                                      newList.remove(b.name);
+                                    }
+                                    onBotsChanged(newList);
+                                    setStateDialog(() {});
+                                  },
+                                );
+                              }).toList(),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+                    ],
+                  );
+                },
+              );
+            },
+            icon: const Icon(Icons.smart_toy, size: 14),
+            label: Text('Bots (${selectedBots.length})'),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFD9D9D9)),
           ),
           const SizedBox(width: 12),
           // Run
           FilledButton.icon(
-            onPressed: running || selectedSymbol == null || selectedBot == null
+            onPressed: running || selectedSymbol == null || selectedBots.isEmpty
                 ? null
                 : onRun,
             icon: running

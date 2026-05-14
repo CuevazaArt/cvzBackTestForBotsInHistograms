@@ -18,9 +18,19 @@ router = APIRouter(tags=["backtest"])
 def run_backtest(
     req: BacktestRequest, ctx: AppContext = Depends(get_ctx),
 ) -> BacktestResponse:
-    bot_cls = ctx.bot_registry.get(req.bot)
-    if bot_cls is None:
-        raise HTTPException(404, f"Bot '{req.bot}' not found")
+    if not req.bots:
+        raise HTTPException(400, "At least one bot is required")
+        
+    bots_instances = []
+    for b in req.bots:
+        bot_cls = ctx.bot_registry.get(b.name)
+        if bot_cls is None:
+            raise HTTPException(404, f"Bot '{b.name}' not found")
+        try:
+            bot = bot_cls(**b.params)
+            bots_instances.append(bot)
+        except TypeError as e:
+            raise HTTPException(400, f"Invalid params for {b.name}: {e}")
 
     rows = ctx.downloader.load_candles(
         req.symbol.upper(), req.timeframe,
@@ -38,11 +48,6 @@ def run_backtest(
         slippage_pct=Decimal(str(req.slippage_pct)),
     )
 
-    try:
-        bot = bot_cls(**req.params)
-    except TypeError as e:
-        raise HTTPException(400, f"Invalid params for {req.bot}: {e}")
-
     engine = BacktestEngine(cfg)
-    result = engine.run(bot, candles, symbol=req.symbol.upper(), timeframe=req.timeframe)
-    return result_to_response(req.bot, req.params, result, candles)
+    result = engine.run(bots_instances, candles, symbol=req.symbol.upper(), timeframe=req.timeframe)
+    return result_to_response([b.model_dump() for b in req.bots], result, candles)

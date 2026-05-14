@@ -13,6 +13,13 @@ class ChartWebViewController {
   void addTradeMarker(Map<String, dynamic> data) => _state?._callJs('addTradeMarker', data);
   void addEquityPoint(Map<String, dynamic> data) => _state?._callJs('addEquityPoint', data);
   void clear() => _state?._callJs('clearChart', {});
+  void setChartFormula(String formula, {double? brickSize}) {
+    if (_state != null) {
+      final configJs = brickSize != null ? '{"brickSize": $brickSize}' : 'null';
+      _state!._wv.executeScript('if(window.setChartFormula) window.setChartFormula("$formula", $configJs);');
+    }
+  }
+  void initIndicators(List<String> keys) => _state?._callJs('initIndicators', keys);
 }
 
 class ChartWebView extends StatefulWidget {
@@ -40,7 +47,7 @@ class _ChartWebViewState extends State<ChartWebView> {
     if (mounted) setState(() => _initialized = true);
   }
 
-  void _callJs(String fn, Map<String, dynamic> data) {
+  void _callJs(String fn, dynamic data) {
     if (!_initialized) return;
     final json = jsonEncode(data);
     _wv.executeScript('if(window.$fn) window.$fn($json);');

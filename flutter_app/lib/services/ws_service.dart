@@ -76,28 +76,28 @@ class WsService {
   void ping() => send({'action': 'ping'});
 
   void runBacktest({
-    required String bot,
+    required List<Map<String, dynamic>> bots,
     required String symbol,
     required String timeframe,
-    Map<String, dynamic>? params,
     int? startMs,
     int? endMs,
     double initialCash = 10000,
     double takerFeePct = 0.1,
     double slippagePct = 0.05,
+    List<Map<String, dynamic>>? indicators,
   }) {
     send({
       'action': 'backtest',
       'config': {
-        'bot': bot,
+        'bots': bots,
         'symbol': symbol,
         'timeframe': timeframe,
-        'params': params ?? {},
-        'start_ms': ?startMs,
-        'end_ms': ?endMs,
+        if (startMs != null) 'start_ms': startMs,
+        if (endMs != null) 'end_ms': endMs,
         'initial_cash': initialCash,
         'taker_fee_pct': takerFeePct,
         'slippage_pct': slippagePct,
+        'indicators': indicators ?? [],
       },
     });
   }

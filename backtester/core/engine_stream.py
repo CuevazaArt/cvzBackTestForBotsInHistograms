@@ -56,15 +56,18 @@ class StreamingEngine(BacktestEngine):
 
     # ---- helpers ----
 
-    def _emit_candle(self, candle: Candle) -> None:
-        self._emit("candle", {
+    def _emit_candle(self, candle: Candle, indicators: dict[str, float] = None) -> None:
+        payload = {
             "time": candle.timestamp_ms // 1000,
             "open": float(candle.open),
             "high": float(candle.high),
             "low": float(candle.low),
             "close": float(candle.close),
             "volume": float(candle.volume),
-        })
+        }
+        if indicators:
+            payload["indicators"] = indicators
+        self._emit("candle", payload)
 
     def _emit_trade(self, t: Trade) -> None:
         self._emit("trade", {
@@ -94,11 +97,19 @@ class StreamingEngine(BacktestEngine):
 
     def run(
         self,
-        bot,
+        bots,
         candles: list[Candle],
         symbol: str = "SYMBOL",
         timeframe: str = "1h",
+        indicator_specs: list[dict] = None,
     ) -> BacktestResult:
+        if not isinstance(bots, list):
+            bots = [bots]
+            
+        # Calculate indicators before starting the simulation
+        from backtester.core.indicators import add_indicators
+        ind_data = add_indicators(candles, indicator_specs or [])
+
         portfolio = Portfolio(cash=self.config.initial_cash)
         result = BacktestResult(
             symbol=symbol, timeframe=timeframe, candles_processed=len(candles),
@@ -110,23 +121,25 @@ class StreamingEngine(BacktestEngine):
             "timeframe": timeframe,
             "candles_total": len(candles),
             "initial_cash": float(self.config.initial_cash),
+            "indicators_keys": list(ind_data.keys()),
         })
 
         prev_closed_count = 0
 
         try:
             for idx, candle in enumerate(candles):
-                # 1. Bot makes decision
-                orders = bot.on_candle(candle, portfolio)
+                # 1. Bots make decision
+                for bot in bots:
+                    orders = bot.on_candle(candle, portfolio)
 
-                # 2. Engine fills (slippage + fees)
-                for order in orders:
-                    side = order.get("side", "").upper()
-                    qty = Decimal(str(order.get("qty", 0)))
-                    if side == "BUY":
-                        self._process_buy(candle, portfolio, qty, result)
-                    elif side == "SELL":
-                        self._process_sell(candle, portfolio, qty, result)
+                    # 2. Engine fills (slippage + fees)
+                    for order in orders:
+                        side = order.get("side", "").upper()
+                        qty = Decimal(str(order.get("qty", 0)))
+                        if side == "BUY":
+                            self._process_buy(candle, portfolio, qty, result)
+                        elif side == "SELL":
+                            self._process_sell(candle, portfolio, qty, result)
 
                 # 3. Equity update
                 current_equity = portfolio.total_equity(candle.close)
@@ -135,7 +148,8 @@ class StreamingEngine(BacktestEngine):
 
                 # 4. Emit events (throttled)
                 if idx % self._candle_every == 0:
-                    self._emit_candle(candle)
+                    inds = {k: v[idx] for k, v in ind_data.items() if v[idx] is not None}
+                    self._emit_candle(candle, indicators=inds)
 
                 # New trades closed during this candle
                 if len(portfolio.closed_trades) > prev_closed_count:

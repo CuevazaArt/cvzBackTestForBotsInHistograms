@@ -147,12 +147,15 @@ class BacktestEngine:
 
     def run(
         self,
-        bot: BacktestBot,
+        bots: BacktestBot | list[BacktestBot],
         candles: list[Candle],
         symbol: str = "SYMBOL",
         timeframe: str = "1h",
     ) -> BacktestResult:
         """Run backtest on candles."""
+        if not isinstance(bots, list):
+            bots = [bots]
+            
         portfolio = Portfolio(cash=self.config.initial_cash)
         result = BacktestResult(
             symbol=symbol,
@@ -161,18 +164,19 @@ class BacktestEngine:
         )
 
         for idx, candle in enumerate(candles):
-            # Get orders from bot
-            orders = bot.on_candle(candle, portfolio)
+            # Get orders from bots
+            for bot in bots:
+                orders = bot.on_candle(candle, portfolio)
 
-            # Process orders
-            for order in orders:
-                side = order.get("side", "").upper()
-                qty = Decimal(str(order.get("qty", 0)))
+                # Process orders
+                for order in orders:
+                    side = order.get("side", "").upper()
+                    qty = Decimal(str(order.get("qty", 0)))
 
-                if side == "BUY":
-                    self._process_buy(candle, portfolio, qty, result)
-                elif side == "SELL":
-                    self._process_sell(candle, portfolio, qty, result)
+                    if side == "BUY":
+                        self._process_buy(candle, portfolio, qty, result)
+                    elif side == "SELL":
+                        self._process_sell(candle, portfolio, qty, result)
 
             # Update equity curve
             current_equity = portfolio.total_equity(candle.close)
