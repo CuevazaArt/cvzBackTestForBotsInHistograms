@@ -1,13 +1,19 @@
-"""Parallel experiment runner."""
+"""Parallel experiment runner.
+
+The worker function is module-level (not a bound method) and takes only
+picklable args. This is critical: DuckDB connections cannot be pickled, so
+we pass a `db_path` and bot class name instead and rebuild a downloader
+inside each worker process.
+"""
 
 import json
 import logging
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from backtester.core import BinanceDownloader, BacktestEngine, BacktestConfig, compute_metrics
+from backtester.core import BacktestConfig, BacktestEngine, BinanceDownloader, compute_metrics
 from backtester.core.engine import Candle
 
 _LOG = logging.getLogger("backtester.experiments")
@@ -32,8 +38,52 @@ class ExperimentResult:
     error: Optional[str] = None
 
 
+# ── Worker (module-level so it can be pickled) ─────────────────
+
+
+def _run_experiment(
+    db_path_str: str,
+    bot_module: str,
+    bot_attr: str,
+    bot_params: dict[str, Any],
+    symbol: str,
+    timeframe: str,
+    engine_cfg: BacktestConfig,
+    exp: Experiment,
+) -> ExperimentResult:
+    """Worker: build a fresh downloader and run a single experiment.
+
+    Lives at module scope so multiprocessing.Pool can pickle it. Receives
+    only picklable args (strings, dataclass, dict) — the DuckDB connection
+    is created inside this process.
+    """
+    try:
+        import importlib
+
+        downloader = BinanceDownloader(Path(db_path_str))
+        candles_data = downloader.load_candles(symbol, timeframe)
+        if not candles_data:
+            raise ValueError(f"No candles found for {symbol} {timeframe}")
+        candles = [Candle.from_dict(c) for c in candles_data]
+
+        mod = importlib.import_module(bot_module)
+        bot_class = getattr(mod, bot_attr)
+        bot = bot_class(**bot_params)
+
+        engine = BacktestEngine(engine_cfg)
+        result = engine.run(bot, candles, symbol=symbol, timeframe=timeframe)
+        metrics = compute_metrics(result)
+        return ExperimentResult(experiment=exp, success=True, metrics=metrics)
+    except Exception as e:  # noqa: BLE001
+        return ExperimentResult(experiment=exp, success=False, error=str(e))
+
+
 class ExperimentRunner:
-    """Run experiments in parallel."""
+    """Run experiments in parallel.
+
+    Production-safe across multiprocessing: the worker function is
+    module-level and only receives picklable arguments (no DuckDB conns).
+    """
 
     def __init__(
         self,
@@ -51,71 +101,77 @@ class ExperimentRunner:
         workers: int = 4,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> list[ExperimentResult]:
-        """Run experiments in parallel."""
-        results = []
+        """Run experiments in parallel.
+
+        With `workers=1` runs sequentially in the current process (useful for
+        tests and for embedded environments where multiprocessing is undesirable).
+        """
+        results: list[ExperimentResult] = []
         completed = 0
+        total = len(experiments)
+        db_path_str = str(self.downloader.db_path)
+        engine_cfg = self.engine_config
 
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            futures = {
-                executor.submit(self._run_single, exp): exp
-                for exp in experiments
-            }
+        def _build_args(exp: Experiment):
+            bot_class = self.bot_registry.get(exp.bot_class)
+            if bot_class is None:
+                return None
+            return (
+                db_path_str,
+                bot_class.__module__,
+                bot_class.__name__,
+                exp.bot_params,
+                exp.symbol,
+                exp.timeframe,
+                engine_cfg,
+                exp,
+            )
 
-            for future in as_completed(futures):
-                try:
-                    result = future.result()
-                    results.append(result)
-                except Exception as e:
-                    exp = futures[future]
-                    _LOG.error(f"Experiment failed: {exp}: {e}")
+        # Sequential fast-path: skip multiprocessing entirely.
+        if workers <= 1:
+            for exp in experiments:
+                args = _build_args(exp)
+                if args is None:
                     results.append(ExperimentResult(
-                        experiment=exp,
-                        success=False,
-                        error=str(e),
+                        experiment=exp, success=False,
+                        error=f"Unknown bot: {exp.bot_class}",
                     ))
-
+                else:
+                    results.append(_run_experiment(*args))
                 completed += 1
                 if progress_callback:
-                    progress_callback(completed, len(experiments))
+                    progress_callback(completed, total)
+            return results
+
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = {}
+            for exp in experiments:
+                args = _build_args(exp)
+                if args is None:
+                    results.append(ExperimentResult(
+                        experiment=exp, success=False,
+                        error=f"Unknown bot: {exp.bot_class}",
+                    ))
+                    completed += 1
+                    if progress_callback:
+                        progress_callback(completed, total)
+                    continue
+                futures[executor.submit(_run_experiment, *args)] = exp
+
+            for future in as_completed(futures):
+                exp = futures[future]
+                try:
+                    results.append(future.result())
+                except Exception as e:  # noqa: BLE001
+                    _LOG.error("Experiment failed: %s: %s", exp, e)
+                    results.append(ExperimentResult(
+                        experiment=exp, success=False, error=str(e),
+                    ))
+                completed += 1
+                if progress_callback:
+                    progress_callback(completed, total)
 
         return results
-
-    def _run_single(self, exp: Experiment) -> ExperimentResult:
-        """Run a single experiment."""
-        try:
-            # Load candles
-            candles_data = self.downloader.load_candles(exp.symbol, exp.timeframe)
-            if not candles_data:
-                raise ValueError(f"No candles found for {exp.symbol} {exp.timeframe}")
-
-            candles = [Candle.from_dict(c) for c in candles_data]
-
-            # Instantiate bot
-            bot_class = self.bot_registry.get(exp.bot_class)
-            if not bot_class:
-                raise ValueError(f"Unknown bot: {exp.bot_class}")
-
-            bot = bot_class(**exp.bot_params)
-
-            # Run backtest
-            engine = BacktestEngine(self.engine_config)
-            result = engine.run(bot, candles, symbol=exp.symbol, timeframe=exp.timeframe)
-
-            # Compute metrics
-            metrics = compute_metrics(result)
-
-            return ExperimentResult(
-                experiment=exp,
-                success=True,
-                metrics=metrics,
-            )
-
-        except Exception as e:
-            return ExperimentResult(
-                experiment=exp,
-                success=False,
-                error=str(e),
-            )
 
     @staticmethod
     def save_results(results: list[ExperimentResult], output_path: Path) -> None:
@@ -137,4 +193,4 @@ class ExperimentRunner:
             data.append(row)
 
         output_path.write_text(json.dumps(data, indent=2))
-        _LOG.info(f"Results saved to {output_path}")
+        _LOG.info("Results saved to %s", output_path)

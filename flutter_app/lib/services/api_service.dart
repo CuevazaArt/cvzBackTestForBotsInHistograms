@@ -190,4 +190,65 @@ class ApiService {
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     return JobStatus.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
+
+  /// Launch a parameter sweep (`POST /api/experiments/run`).
+  ///
+  /// `bots` shape: `[{name: "EMACross", configs: [{fast_ema:5, slow_ema:20}, ...]}]`.
+  /// Returns the job id used for polling via [getJob].
+  /// Throws [ApiValidationError] on HTTP 422 (Pydantic validation) so the UI can
+  /// show field-level feedback.
+  Future<String> runOptimization({
+    required String symbol,
+    required String timeframe,
+    required List<Map<String, dynamic>> bots,
+    int workers = 4,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/experiments/run'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'bots': bots,
+        'workers': workers,
+      }),
+    );
+    if (res.statusCode == 422) {
+      throw ApiValidationError.fromBody(res.body);
+    }
+    if (res.statusCode != 200) {
+      throw Exception('HTTP ${res.statusCode}: ${res.body}');
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return body['id'] as String;
+  }
+}
+
+/// Thrown when the backend rejects a request with HTTP 422 (Pydantic validation).
+///
+/// The Flutter UI uses [message] for a friendly banner.
+class ApiValidationError implements Exception {
+  final String message;
+  final List<String> fieldPath;
+  const ApiValidationError(this.message, this.fieldPath);
+
+  factory ApiValidationError.fromBody(String body) {
+    try {
+      final j = jsonDecode(body);
+      final detail = j is Map ? j['detail'] : null;
+      if (detail is List && detail.isNotEmpty) {
+        final first = detail.first as Map<String, dynamic>;
+        final loc = (first['loc'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[];
+        final msg = first['msg'] as String? ?? 'Validation error';
+        return ApiValidationError(msg, loc);
+      }
+      if (detail is String) return ApiValidationError(detail, const []);
+    } catch (_) {}
+    return ApiValidationError('Validation error: $body', const []);
+  }
+
+  @override
+  String toString() => fieldPath.isEmpty
+      ? message
+      : '${fieldPath.join('.')}: $message';
 }

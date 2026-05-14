@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+# Bots whose params include a fast/slow EMA pair that must be ordered correctly.
+_EMA_ORDERED_BOTS = {"EMACross", "MACDCross"}
 
 
 # ───────────────────────── Bots ─────────────────────────
@@ -102,6 +106,18 @@ class BotRunSpec(BaseModel):
     name: str
     params: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _validate_param_relationships(self) -> "BotRunSpec":
+        # Only validate fast/slow EMA pairs for bots that expose both.
+        if self.name in _EMA_ORDERED_BOTS:
+            fast = self.params.get("fast_ema")
+            slow = self.params.get("slow_ema")
+            if fast is not None and slow is not None and fast >= slow:
+                raise ValueError(
+                    f"[{self.name}] fast_ema ({fast}) must be < slow_ema ({slow})"
+                )
+        return self
+
 
 class BacktestRequest(BaseModel):
     bots: list[BotRunSpec]
@@ -113,6 +129,34 @@ class BacktestRequest(BaseModel):
     initial_cash: float = 10000.0
     taker_fee_pct: float = 0.1
     slippage_pct: float = 0.05
+
+    @field_validator("initial_cash")
+    @classmethod
+    def _cash_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("initial_cash must be > 0")
+        return v
+
+    @field_validator("taker_fee_pct", "slippage_pct")
+    @classmethod
+    def _non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("must be >= 0")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_time_range(self) -> "BacktestRequest":
+        if (
+            self.start_ms is not None
+            and self.end_ms is not None
+            and self.start_ms >= self.end_ms
+        ):
+            raise ValueError(
+                f"start_ms ({self.start_ms}) must be < end_ms ({self.end_ms})"
+            )
+        if not self.bots:
+            raise ValueError("at least one bot is required")
+        return self
 
 
 class TradeDTO(BaseModel):
@@ -148,12 +192,46 @@ class ExperimentSpec(BaseModel):
     name: str                          # bot class
     configs: list[dict[str, Any]]      # list of param sets
 
+    @model_validator(mode="after")
+    def _validate_configs(self) -> "ExperimentSpec":
+        if not self.configs:
+            raise ValueError(f"[{self.name}] configs list cannot be empty")
+        # If bot uses fast_ema/slow_ema pair, validate each config.
+        if self.name in _EMA_ORDERED_BOTS:
+            for i, cfg in enumerate(self.configs):
+                fast = cfg.get("fast_ema")
+                slow = cfg.get("slow_ema")
+                if fast is not None and slow is not None and fast >= slow:
+                    raise ValueError(
+                        f"[{self.name}] config[{i}]: fast_ema ({fast}) must be < slow_ema ({slow})"
+                    )
+        return self
+
 
 class ExperimentsRequest(BaseModel):
     symbol: str
     timeframe: str
     bots: list[ExperimentSpec]
     workers: int = 4
+
+    @field_validator("workers")
+    @classmethod
+    def _workers_range(cls, v: int) -> int:
+        if v < 1 or v > 32:
+            raise ValueError("workers must be between 1 and 32")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_total_configs(self) -> "ExperimentsRequest":
+        total = sum(len(b.configs) for b in self.bots)
+        if total == 0:
+            raise ValueError("at least one experiment config is required")
+        if total > 1000:
+            raise ValueError(
+                f"too many experiments ({total}); cap is 1000. "
+                "Reduce parameter steps or split the sweep."
+            )
+        return self
 
 
 # ───────────────────────── Credentials ─────────────────────────

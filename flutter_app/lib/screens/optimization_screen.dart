@@ -1,11 +1,27 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:backtester_shell/services/api_service.dart';
+import 'package:backtester_shell/utils/param_grid.dart';
 import 'package:backtester_shell/widgets/param_bounds_editor.dart';
+
+/// Payload handed off to the Backtest screen when the user clicks "Apply best".
+class OptimizationResult {
+  final String symbol;
+  final String timeframe;
+  final String botName;
+  final Map<String, dynamic> params;
+  const OptimizationResult({
+    required this.symbol,
+    required this.timeframe,
+    required this.botName,
+    required this.params,
+  });
+}
 
 class OptimizationScreen extends StatefulWidget {
   final ApiService apiService;
-  const OptimizationScreen({super.key, required this.apiService});
+  final ValueChanged<OptimizationResult>? onApplyBest;
+  const OptimizationScreen({super.key, required this.apiService, this.onApplyBest});
 
   @override
   State<OptimizationScreen> createState() => _OptimizationScreenState();
@@ -17,20 +33,32 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   String? _selectedSymbol;
   String _selectedTimeframe = '1h';
   String? _selectedBot;
-  
+
   Map<String, ParamSpec> _paramSpecs = {};
   Map<String, ParamBound> _bounds = {};
-  
+
   bool _running = false;
   String? _error;
+  String? _info;
   double _progress = 0;
-  
-  final _trialsCtrl = TextEditingController(text: '50');
+  String? _jobMessage;
+  Timer? _poll;
+
+  // Latest sweep output (sorted by total_return_pct desc).
+  List<_TrialRow> _trials = [];
+
+  int _maxWorkers = 4;
 
   @override
   void initState() {
     super.initState();
     _loadCatalog();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadCatalog() async {
@@ -59,15 +87,125 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
     }
   }
 
-  void _runOptimization() {
-    // TODO: implement REST/WebSocket calls to run Optuna in the backend
+  Future<void> _runOptimization() async {
+    if (_selectedSymbol == null || _selectedBot == null) return;
+
+    final grid = expandBounds(_bounds, cap: 200);
+    if (grid.combos.isEmpty) {
+      setState(() => _error = 'Search space is empty. Adjust the param bounds.');
+      return;
+    }
+
     setState(() {
       _running = true;
-      _error = 'Backend Optuna integration pending...';
+      _error = null;
+      _info = grid.capped
+          ? 'Grid capped at 200 combos (would have been ${grid.wouldHaveBeen}).'
+          : 'Running ${grid.combos.length} combinations…';
+      _progress = 0;
+      _trials = [];
+      _jobMessage = null;
     });
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _running = false);
+
+    try {
+      final jobId = await widget.apiService.runOptimization(
+        symbol: _selectedSymbol!,
+        timeframe: _selectedTimeframe,
+        bots: [
+          {'name': _selectedBot, 'configs': grid.combos},
+        ],
+        workers: _maxWorkers,
+      );
+
+      _poll = Timer.periodic(const Duration(seconds: 1), (timer) async {
+        try {
+          final st = await widget.apiService.getJob(jobId);
+          if (!mounted) {
+            timer.cancel();
+            return;
+          }
+          setState(() {
+            _progress = st.progress;
+            _jobMessage = st.message;
+          });
+          if (st.status == 'done') {
+            timer.cancel();
+            _onJobDone(st);
+          } else if (st.status == 'error') {
+            timer.cancel();
+            setState(() {
+              _running = false;
+              _error = st.message ?? 'Optimization failed';
+            });
+          }
+        } catch (e) {
+          // Network blip — ignore one tick.
+        }
+      });
+    } on ApiValidationError catch (e) {
+      setState(() {
+        _running = false;
+        _error = 'Validation: $e';
+      });
+    } catch (e) {
+      setState(() {
+        _running = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  void _onJobDone(JobStatus st) {
+    final runs = (st.result?['runs'] as List?) ?? [];
+    final rows = <_TrialRow>[];
+    for (final r in runs) {
+      final m = r as Map<String, dynamic>;
+      final ok = m['success'] as bool? ?? false;
+      final metrics = (m['metrics'] as Map?)?.cast<String, dynamic>() ?? const {};
+      rows.add(_TrialRow(
+        bot: m['bot'] as String? ?? '?',
+        params: Map<String, dynamic>.from(m['params'] as Map? ?? {}),
+        success: ok,
+        error: m['error'] as String?,
+        returnPct: (metrics['total_return_pct'] as num?)?.toDouble() ?? double.nan,
+        trades: (metrics['trades'] as num?)?.toInt() ?? 0,
+        winRatePct: (metrics['win_rate_pct'] as num?)?.toDouble() ?? 0,
+        profitFactor: (metrics['profit_factor'] as num?)?.toDouble() ?? 0,
+        maxDdPct: (metrics['max_drawdown_pct'] as num?)?.toDouble() ?? 0,
+        finalEquity: (metrics['final_equity'] as num?)?.toDouble() ?? 0,
+      ));
+    }
+    rows.sort((a, b) {
+      // Success first, then by return desc.
+      if (a.success != b.success) return a.success ? -1 : 1;
+      if (a.returnPct.isNaN) return 1;
+      if (b.returnPct.isNaN) return -1;
+      return b.returnPct.compareTo(a.returnPct);
     });
+    setState(() {
+      _running = false;
+      _trials = rows;
+      _info = 'Completed ${rows.length} trials. Top: '
+          '${rows.isNotEmpty && rows.first.success ? "${rows.first.returnPct.toStringAsFixed(2)}%" : "n/a"}';
+    });
+  }
+
+  void _applyBest() {
+    if (_trials.isEmpty || _selectedSymbol == null || _selectedBot == null) return;
+    final top = _trials.firstWhere((t) => t.success, orElse: () => _trials.first);
+    widget.onApplyBest?.call(OptimizationResult(
+      symbol: _selectedSymbol!,
+      timeframe: _selectedTimeframe,
+      botName: _selectedBot!,
+      params: top.params,
+    ));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      backgroundColor: const Color(0xFF26a69a),
+      content: Text(
+        'Applied best to Backtest: ${top.params}',
+        style: const TextStyle(color: Colors.black, fontSize: 12),
+      ),
+    ));
   }
 
   @override
@@ -81,14 +219,16 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
           selectedTimeframe: _selectedTimeframe,
           selectedBot: _selectedBot,
           running: _running,
-          progress: _progress,
-          trialsCtrl: _trialsCtrl,
+          progress: _progress * 100,
+          maxWorkers: _maxWorkers,
+          onWorkersChanged: (v) => setState(() => _maxWorkers = v),
           onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
           onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
           onBotChanged: (v) {
             setState(() {
               _selectedBot = v;
               _paramSpecs = {};
+              _bounds = {};
             });
             if (v != null) _loadBotParams(v);
           },
@@ -96,18 +236,54 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         ),
         if (_error != null)
           Container(
-            color: const Color(0xFFef5350).withOpacity(0.1),
+            color: const Color(0xFFef5350).withValues(alpha: 0.12),
             padding: const EdgeInsets.all(8),
             width: double.infinity,
-            child: Text('⚠ $_error', style: const TextStyle(color: Color(0xFFef5350))),
+            child: Row(
+              children: [
+                Expanded(child: Text('⚠ $_error', style: const TextStyle(color: Color(0xFFef5350), fontSize: 12))),
+                IconButton(
+                  iconSize: 14,
+                  icon: const Icon(Icons.close, color: Color(0xFFef5350)),
+                  onPressed: () => setState(() => _error = null),
+                ),
+              ],
+            ),
+          ),
+        if (_info != null && _error == null)
+          Container(
+            color: const Color(0xFF26a69a).withValues(alpha: 0.10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            width: double.infinity,
+            child: Text(_info!, style: const TextStyle(color: Color(0xFF26a69a), fontSize: 11)),
+          ),
+        if (_running && _jobMessage != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            width: double.infinity,
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFb388ff)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(_jobMessage!, style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11)),
+                ),
+                Text('${(_progress * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(color: Color(0xFF787B86), fontSize: 11)),
+              ],
+            ),
           ),
         Expanded(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Left: Parameter Setup
-              Expanded(
-                flex: 2,
+              SizedBox(
+                width: 420,
                 child: Container(
                   decoration: const BoxDecoration(
                     border: Border(right: BorderSide(color: Color(0xFF2B2B43))),
@@ -116,14 +292,21 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text('Search Space', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                        padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                        child: Text('SEARCH SPACE',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                                color: Color(0xFF787B86), letterSpacing: 1)),
                       ),
                       Expanded(
-                        child: ParamBoundsEditor(
-                          paramSpecs: _paramSpecs,
-                          onChanged: (b) => _bounds = b,
-                        ),
+                        child: _selectedBot == null
+                            ? const Center(
+                                child: Text('Select a bot to define the search space',
+                                    style: TextStyle(color: Color(0xFF787B86), fontSize: 12)),
+                              )
+                            : ParamBoundsEditor(
+                                paramSpecs: _paramSpecs,
+                                onChanged: (b) => _bounds = b,
+                              ),
                       ),
                     ],
                   ),
@@ -131,21 +314,42 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
               ),
               // Right: Leaderboard
               Expanded(
-                flex: 3,
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text('Leaderboard (Top Trials)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                      child: Row(
+                        children: [
+                          const Text('LEADERBOARD',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                                  color: Color(0xFF787B86), letterSpacing: 1)),
+                          const Spacer(),
+                          if (_trials.isNotEmpty && widget.onApplyBest != null)
+                            FilledButton.icon(
+                              onPressed: _applyBest,
+                              icon: const Icon(Icons.shortcut, size: 14),
+                              label: const Text('Apply best to Backtest'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF26a69a),
+                                minimumSize: const Size(0, 30),
+                                textStyle: const TextStyle(fontSize: 11),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                     Expanded(
-                      child: Center(
-                        child: Text(
-                          'Waiting for optimization to start...',
-                          style: TextStyle(color: const Color(0xFF787B86).withOpacity(0.5)),
-                        ),
-                      ),
+                      child: _trials.isEmpty
+                          ? Center(
+                              child: Text(
+                                _running
+                                    ? 'Running trials…'
+                                    : 'Configure bounds and click Run to start.',
+                                style: const TextStyle(color: Color(0xFF787B86), fontSize: 12),
+                              ),
+                            )
+                          : _LeaderboardTable(rows: _trials),
                     ),
                   ],
                 ),
@@ -158,6 +362,197 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   }
 }
 
+// ── Leaderboard ─────────────────────────────────────────────────
+
+class _TrialRow {
+  final String bot;
+  final Map<String, dynamic> params;
+  final bool success;
+  final String? error;
+  final double returnPct;
+  final int trades;
+  final double winRatePct;
+  final double profitFactor;
+  final double maxDdPct;
+  final double finalEquity;
+
+  const _TrialRow({
+    required this.bot,
+    required this.params,
+    required this.success,
+    required this.error,
+    required this.returnPct,
+    required this.trades,
+    required this.winRatePct,
+    required this.profitFactor,
+    required this.maxDdPct,
+    required this.finalEquity,
+  });
+}
+
+class _LeaderboardTable extends StatefulWidget {
+  final List<_TrialRow> rows;
+  const _LeaderboardTable({required this.rows});
+
+  @override
+  State<_LeaderboardTable> createState() => _LeaderboardTableState();
+}
+
+class _LeaderboardTableState extends State<_LeaderboardTable> {
+  int _sortCol = 1; // default: Return
+  bool _sortAsc = false;
+
+  List<_TrialRow> get _sorted {
+    final list = List<_TrialRow>.from(widget.rows);
+    list.sort((a, b) {
+      if (a.success != b.success) return a.success ? -1 : 1;
+      int cmp(double x, double y) {
+        if (x.isNaN) return 1;
+        if (y.isNaN) return -1;
+        return x.compareTo(y);
+      }
+      int r;
+      switch (_sortCol) {
+        case 1: r = cmp(a.returnPct, b.returnPct); break;
+        case 2: r = a.trades.compareTo(b.trades); break;
+        case 3: r = cmp(a.winRatePct, b.winRatePct); break;
+        case 4: r = cmp(a.profitFactor, b.profitFactor); break;
+        case 5: r = cmp(a.maxDdPct, b.maxDdPct); break;
+        case 6: r = cmp(a.finalEquity, b.finalEquity); break;
+        default: r = 0;
+      }
+      return _sortAsc ? r : -r;
+    });
+    return list;
+  }
+
+  void _setSort(int c) {
+    setState(() {
+      if (_sortCol == c) {
+        _sortAsc = !_sortAsc;
+      } else {
+        _sortCol = c;
+        _sortAsc = false;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = _sorted;
+    return ListView.builder(
+      itemCount: rows.length + 1,
+      itemBuilder: (ctx, i) {
+        if (i == 0) return _header();
+        return _row(rows[i - 1], i, i.isEven);
+      },
+    );
+  }
+
+  Widget _header() {
+    Widget col(String label, int idx, {int flex = 1, TextAlign align = TextAlign.left}) {
+      final isSort = _sortCol == idx;
+      return Expanded(
+        flex: flex,
+        child: InkWell(
+          onTap: idx == 0 ? null : () => _setSort(idx),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Row(
+              mainAxisAlignment: align == TextAlign.right ? MainAxisAlignment.end : MainAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                      color: isSort ? const Color(0xFFb388ff) : const Color(0xFF787B86),
+                      fontSize: 10,
+                      letterSpacing: 0.8,
+                    )),
+                if (isSort)
+                  Icon(_sortAsc ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+                      size: 14, color: const Color(0xFFb388ff)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      color: const Color(0xFF131722),
+      child: Row(
+        children: [
+          col('#', 0, flex: 1),
+          col('PARAMS', 0, flex: 4),
+          col('RETURN', 1, flex: 2, align: TextAlign.right),
+          col('TRADES', 2, flex: 2, align: TextAlign.right),
+          col('WIN%', 3, flex: 2, align: TextAlign.right),
+          col('PF', 4, flex: 2, align: TextAlign.right),
+          col('DD%', 5, flex: 2, align: TextAlign.right),
+          col('EQUITY', 6, flex: 2, align: TextAlign.right),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(_TrialRow t, int rank, bool alt) {
+    final ret = t.returnPct;
+    final retColor = !t.success || ret.isNaN
+        ? const Color(0xFF787B86)
+        : (ret >= 0 ? const Color(0xFF26a69a) : const Color(0xFFef5350));
+
+    String fmt(double v, {bool pct = false}) {
+      if (v.isNaN || !v.isFinite) return '—';
+      return '${v.toStringAsFixed(2)}${pct ? '%' : ''}';
+    }
+
+    Widget cell(String text, {int flex = 1, Color? color, TextAlign align = TextAlign.left, FontWeight? weight}) {
+      return Expanded(
+        flex: flex,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Text(text,
+              textAlign: align,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color ?? const Color(0xFFD9D9D9),
+                fontSize: 11,
+                fontWeight: weight,
+              )),
+        ),
+      );
+    }
+
+    final paramsStr = t.params.entries
+        .map((e) => '${e.key.replaceAll('_', '')}=${_fmtNum(e.value)}')
+        .join(' · ');
+
+    return Container(
+      color: alt ? const Color(0xFF1A1D26) : const Color(0xFF1E222D),
+      child: Row(
+        children: [
+          cell('$rank', flex: 1, color: const Color(0xFF787B86)),
+          cell(t.success ? paramsStr : '${t.error ?? "error"} · $paramsStr',
+              flex: 4, color: t.success ? const Color(0xFFD9D9D9) : const Color(0xFFef5350)),
+          cell(fmt(ret, pct: true), flex: 2, align: TextAlign.right, color: retColor, weight: FontWeight.w600),
+          cell('${t.trades}', flex: 2, align: TextAlign.right),
+          cell(fmt(t.winRatePct, pct: true), flex: 2, align: TextAlign.right, color: const Color(0xFF26a69a)),
+          cell(fmt(t.profitFactor), flex: 2, align: TextAlign.right),
+          cell(fmt(t.maxDdPct, pct: true), flex: 2, align: TextAlign.right, color: const Color(0xFFef5350)),
+          cell('\$${fmt(t.finalEquity)}', flex: 2, align: TextAlign.right),
+        ],
+      ),
+    );
+  }
+
+  String _fmtNum(dynamic v) {
+    if (v is int) return '$v';
+    if (v is double) return v.toStringAsFixed(v.abs() < 1 ? 4 : 2);
+    return '$v';
+  }
+}
+
+// ── Top bar ─────────────────────────────────────────────────────
+
 class _OptTopBar extends StatelessWidget {
   final List<SymbolEntry> symbols;
   final List<BotInfo> bots;
@@ -166,7 +561,8 @@ class _OptTopBar extends StatelessWidget {
   final String? selectedBot;
   final bool running;
   final double progress;
-  final TextEditingController trialsCtrl;
+  final int maxWorkers;
+  final ValueChanged<int> onWorkersChanged;
   final ValueChanged<String?> onSymbolChanged;
   final ValueChanged<String> onTimeframeChanged;
   final ValueChanged<String?> onBotChanged;
@@ -180,7 +576,8 @@ class _OptTopBar extends StatelessWidget {
     required this.selectedBot,
     required this.running,
     required this.progress,
-    required this.trialsCtrl,
+    required this.maxWorkers,
+    required this.onWorkersChanged,
     required this.onSymbolChanged,
     required this.onTimeframeChanged,
     required this.onBotChanged,
@@ -221,16 +618,20 @@ class _OptTopBar extends StatelessWidget {
             onChanged: onBotChanged,
           ),
           const SizedBox(width: 16),
-          const Text('Trials:', style: TextStyle(color: Color(0xFF787B86), fontSize: 12)),
+          const Text('Workers:', style: TextStyle(color: Color(0xFF787B86), fontSize: 11)),
           const SizedBox(width: 4),
-          SizedBox(
-            width: 40,
-            child: TextField(
-              controller: trialsCtrl,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              decoration: const InputDecoration(isDense: true, border: InputBorder.none),
-            ),
+          DropdownButton<int>(
+            value: maxWorkers,
+            isDense: true,
+            underline: const SizedBox(),
+            style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 12),
+            dropdownColor: const Color(0xFF1E222D),
+            items: const [1, 2, 4, 8]
+                .map((n) => DropdownMenuItem(value: n, child: Text('$n')))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) onWorkersChanged(v);
+            },
           ),
           const Spacer(),
           FilledButton.icon(
@@ -242,9 +643,9 @@ class _OptTopBar extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
                 : const Icon(Icons.science, size: 16),
-            label: Text(running ? '${progress.toStringAsFixed(0)}%' : 'Run Optuna'),
+            label: Text(running ? '${progress.toStringAsFixed(0)}%' : 'Run Sweep'),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFb388ff), // Purple for optimization
+              backgroundColor: const Color(0xFFb388ff),
               minimumSize: const Size(100, 32),
               textStyle: const TextStyle(fontSize: 13),
             ),

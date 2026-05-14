@@ -18,6 +18,13 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _checking = true;
   int _selectedIndex = 0;
 
+  // Preset handed off from OptimizationScreen → BacktestScreen.
+  // Consumed once, then cleared.
+  OptimizationResult? _pendingApply;
+
+  // GlobalKey lets us trigger Data Manager from elsewhere if needed.
+  final GlobalKey<State<BacktestScreen>> _backtestKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -32,12 +39,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _onApplyBest(OptimizationResult result) {
+    setState(() {
+      _pendingApply = result;
+      _selectedIndex = 0; // jump to Backtest
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Row(
         children: [
-          // ── Sidebar ──────────────────────────────────────────
           _Sidebar(
             selectedIndex: _selectedIndex,
             onSelect: (i) => setState(() => _selectedIndex = i),
@@ -45,11 +58,18 @@ class _HomeScreenState extends State<HomeScreen> {
             checking: _checking,
           ),
           const VerticalDivider(width: 1),
-          // ── Content ──────────────────────────────────────────
           Expanded(
             child: switch (_selectedIndex) {
-              0 => BacktestScreen(apiService: widget.apiService),
-              1 => OptimizationScreen(apiService: widget.apiService),
+              0 => BacktestScreen(
+                  key: _backtestKey,
+                  apiService: widget.apiService,
+                  initialApply: _pendingApply,
+                  onApplyConsumed: () => setState(() => _pendingApply = null),
+                ),
+              1 => OptimizationScreen(
+                  apiService: widget.apiService,
+                  onApplyBest: _onApplyBest,
+                ),
               _ => const _PlaceholderPage(label: 'Settings coming soon'),
             },
           ),
@@ -88,7 +108,6 @@ class _Sidebar extends StatelessWidget {
       child: Column(
         children: [
           const SizedBox(height: 12),
-          // Logo
           Container(
             width: 36,
             height: 36,
@@ -127,7 +146,6 @@ class _Sidebar extends StatelessWidget {
             );
           }),
           const Spacer(),
-          // Backend status
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Tooltip(

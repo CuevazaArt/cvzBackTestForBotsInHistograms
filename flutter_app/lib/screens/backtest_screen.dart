@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:backtester_shell/services/api_service.dart';
 import 'package:backtester_shell/services/presets_service.dart';
 import 'package:backtester_shell/services/ws_service.dart';
+import 'package:backtester_shell/screens/optimization_screen.dart' show OptimizationResult;
 import 'package:backtester_shell/widgets/chart_webview.dart';
 import 'package:backtester_shell/widgets/results_panel.dart';
 import 'package:backtester_shell/widgets/trades_table.dart';
@@ -14,7 +15,14 @@ import 'package:backtester_shell/widgets/mini_weight_chart.dart';
 /// Main backtest workspace: controls + chart + results.
 class BacktestScreen extends StatefulWidget {
   final ApiService apiService;
-  const BacktestScreen({super.key, required this.apiService});
+  final OptimizationResult? initialApply;
+  final VoidCallback? onApplyConsumed;
+  const BacktestScreen({
+    super.key,
+    required this.apiService,
+    this.initialApply,
+    this.onApplyConsumed,
+  });
 
   @override
   State<BacktestScreen> createState() => _BacktestScreenState();
@@ -55,6 +63,40 @@ class _BacktestScreenState extends State<BacktestScreen> {
     super.initState();
     _loadCatalog();
     _connectWs();
+    if (widget.initialApply != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _consumeInitialApply(widget.initialApply!));
+    }
+  }
+
+  @override
+  void didUpdateWidget(BacktestScreen old) {
+    super.didUpdateWidget(old);
+    if (widget.initialApply != null && widget.initialApply != old.initialApply) {
+      _consumeInitialApply(widget.initialApply!);
+    }
+  }
+
+  Future<void> _consumeInitialApply(OptimizationResult r) async {
+    // Ensure params spec is loaded so the editor sliders pick up the values.
+    await _fetchBotParams(r.botName);
+    if (!mounted) return;
+    setState(() {
+      _selectedSymbol = r.symbol;
+      _selectedTimeframe = r.timeframe;
+      if (!_selectedBots.contains(r.botName)) {
+        _selectedBots = [..._selectedBots, r.botName];
+      }
+      _botsParams[r.botName] = Map<String, dynamic>.from(r.params);
+    });
+    widget.onApplyConsumed?.call();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: const Color(0xFFb388ff),
+        content: Text('Optimized params loaded for ${r.botName}. Click Run to backtest.',
+            style: const TextStyle(color: Colors.black, fontSize: 12)),
+        duration: const Duration(seconds: 3),
+      ));
+    }
   }
 
   Future<void> _loadCatalog() async {
@@ -134,10 +176,12 @@ class _BacktestScreenState extends State<BacktestScreen> {
         }
       case WsEventType.error:
         if (mounted) {
+          final msg = ev.data['message'] as String? ?? 'Unknown error';
           setState(() {
             _running = false;
-            _wsError = ev.data['message'] as String?;
+            _wsError = msg;
           });
+          _maybeOfferDataManager(msg);
         }
       case WsEventType.reconnecting:
         final attempt = ev.data['attempt'];
@@ -155,6 +199,24 @@ class _BacktestScreenState extends State<BacktestScreen> {
       default:
         break;
     }
+  }
+
+  void _maybeOfferDataManager(String message) {
+    final lower = message.toLowerCase();
+    if (!lower.contains('no candles') && !lower.contains('download first')) return;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      backgroundColor: const Color(0xFFef5350),
+      duration: const Duration(seconds: 8),
+      content: Text('No data for ${_selectedSymbol ?? "this symbol"} ($_selectedTimeframe). Download first.',
+          style: const TextStyle(color: Colors.white, fontSize: 12)),
+      action: SnackBarAction(
+        label: 'Open Data Manager',
+        textColor: Colors.white,
+        onPressed: () => _showDownloadDialog(context),
+      ),
+    ));
   }
 
   void _runBacktest() {
@@ -417,6 +479,33 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onLoadPreset: _loadPresetDialog,
           onReconnect: _connectWs,
         ),
+        if (_symbols.isEmpty)
+          Container(
+            color: const Color(0xFF26a69a).withValues(alpha: 0.10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                const Icon(Icons.download_outlined, size: 18, color: Color(0xFF26a69a)),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'No data downloaded yet. Open the Data Manager to fetch historical candles before running a backtest.',
+                    style: TextStyle(color: Color(0xFFD9D9D9), fontSize: 12),
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _showDownloadDialog(context),
+                  icon: const Icon(Icons.cloud_download_outlined, size: 14),
+                  label: const Text('Open Data Manager'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF26a69a),
+                    minimumSize: const Size(0, 30),
+                    textStyle: const TextStyle(fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          ),
         Expanded(flex: 3, child: ChartWebView(controller: _chartCtrl)),
         const Divider(height: 1),
         if (_lastResult != null || _trades.isNotEmpty)
@@ -446,7 +535,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
           });
         },
       ),
-    );
+    ).then((_) {
+      // After dialog closes, refresh catalog (downloads may have completed).
+      _loadCatalog();
+    });
   }
 }
 
