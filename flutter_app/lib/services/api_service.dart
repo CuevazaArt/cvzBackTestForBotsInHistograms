@@ -44,7 +44,7 @@ class HealthStatus {
 class ApiService {
   final String baseUrl;
 
-  ApiService({this.baseUrl = 'http://127.0.0.1:8000'});
+  ApiService({this.baseUrl = 'http://127.0.0.1:8002'});
 
   Future<HealthStatus> checkHealth() async {
     try {

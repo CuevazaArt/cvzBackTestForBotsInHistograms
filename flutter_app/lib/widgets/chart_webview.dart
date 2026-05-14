@@ -36,7 +36,7 @@ class _ChartWebViewState extends State<ChartWebView> {
 
   Future<void> _initWebview() async {
     await _wv.initialize();
-    await _wv.loadUrl('http://127.0.0.1:8000/static/index.html');
+    await _wv.loadUrl('http://127.0.0.1:8002/static/index.html');
     if (mounted) setState(() => _initialized = true);
   }
 

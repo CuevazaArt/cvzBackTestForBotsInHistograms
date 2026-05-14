@@ -61,9 +61,9 @@ class BacktesterCLI:
 
         if api_key and api_secret:
             self.credentials.save(api_key, api_secret)
-            console.print("[green]✓ Credentials saved (encrypted)[/green]\n")
+            console.print("[green][OK] Credentials saved (encrypted)[/green]\n")
         else:
-            console.print("[red]✗ Invalid credentials[/red]\n")
+            console.print("[red][FAIL] Invalid credentials[/red]\n")
 
     def download_candles(self, symbol: str, timeframe: str, date_from: str, date_to: str) -> None:
         """Download candles from Binance."""
@@ -80,7 +80,7 @@ class BacktesterCLI:
             progress.add_task("Downloading...", total=None)
             count = self.downloader.download(symbol, timeframe, date_from, date_to)
 
-        console.print(f"[green]✓ Downloaded {count} candles[/green]\n")
+        console.print(f"[green][OK] Downloaded {count} candles[/green]\n")
 
     def interactive_backtest(self) -> None:
         """Interactive backtest editor."""
@@ -93,7 +93,7 @@ class BacktesterCLI:
         # Check candles exist
         candles_data = self.downloader.load_candles(symbol, timeframe)
         if not candles_data:
-            console.print(f"[red]✗ No candles for {symbol} {timeframe}[/red]")
+            console.print(f"[red][FAIL] No candles for {symbol} {timeframe}[/red]")
             console.print(f"Download first: python main.py --download {symbol} {timeframe} 2024-01-01 2024-12-31\n")
             return
 
@@ -303,7 +303,7 @@ class BacktesterCLI:
             )
 
         console.print(table)
-        console.print(f"\n[green]✓ Saved {len(results)} trials to {output_file}[/green]\n")
+        console.print(f"\n[green][OK] Saved {len(results)} trials to {output_file}[/green]\n")
 
     def _print_backtest_results(
         self,

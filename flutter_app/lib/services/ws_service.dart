@@ -45,7 +45,7 @@ class WsService {
   WebSocketChannel? _channel;
   StreamController<WsEvent>? _controller;
 
-  WsService({this.wsUrl = 'ws://127.0.0.1:8000/ws'});
+  WsService({this.wsUrl = 'ws://127.0.0.1:8002/ws'});
 
   Stream<WsEvent> get events => _controller!.stream;
   bool get isConnected => _channel != null;

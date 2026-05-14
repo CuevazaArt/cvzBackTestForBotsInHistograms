@@ -1,7 +1,7 @@
 """FastAPI app factory + uvicorn entry point.
 
 Run:
-    uvicorn backtester.api.server:app --host 127.0.0.1 --port 8000 --reload
+    uvicorn backtester.api.server:app --host 127.0.0.1 --port 8002 --reload
 or:
     python -m backtester.api.server
 """
@@ -66,7 +66,7 @@ def main() -> None:
     """Run uvicorn programmatically (used by `python -m backtester.api.server`)."""
     import uvicorn
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run("backtester.api.server:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("backtester.api.server:app", host="127.0.0.1", port=8002, reload=False)
 
 
 if __name__ == "__main__":
