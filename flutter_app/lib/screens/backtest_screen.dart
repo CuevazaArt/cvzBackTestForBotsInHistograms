@@ -4,6 +4,7 @@ import 'package:backtester_shell/services/api_service.dart';
 import 'package:backtester_shell/services/ws_service.dart';
 import 'package:backtester_shell/widgets/chart_webview.dart';
 import 'package:backtester_shell/widgets/results_panel.dart';
+import 'package:backtester_shell/widgets/mini_weight_chart.dart';
 
 /// Main backtest workspace: controls + chart + results.
 class BacktestScreen extends StatefulWidget {
@@ -386,9 +387,9 @@ class _DownloadDialogState extends State<_DownloadDialog> {
     super.dispose();
   }
 
-  Future<void> _download() async {
+  void _download() async {
     setState(() {
-      _loading = true;
+      _loading = true; // Still keep loading to show progress bar, but we can allow triggering again
       _msg = 'Initializing download...';
       _downloadProgress = 0.0;
     });
@@ -541,12 +542,12 @@ class _DownloadDialogState extends State<_DownloadDialog> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               const Text('API Weight (1m)', style: TextStyle(fontSize: 10, color: Color(0xFF787B86))),
-              Row(
-                children: [
-                  Icon(Icons.monitor_heart, size: 14, color: _apiWeight > 1000 ? const Color(0xFFef5350) : const Color(0xFF26a69a)),
-                  const SizedBox(width: 4),
-                  Text('$_apiWeight / 6000', style: TextStyle(fontSize: 12, color: _apiWeight > 1000 ? const Color(0xFFef5350) : const Color(0xFFD9D9D9))),
-                ],
+              const SizedBox(height: 4),
+              MiniWeightChart(
+                currentWeight: _apiWeight,
+                height: 72,
+                width: 220,
+                timeWindow: const Duration(minutes: 5),
               ),
             ],
           ),
@@ -632,10 +633,8 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                     ),
                   const SizedBox(height: 16),
                   FilledButton.icon(
-                    onPressed: _loading ? null : _download,
-                    icon: _loading
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.download, size: 16),
+                    onPressed: _download,
+                    icon: const Icon(Icons.download, size: 16),
                     label: const Text('Start Download'),
                   ),
                   if (_loading && _downloadProgress > 0) ...[

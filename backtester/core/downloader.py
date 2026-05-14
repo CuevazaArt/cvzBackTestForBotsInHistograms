@@ -43,28 +43,29 @@ class BinanceDownloader:
             self.db_path = self.db_path.with_suffix(".duckdb")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.api_key = api_key
+        # Shared connection for thread safety
+        self.conn = duckdb.connect(str(self.db_path))
         self._init_db()
 
     def _init_db(self) -> None:
         """Create candles table if not exists."""
-        with duckdb.connect(str(self.db_path)) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS candles (
-                    symbol VARCHAR,
-                    timeframe VARCHAR,
-                    timestamp_ms BIGINT,
-                    open DOUBLE,
-                    high DOUBLE,
-                    low DOUBLE,
-                    close DOUBLE,
-                    volume DOUBLE,
-                    UNIQUE(symbol, timeframe, timestamp_ms)
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_symbol_tf
-                ON candles (symbol, timeframe)
-            """)
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS candles (
+                symbol VARCHAR,
+                timeframe VARCHAR,
+                timestamp_ms BIGINT,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE,
+                volume DOUBLE,
+                UNIQUE(symbol, timeframe, timestamp_ms)
+            )
+        """)
+        self.conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_symbol_tf
+            ON candles (symbol, timeframe)
+        """)
 
     def download(
         self,
@@ -228,13 +229,12 @@ class BinanceDownloader:
             for k in klines
         ]
 
-        with duckdb.connect(str(self.db_path)) as conn:
-            conn.executemany("""
-                INSERT INTO candles
-                (symbol, timeframe, timestamp_ms, open, high, low, close, volume)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (symbol, timeframe, timestamp_ms) DO NOTHING
-            """, data)
+        self.conn.executemany("""
+            INSERT INTO candles
+            (symbol, timeframe, timestamp_ms, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (symbol, timeframe, timestamp_ms) DO NOTHING
+        """, data)
         return len(klines)
 
     def load_candles(
@@ -254,42 +254,40 @@ class BinanceDownloader:
             end_ms: optional inclusive upper bound (epoch ms)
             limit: optional row cap
         """
-        with duckdb.connect(str(self.db_path)) as conn:
-            clauses = ["symbol = ?", "timeframe = ?"]
-            params: list = [symbol, timeframe]
-            if start_ms is not None:
-                clauses.append("timestamp_ms >= ?")
-                params.append(int(start_ms))
-            if end_ms is not None:
-                clauses.append("timestamp_ms <= ?")
-                params.append(int(end_ms))
-            query = (
-                "SELECT timestamp_ms, open, high, low, close, volume "
-                "FROM candles WHERE " + " AND ".join(clauses) +
-                " ORDER BY timestamp_ms ASC"
-            )
-            if limit:
-                query += " LIMIT ?"
-                params.append(int(limit))
-            
-            df = conn.execute(query, params).df()
-            # Convert pandas DataFrame to list of dicts for backward compatibility
-            return df.to_dict('records')
+        clauses = ["symbol = ?", "timeframe = ?"]
+        params: list = [symbol, timeframe]
+        if start_ms is not None:
+            clauses.append("timestamp_ms >= ?")
+            params.append(int(start_ms))
+        if end_ms is not None:
+            clauses.append("timestamp_ms <= ?")
+            params.append(int(end_ms))
+        query = (
+            "SELECT timestamp_ms, open, high, low, close, volume "
+            "FROM candles WHERE " + " AND ".join(clauses) +
+            " ORDER BY timestamp_ms ASC"
+        )
+        if limit:
+            query += " LIMIT ?"
+            params.append(int(limit))
+        
+        df = self.conn.execute(query, params).df()
+        # Convert pandas DataFrame to list of dicts for backward compatibility
+        return df.to_dict('records')
 
     def list_symbols(self) -> list[dict]:
         """List distinct (symbol, timeframe) pairs available with row counts."""
-        with duckdb.connect(str(self.db_path)) as conn:
-            df = conn.execute(
-                "SELECT symbol, timeframe, COUNT(*) AS n, "
-                "MIN(timestamp_ms) AS first_ms, MAX(timestamp_ms) AS last_ms "
-                "FROM candles GROUP BY symbol, timeframe ORDER BY symbol, timeframe"
-            ).df()
-            
-            return [
-                {"symbol": r['symbol'], "timeframe": r['timeframe'], "candles": r['n'],
-                 "first_ms": r['first_ms'], "last_ms": r['last_ms']}
-                for _, r in df.iterrows()
-            ]
+        df = self.conn.execute(
+            "SELECT symbol, timeframe, COUNT(*) AS n, "
+            "MIN(timestamp_ms) AS first_ms, MAX(timestamp_ms) AS last_ms "
+            "FROM candles GROUP BY symbol, timeframe ORDER BY symbol, timeframe"
+        ).df()
+        
+        return [
+            {"symbol": r['symbol'], "timeframe": r['timeframe'], "candles": r['n'],
+             "first_ms": r['first_ms'], "last_ms": r['last_ms']}
+            for _, r in df.iterrows()
+        ]
 
     def _parse_date(self, date_str: str) -> int:
         """Convert "2024-01-01" to milliseconds since epoch."""

@@ -126,7 +126,7 @@ class ApiService {
   }
 
   Future<List<SymbolEntry>> listSymbols() async {
-    final res = await http.get(Uri.parse('$baseUrl/api/candles'));
+    final res = await http.get(Uri.parse('$baseUrl/api/candles/symbols'));
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final List<dynamic> data = jsonDecode(res.body) as List<dynamic>;
     return data.map((e) => SymbolEntry.fromJson(e as Map<String, dynamic>)).toList();
