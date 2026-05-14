@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:backtester_shell/services/api_service.dart';
 import 'package:backtester_shell/screens/backtest_screen.dart';
+import 'package:backtester_shell/screens/optimization_screen.dart';
 import 'package:backtester_shell/widgets/status_dot.dart';
 
 /// Main scaffold — sidebar nav + content area.
@@ -46,9 +47,11 @@ class _HomeScreenState extends State<HomeScreen> {
           const VerticalDivider(width: 1),
           // ── Content ──────────────────────────────────────────
           Expanded(
-            child: _selectedIndex == 0
-                ? BacktestScreen(apiService: widget.apiService)
-                : const _PlaceholderPage(label: 'Coming soon'),
+            child: switch (_selectedIndex) {
+              0 => BacktestScreen(apiService: widget.apiService),
+              1 => OptimizationScreen(apiService: widget.apiService),
+              _ => const _PlaceholderPage(label: 'Settings coming soon'),
+            },
           ),
         ],
       ),

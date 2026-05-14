@@ -35,6 +35,45 @@ class BotInfo {
       BotInfo(name: j['name'] as String, description: j['description'] as String?);
 }
 
+class ParamSpec {
+  final String type;
+  final dynamic defaultValue;
+  final double? min;
+  final double? max;
+  final double? step;
+
+  const ParamSpec({
+    required this.type,
+    this.defaultValue,
+    this.min,
+    this.max,
+    this.step,
+  });
+
+  factory ParamSpec.fromJson(Map<String, dynamic> j) => ParamSpec(
+        type: j['type'] as String,
+        defaultValue: j['default'],
+        min: (j['min'] as num?)?.toDouble(),
+        max: (j['max'] as num?)?.toDouble(),
+        step: (j['step'] as num?)?.toDouble(),
+      );
+}
+
+class BotParamsResponse {
+  final String name;
+  final Map<String, ParamSpec> params;
+
+  const BotParamsResponse({required this.name, required this.params});
+
+  factory BotParamsResponse.fromJson(Map<String, dynamic> j) {
+    final Map<String, dynamic> rawParams = j['params'] ?? {};
+    return BotParamsResponse(
+      name: j['name'] as String,
+      params: rawParams.map((k, v) => MapEntry(k, ParamSpec.fromJson(v))),
+    );
+  }
+}
+
 class HealthStatus {
   final bool ok;
   const HealthStatus(this.ok);
@@ -93,6 +132,12 @@ class ApiService {
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final List<dynamic> data = jsonDecode(res.body) as List<dynamic>;
     return data.map((e) => BotInfo.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<BotParamsResponse> getBotParams(String botName) async {
+    final res = await http.get(Uri.parse('$baseUrl/api/bots/$botName/params'));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    return BotParamsResponse.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   Future<Map<String, dynamic>> downloadCandles({
