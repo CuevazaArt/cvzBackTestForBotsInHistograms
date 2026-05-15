@@ -12,8 +12,9 @@
 
   let _chart, _series;
 
-  function _toTime(ms) {
-    return Math.floor(ms / 1000);
+  // Input is already epoch-seconds (API converts ms→s before sending).
+  function _toTime(s) {
+    return Math.trunc(s);
   }
 
   /** Compute running drawdown pct from equity array. */

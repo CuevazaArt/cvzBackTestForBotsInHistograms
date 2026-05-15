@@ -34,7 +34,7 @@ class TradesTab extends StatelessWidget {
             ...trades.map((t) => _Row(
                   cells: [
                     _fmtMs(t.entryTime),
-                    t.exitTime != null ? _fmtMs(t.exitTime!) : '—',
+                    t.exitTime != null ? _fmtMs(t.exitTime!) : '(open)',
                     '\$${t.entryPrice.toStringAsFixed(2)}',
                     '\$${t.exitPrice.toStringAsFixed(2)}',
                     t.qty.toStringAsFixed(4),

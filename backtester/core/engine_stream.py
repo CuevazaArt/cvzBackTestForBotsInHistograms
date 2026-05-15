@@ -170,10 +170,43 @@ class StreamingEngine(BacktestEngine):
             # Force one last set of events so the UI ends consistent
             self._emit_progress(len(candles))
             self._emit_equity(candles[-1].timestamp_ms, result.final_equity)
+
+            # Final result — includes full equity curve and trades so the
+            # browser/Flutter can populate all charts without a separate HTTP call.
+            equity_curve = [
+                {"time": candles[i].timestamp_ms // 1000, "value": result.equity_curve[i]}
+                for i in range(min(len(result.equity_curve), len(candles)))
+            ]
+            trades_out = [
+                {
+                    "entry_time":  t.entry_time // 1000,
+                    "exit_time":   t.exit_time // 1000 if t.exit_time else None,
+                    "entry_price": t.entry_price,
+                    "exit_price":  t.exit_price,
+                    "qty":         t.qty,
+                    "pnl":         t.pnl,
+                    "pnl_pct":     t.pnl_pct,
+                    "fee_usdt":    t.fee_usdt,
+                    "reason":      t.reason or None,
+                }
+                for t in result.trades
+            ]
+            candles_out = [
+                {
+                    "time":   c.timestamp_ms // 1000,
+                    "open":   c.open, "high": c.high,
+                    "low":    c.low,  "close": c.close,
+                    "volume": c.volume,
+                }
+                for c in candles
+            ]
             self._emit("result", {
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "summary": result.summary(),
+                "symbol":       symbol,
+                "timeframe":    timeframe,
+                "summary":      result.summary(),
+                "candles":      candles_out,
+                "trades":       trades_out,
+                "equity_curve": equity_curve,
             })
 
         except Exception as exc:

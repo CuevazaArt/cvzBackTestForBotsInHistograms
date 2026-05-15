@@ -31,7 +31,6 @@ class ChartWebViewState extends State<ChartWebView> {
           onWebViewCreated: (ctrl) {
             _ctrl = ctrl;
 
-            // Flutter → JS handlers
             ctrl.addJavaScriptHandler(
               handlerName: 'flutter_log',
               callback: (args) {
@@ -39,72 +38,64 @@ class ChartWebViewState extends State<ChartWebView> {
                 return {'ok': true};
               },
             );
+            // Bridge signals page ready via either handler name
+            ctrl.addJavaScriptHandler(
+              handlerName: 'onReady',
+              callback: (_) { _onReady(); return {'ok': true}; },
+            );
             ctrl.addJavaScriptHandler(
               handlerName: 'onPageReady',
-              callback: (_) {
-                setState(() => _ready = true);
-                _connectWS();
-                return {'ok': true};
-              },
+              callback: (_) { _onReady(); return {'ok': true}; },
             );
             ctrl.addJavaScriptHandler(
               handlerName: 'onProgress',
               callback: (args) {
-                final pct = (args.firstOrNull as Map?)?['percent'] ?? 0;
-                debugPrint('[progress] $pct%');
+                debugPrint('[progress] ${(args.firstOrNull as Map?)?['percent']}%');
                 return {'ok': true};
               },
             );
-            ctrl.addJavaScriptHandler(
-              handlerName: 'onResult',
-              callback: (_) => {'ok': true},
-            );
+            ctrl.addJavaScriptHandler(handlerName: 'onResult', callback: (_) => {'ok': true});
             ctrl.addJavaScriptHandler(
               handlerName: 'onError',
-              callback: (args) {
-                debugPrint('[wserror] ${args.firstOrNull}');
-                return {'ok': true};
-              },
+              callback: (args) { debugPrint('[ws-error] ${args.firstOrNull}'); return {'ok': true}; },
             );
           },
-          onLoadStop: (ctrl, url) async {
-            // Fallback: connect WS if onPageReady wasn't fired
-            if (!_ready) _connectWS();
-          },
+          onLoadStop: (ctrl, url) { if (!_ready) _onReady(); },
         ),
 
-        // Loading overlay
         if (!_ready)
           const Center(
-            child: SizedBox(
-                width: 24,
-                height: 24,
+            child: SizedBox(width: 24, height: 24,
                 child: CircularProgressIndicator(strokeWidth: 2)),
           ),
       ],
     );
   }
 
-  void _connectWS() {
+  void _onReady() {
+    if (!mounted) return;
+    setState(() => _ready = true);
     _ctrl?.evaluateJavascript(
-        source: "if(window.initBridge) initBridge('ws://127.0.0.1:8000');");
+        source: "if(window.Bridge) Bridge.connectWS('ws://127.0.0.1:8000');");
   }
 
-  /// Call after a successful HTTP backtest run — pushes result to charts.
+  /// Push a completed HTTP backtest result into the charts.
   void loadResult(BacktestResult result) {
-    final json = jsonEncode({
+    final payload = jsonEncode({
       'bot':          result.bot,
       'summary':      _summaryJson(result.summary),
-      'trades':       result.trades.map(_tradeJson).toList(),
-      'equity_curve': result.equityCurve.map((e) => {'time': e.time, 'value': e.value}).toList(),
+      'candles':      result.candles.map((c) => c.toJson()).toList(),
+      'trades':       result.trades.map((t) => t.toJson()).toList(),
+      'equity_curve': result.equityCurve.map((e) => e.toJson()).toList(),
     });
-    _ctrl?.evaluateJavascript(source: "Bridge.loadResult($json)");
+    _ctrl?.evaluateJavascript(source: "Bridge.loadResult($payload)");
   }
 
-  /// Update the topbar labels shown inside the WebView.
+  /// Update the topbar labels inside the WebView.
   void setTopbar(String symbol, String tf, String bot, String dateRange) {
+    String esc(String s) => s.replaceAll("'", r"\'");
     _ctrl?.evaluateJavascript(
-        source: "if(window.setTopbar) setTopbar('$symbol','$tf','$bot','$dateRange')");
+        source: "if(window.setTopbar) setTopbar('${esc(symbol)}','${esc(tf)}','${esc(bot)}','${esc(dateRange)}')");
   }
 
   Map<String, dynamic> _summaryJson(BacktestSummary s) => {
@@ -116,16 +107,11 @@ class ChartWebViewState extends State<ChartWebView> {
         'win_rate_pct':      s.winRatePct,
         'profit_factor':     s.profitFactor,
         'total_fees_usdt':   s.totalFeesUsdt,
-      };
-
-  Map<String, dynamic> _tradeJson(TradeResult t) => {
-        'entry_time':  t.entryTime,
-        'exit_time':   t.exitTime,
-        'entry_price': t.entryPrice,
-        'exit_price':  t.exitPrice,
-        'qty':         t.qty,
-        'pnl':         t.pnl,
-        'pnl_pct':     t.pnlPct,
-        'reason':      t.reason,
+        'avg_win_usdt':      s.avgWinUsdt,
+        'avg_loss_usdt':     s.avgLossUsdt,
+        'initial_equity':    s.initialEquity,
+        'final_equity':      s.finalEquity,
+        'peak_equity':       s.peakEquity,
+        'rejected_orders':   s.rejectedOrders,
       };
 }

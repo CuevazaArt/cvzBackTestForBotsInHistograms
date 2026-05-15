@@ -43,4 +43,11 @@ def run_backtest(
 
     engine = BacktestEngine(cfg)
     result = engine.run(bot, candles, symbol=req.symbol.upper(), timeframe=req.timeframe)
-    return result_to_response(req.bot, req.params, result, candles)
+    response = result_to_response(req.bot, req.params, result, candles)
+    # Sanitize summary: JSON spec forbids Infinity / NaN
+    summary = response.summary
+    response.summary = {
+        k: (None if isinstance(v, float) and (v != v or abs(v) == float("inf")) else v)
+        for k, v in summary.items()
+    }
+    return response

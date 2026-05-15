@@ -19,8 +19,10 @@
   let _chart, _candleSeries, _volSeries;
   const _markers = [];
 
-  function _toTime(ms) {
-    return Math.floor(ms / 1000);
+  // Input is already epoch-seconds (API converts ms→s before sending).
+  // LW Charts v5 expects seconds; no further division needed.
+  function _toTime(s) {
+    return Math.trunc(s);
   }
 
   function init(containerId) {
