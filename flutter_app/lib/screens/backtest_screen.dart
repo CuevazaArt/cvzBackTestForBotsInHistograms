@@ -11,6 +11,7 @@ import 'package:backtester_shell/widgets/chart_webview.dart';
 import 'package:backtester_shell/widgets/results_panel.dart';
 import 'package:backtester_shell/widgets/trades_table.dart';
 import 'package:backtester_shell/widgets/mini_weight_chart.dart';
+import 'package:backtester_shell/widgets/validation_error_dialog.dart';
 
 /// Main backtest workspace: controls + chart + results.
 class BacktestScreen extends StatefulWidget {
@@ -1369,6 +1370,9 @@ class _DownloadDialogState extends State<_DownloadDialog> {
           }
         });
       }
+    } on ApiValidationError catch (e) {
+      setState(() { _loading = false; });
+      if (mounted) await ValidationErrorDialog.show(context, e);
     } catch (e) {
       setState(() {
         _loading = false;
