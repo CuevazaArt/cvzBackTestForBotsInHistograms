@@ -170,6 +170,11 @@ class StreamingEngine(BacktestEngine):
                 for bi, (bot, portfolio, bot_id) in enumerate(
                     zip(bots, portfolios, names)
                 ):
+                    # Update MFE/MAE BEFORE the bot runs so positions that
+                    # close on this candle capture its full high/low range.
+                    for pos in portfolio.positions:
+                        pos.update_excursion(candle.high, candle.low)
+
                     try:
                         orders = bot.on_candle(candle, portfolio)
                     except Exception as exc:  # noqa: BLE001
@@ -193,10 +198,6 @@ class StreamingEngine(BacktestEngine):
                     for t in new_trades:
                         self._emit_trade(t)
                     prev_closed[bi] = len(portfolio.closed_trades)
-
-                    # Update MFE/MAE trackers for any positions still open
-                    for pos in portfolio.positions:
-                        pos.update_excursion(candle.high, candle.low)
 
                 # ── 2. Global equity = sum of all portfolios ──────
                 total_equity = sum(p.total_equity(candle.close) for p in portfolios)

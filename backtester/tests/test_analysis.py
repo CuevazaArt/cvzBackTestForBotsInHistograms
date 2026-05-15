@@ -75,6 +75,56 @@ def test_engine_records_mfe_mae_on_closed_trades():
         assert t.duration_bars >= 0
 
 
+def test_mfe_mae_includes_exit_candle_range():
+    """Regression: MFE/MAE must capture the high/low of the exit candle itself.
+
+    Build 3 candles where the exit candle has a clearly wider range than the
+    entry candle; the trade's MFE/MAE should reflect that wider range.
+    """
+    class _BuyHoldSell:
+        """Buy on first candle, hold through middle, sell on the third."""
+        def __init__(self):
+            self.n = 0
+        def on_candle(self, candle, portfolio):
+            self.n += 1
+            if self.n == 1:
+                return [{"side": "BUY", "qty": Decimal("1")}]
+            if self.n == 3 and portfolio.positions:
+                return [{"side": "SELL", "qty": Decimal("1")}]
+            return []
+
+    # Entry candle: tight range around 100. Mid candle: wide rally to 120,
+    # dip to 80. Exit candle: even wider — top 130, bottom 70. The trade's
+    # MFE must reflect 130, MAE must reflect 70.
+    candles = [
+        Candle(
+            timestamp_ms=0, open=Decimal("100"), high=Decimal("101"),
+            low=Decimal("99"), close=Decimal("100"), volume=Decimal("1"),
+        ),
+        Candle(
+            timestamp_ms=3_600_000, open=Decimal("100"), high=Decimal("120"),
+            low=Decimal("80"), close=Decimal("100"), volume=Decimal("1"),
+        ),
+        Candle(
+            timestamp_ms=7_200_000, open=Decimal("100"), high=Decimal("130"),
+            low=Decimal("70"), close=Decimal("100"), volume=Decimal("1"),
+        ),
+    ]
+    engine = BacktestEngine(BacktestConfig(
+        initial_cash=Decimal("10000"),
+        taker_fee_pct=Decimal("0"),
+        slippage_pct=Decimal("0"),
+    ))
+    result = engine.run([_BuyHoldSell()], candles)
+    assert len(result.trades) == 1
+    t = result.trades[0]
+    # Entry was at candle[0].close = 100. MFE should reach at least the third
+    # candle's high (130) → +30%. MAE should reach the third candle's low
+    # (70) → -30%. Allow small tolerance for slippage rounding.
+    assert float(t.mfe_pct) >= 29.0, f"MFE must include exit candle high, got {t.mfe_pct}"
+    assert float(t.mae_pct) <= -29.0, f"MAE must include exit candle low, got {t.mae_pct}"
+
+
 def test_metrics_include_advanced_fields():
     """compute_metrics should expose Phase 3 advanced metrics."""
     from backtester.core.metrics import compute_metrics
@@ -213,6 +263,31 @@ def test_monte_carlo_empty_trades_returns_zeros():
     result = run_monte_carlo([], MonteCarloConfig(trials=100))
     assert result.n_trials == 0
     assert result.return_pct.mean == 0.0
+
+
+def test_monte_carlo_configurable_ruin_threshold():
+    """ruin_drawdown_pct controls what counts as 'ruin' for prob_ruin."""
+    # Trades that produce a ~25% drawdown
+    pnls = [-2500.0] + [50.0] * 50
+    aggressive = run_monte_carlo(
+        pnls,
+        MonteCarloConfig(trials=200, seed=0, ruin_drawdown_pct=75.0),
+    )
+    conservative = run_monte_carlo(
+        pnls,
+        MonteCarloConfig(trials=200, seed=0, ruin_drawdown_pct=20.0),
+    )
+    # The same drawdown is "ruin" by the conservative threshold but not the
+    # aggressive one → conservative.prob_ruin >= aggressive.prob_ruin
+    assert conservative.prob_ruin >= aggressive.prob_ruin
+
+
+def test_monte_carlo_rejects_invalid_ruin_threshold():
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        MonteCarloConfig(trials=100, ruin_drawdown_pct=0.0)
+    with _pytest.raises(ValueError):
+        MonteCarloConfig(trials=100, ruin_drawdown_pct=150.0)
 
 
 # ── Robustness Score ─────────────────────────────────────────────────

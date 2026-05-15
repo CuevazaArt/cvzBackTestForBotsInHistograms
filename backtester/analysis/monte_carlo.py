@@ -39,12 +39,19 @@ class MonteCarloConfig:
     method: str = "shuffle"           # "shuffle" or "bootstrap"
     seed: Optional[int] = None        # for reproducibility
     initial_equity: float = 10_000.0
+    # Drawdown % that counts as "ruin" when computing prob_ruin. 50% by default
+    # but conservative traders might set 25% (institutional limit) or aggressive
+    # ones 75%. Pure mathematical ruin would require 100% but that almost never
+    # happens in shuffled-trade Monte Carlo, so we use a practical threshold.
+    ruin_drawdown_pct: float = 50.0
 
     def __post_init__(self) -> None:
         if self.trials < 10:
             raise ValueError("trials must be at least 10 (10_000 recommended)")
         if self.method not in ("shuffle", "bootstrap"):
             raise ValueError("method must be 'shuffle' or 'bootstrap'")
+        if not 0 < self.ruin_drawdown_pct <= 100:
+            raise ValueError("ruin_drawdown_pct must be in (0, 100]")
 
 
 @dataclass
@@ -89,6 +96,7 @@ class MonteCarloResult:
                 "method": self.config.method,
                 "seed": self.config.seed,
                 "initial_equity": self.config.initial_equity,
+                "ruin_drawdown_pct": self.config.ruin_drawdown_pct,
             },
             "n_trials": self.n_trials,
             "n_trades": self.n_trades,
@@ -221,7 +229,7 @@ def run_monte_carlo(
     streak_perc = _percentiles(streaks)
 
     prob_profit = sum(1 for r in returns if r > 0) / len(returns)
-    prob_ruin = sum(1 for d in drawdowns if d > 50.0) / len(drawdowns)
+    prob_ruin = sum(1 for d in drawdowns if d > config.ruin_drawdown_pct) / len(drawdowns)
     # 95% VaR: the worst loss we'd expect with 95% confidence
     var_95 = round(-ret_perc.p5, 4)
     # Conditional VaR (Expected Shortfall): mean return in the worst 5%

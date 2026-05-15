@@ -74,6 +74,21 @@ def walk_forward_run(
     if bot_cls is None:
         raise HTTPException(status_code=404, detail=f"Unknown bot '{req.bot}'")
 
+    # Validate that every param_range is exactly [low, high] with low < high.
+    # Without this guard, an invalid input would raise IndexError or
+    # produce a bogus Optuna search space deep inside the run.
+    for name, rng in req.param_ranges.items():
+        if not isinstance(rng, list) or len(rng) != 2:
+            raise HTTPException(
+                status_code=422,
+                detail=f"param_ranges['{name}'] must be [low, high], got {rng}",
+            )
+        if rng[0] >= rng[1]:
+            raise HTTPException(
+                status_code=422,
+                detail=f"param_ranges['{name}']: low ({rng[0]}) must be < high ({rng[1]})",
+            )
+
     rows = ctx.downloader.load_candles(
         req.symbol.upper(), req.timeframe,
         start_ms=req.start_ms, end_ms=req.end_ms,
@@ -158,6 +173,8 @@ class MonteCarloRequest(BaseModel):
     method: str = "shuffle"   # "shuffle" | "bootstrap"
     seed: int | None = None
     initial_equity: float = 10_000.0
+    ruin_drawdown_pct: float = Field(50.0, gt=0, le=100,
+        description="Drawdown % considered 'ruin' for prob_ruin metric")
 
 
 @router.post("/monte-carlo")
@@ -196,6 +213,7 @@ def monte_carlo_run(
         method=req.method,
         seed=req.seed,
         initial_equity=req.initial_equity,
+        ruin_drawdown_pct=req.ruin_drawdown_pct,
     )
     result = run_monte_carlo(pnls, cfg)
     return result.to_dict()

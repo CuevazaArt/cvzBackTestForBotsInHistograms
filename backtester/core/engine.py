@@ -262,6 +262,13 @@ class BacktestEngine:
 
         for candle in candles:
             for bot, portfolio, bot_id in zip(bots, portfolios, names):
+                # 1. Update MFE/MAE trackers BEFORE order processing so closing
+                #    trades capture this candle's full range (the exit candle's
+                #    high/low must be in the excursion stats).
+                for pos in portfolio.positions:
+                    pos.update_excursion(candle.high, candle.low)
+
+                # 2. Let the bot see this candle and emit orders.
                 try:
                     orders = bot.on_candle(candle, portfolio)
                 except Exception:  # noqa: BLE001
@@ -275,10 +282,6 @@ class BacktestEngine:
                         self._process_buy(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
                     elif side == "SELL":
                         self._process_sell(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
-
-                # Update MFE/MAE trackers for all open positions in this bot
-                for pos in portfolio.positions:
-                    pos.update_excursion(candle.high, candle.low)
 
             # Global equity = sum of all bot portfolios
             total_equity = sum(p.total_equity(candle.close) for p in portfolios)
@@ -323,13 +326,17 @@ class BacktestEngine:
             return
 
         portfolio.cash -= cost + fee
-        portfolio.positions.append(Position(
+        pos = Position(
             entry_price=fill_price,
             qty=qty,
             entry_idx=len(result.equity_curve),
             entry_time=candle.timestamp_ms,
             bot_id=bot_id,
-        ))
+        )
+        # Seed MFE/MAE with the entry candle's range so a same-candle exit
+        # still reports the full intra-bar excursion.
+        pos.update_excursion(candle.high, candle.low)
+        portfolio.positions.append(pos)
 
     def _process_sell(
         self,
