@@ -12,5 +12,11 @@ void main() {
 
     await tester.pumpWidget(const BacktesterApp());
     expect(find.byType(MaterialApp), findsOneWidget);
+
+    // Unmount so HomeScreen.dispose() runs and the WsService cancels its
+    // reconnect/heartbeat timers — otherwise the test framework flags
+    // pending timers as a failure.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 50));
   });
 }
