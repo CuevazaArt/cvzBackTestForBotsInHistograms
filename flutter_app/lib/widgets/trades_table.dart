@@ -300,9 +300,84 @@ class _TradesTableState extends State<TradesTable> {
               width: 90, align: TextAlign.right, color: pnlColor, weight: FontWeight.w600),
           cell('${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct.toStringAsFixed(2)}%',
               width: 70, align: TextAlign.right, color: pnlColor),
-          cell(t.reason, width: 110, color: const Color(0xFF787B86)),
+          SizedBox(
+            width: 110,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              child: _ReasonBadge(reason: t.reason),
+            ),
+          ),
         ],
       ),
     );
   }
+}
+
+
+/// Visual badge for a trade reason. Colour-codes order-trigger types
+/// (STOP_LOSS / TAKE_PROFIT / TRAILING_STOP) so a glance reveals exit quality.
+class _ReasonBadge extends StatelessWidget {
+  final String reason;
+  const _ReasonBadge({required this.reason});
+
+  @override
+  Widget build(BuildContext context) {
+    final cfg = _colorFor(reason);
+    if (cfg == null) {
+      return Text(
+        reason,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Color(0xFF787B86), fontSize: 11),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: cfg.bg,
+        border: Border.all(color: cfg.border, width: 0.8),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        reason,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: cfg.text,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+
+  static _ReasonStyle? _colorFor(String reason) {
+    switch (reason) {
+      case 'STOP_LOSS':
+        return const _ReasonStyle(
+          bg: Color(0x33ef5350), border: Color(0xFFef5350), text: Color(0xFFef5350));
+      case 'TAKE_PROFIT':
+        return const _ReasonStyle(
+          bg: Color(0x3326a69a), border: Color(0xFF26a69a), text: Color(0xFF26a69a));
+      case 'TRAILING_STOP':
+        return const _ReasonStyle(
+          bg: Color(0x33D4AF37), border: Color(0xFFD4AF37), text: Color(0xFFD4AF37));
+      case 'LIMIT':
+        return const _ReasonStyle(
+          bg: Color(0x335B9BD5), border: Color(0xFF5B9BD5), text: Color(0xFF5B9BD5));
+      case 'MARKET':
+      case 'BUY':
+      case 'SELL':
+        return null; // no badge for plain market trades
+      default:
+        return null;
+    }
+  }
+}
+
+
+class _ReasonStyle {
+  final Color bg;
+  final Color border;
+  final Color text;
+  const _ReasonStyle({required this.bg, required this.border, required this.text});
 }
