@@ -62,6 +62,23 @@ flutter run -d windows
 - 🔐 Credenciales encriptadas con Fernet (local)
 - 🖥️ Interfaz nativa Flutter + gráficos profesionales TradingView
 
+## Phase 2 Deliverables (2026-05-15)
+
+Completadas 7 características en dos pistas paralelas (Backend A / Frontend B):
+
+### Backend (Track A)
+- **A1 — IndicatorCache** (PR #2): LRU cache con stats para add_indicators() reduciendo cálculos redundantes en barridos de parámetros
+- **A2 — Resumable Downloads** (PR #5): Descargas parciales reanudables con progress callbacks y checkpoints de last_timestamp_ms
+- **A3 — Result Persistence** (PR #7): SQLite result store para backtests completados con GET/DELETE/LIST endpoints y run_id tracking
+
+### Frontend (Track B)
+- **B1 — OptimizationHeatmap** (PR #3): Widget 2D interactivo para sweep de parámetros con cell tap detection y leaderboard sync
+- **B2 — ValidationErrorDialog** (PR #6): Modal estructurado para errores HTTP 422 con field-level Pydantic messages
+- **B3 — Presets UI** (PR #8): Dropdown toolbar con lazy loading, save/load de configuraciones, y autorefresh
+- **B5 — fakeAsync Migration** (PR #4): Flutter tests con fake async + Timer cancellation, flutter promovido a ci-gate
+
+**Status**: ✅ Todas las PRs mergeadas a main, CI verde en todos los checks
+
 ## Repositorio
 
 GitHub: https://github.com/CuevazaArt/cvzBackTestForBotsInHistograms
