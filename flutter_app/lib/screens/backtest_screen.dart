@@ -15,11 +15,13 @@ import 'package:backtester_shell/widgets/mini_weight_chart.dart';
 /// Main backtest workspace: controls + chart + results.
 class BacktestScreen extends StatefulWidget {
   final ApiService apiService;
+  final WsService wsService;
   final OptimizationResult? initialApply;
   final VoidCallback? onApplyConsumed;
   const BacktestScreen({
     super.key,
     required this.apiService,
+    required this.wsService,
     this.initialApply,
     this.onApplyConsumed,
   });
@@ -29,7 +31,7 @@ class BacktestScreen extends StatefulWidget {
 }
 
 class _BacktestScreenState extends State<BacktestScreen> {
-  final WsService _ws = WsService();
+  WsService get _ws => widget.wsService;
   final PresetsService _presets = PresetsService();
   final ChartWebViewController _chartCtrl = ChartWebViewController();
 
@@ -62,7 +64,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
   void initState() {
     super.initState();
     _loadCatalog();
-    _connectWs();
+    _wsSub = _ws.events.listen(_onWsEvent);
     if (widget.initialApply != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _consumeInitialApply(widget.initialApply!));
     }
@@ -129,18 +131,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
     } catch (_) {}
   }
 
-  Future<void> _connectWs() async {
-    try {
-      await _ws.connect();
-      _wsSub = _ws.events.listen(
-        _onWsEvent,
-        onError: (e) {
-          if (mounted) setState(() => _wsError = e.toString());
-        },
-      );
-    } catch (e) {
-      if (mounted) setState(() => _wsError = e.toString());
-    }
+  @override
+  void dispose() {
+    _wsSub?.cancel();
+    super.dispose();
   }
 
   void _onWsEvent(WsEvent ev) {
@@ -222,8 +216,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
   void _runBacktest() {
     if (_selectedSymbol == null || _selectedBots.isEmpty || _running) return;
     if (!_ws.isConnected) {
-      setState(() => _wsError = 'Not connected to backend. Reconnecting…');
-      _connectWs();
+      setState(() => _wsError = 'Not connected to backend.');
       return;
     }
     setState(() {
@@ -424,12 +417,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
     ));
   }
 
-  @override
-  void dispose() {
-    _wsSub?.cancel();
-    _ws.disconnect();
-    super.dispose();
-  }
+  // dispose is handled near initState
 
   @override
   Widget build(BuildContext context) {
@@ -477,7 +465,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onDownload: () => _showDownloadDialog(context),
           onSavePreset: _savePresetDialog,
           onLoadPreset: _loadPresetDialog,
-          onReconnect: _connectWs,
+          onReconnect: _ws.connect,
         ),
         if (_symbols.isEmpty)
           Container(

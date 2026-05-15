@@ -3,6 +3,7 @@ import 'package:backtester_shell/services/api_service.dart';
 import 'package:backtester_shell/screens/backtest_screen.dart';
 import 'package:backtester_shell/screens/optimization_screen.dart';
 import 'package:backtester_shell/screens/settings_screen.dart';
+import 'package:backtester_shell/services/ws_service.dart';
 import 'package:backtester_shell/widgets/status_dot.dart';
 
 /// Main scaffold — sidebar nav + content area.
@@ -26,10 +27,20 @@ class _HomeScreenState extends State<HomeScreen> {
   // GlobalKey lets us trigger Data Manager from elsewhere if needed.
   final GlobalKey<State<BacktestScreen>> _backtestKey = GlobalKey();
 
+  late final WsService _wsService;
+
   @override
   void initState() {
     super.initState();
+    _wsService = WsService();
+    _wsService.connect();
     _pollHealth();
+  }
+
+  @override
+  void dispose() {
+    _wsService.disconnect();
+    super.dispose();
   }
 
   Future<void> _pollHealth() async {
@@ -64,11 +75,13 @@ class _HomeScreenState extends State<HomeScreen> {
               0 => BacktestScreen(
                   key: _backtestKey,
                   apiService: widget.apiService,
+                  wsService: _wsService,
                   initialApply: _pendingApply,
                   onApplyConsumed: () => setState(() => _pendingApply = null),
                 ),
               1 => OptimizationScreen(
                   apiService: widget.apiService,
+                  wsService: _wsService,
                   onApplyBest: _onApplyBest,
                 ),
               _ => SettingsScreen(apiService: widget.apiService),

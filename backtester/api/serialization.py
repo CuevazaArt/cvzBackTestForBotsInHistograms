@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from decimal import Decimal
 from typing import Any
 
@@ -13,6 +14,28 @@ from backtester.api.schemas import (
 )
 from backtester.core.engine import BacktestResult, Trade
 from backtester.core.metrics import compute_metrics
+
+
+def unique_bot_names(bots: list) -> list[str]:
+    """Return stable unique names; appends _N suffix on duplicates.
+
+    Accepts both BotRunSpec instances and plain dicts so it works from
+    both the REST route (Pydantic models) and the WS handler.
+    """
+    def _name(b) -> str:
+        return b["name"] if isinstance(b, dict) else b.name
+
+    counts: Counter = Counter(_name(b) for b in bots)
+    seen: dict[str, int] = {}
+    names: list[str] = []
+    for b in bots:
+        n = _name(b)
+        if counts[n] > 1:
+            names.append(f"{n}_{seen.get(n, 0)}")
+            seen[n] = seen.get(n, 0) + 1
+        else:
+            names.append(n)
+    return names
 
 
 def ms_to_s(ms: int) -> int:
@@ -70,6 +93,7 @@ def result_to_response(
         summary=compute_metrics(result),
         trades=[trade_to_dto(t) for t in result.trades],
         equity_curve=equity_curve_dto(result, candles),
+        per_bot=result.per_bot,
     )
 
 

@@ -183,6 +183,7 @@ class BacktestResponse(BaseModel):
     summary: dict[str, Any]
     trades: list[TradeDTO]
     equity_curve: list[EquityPoint]
+    per_bot: dict[str, Any] = Field(default_factory=dict)
 
 
 # ───────────────────────── Experiments ─────────────────────────

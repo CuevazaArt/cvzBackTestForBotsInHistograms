@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from backtester.api.deps import AppContext, get_ctx
 from backtester.api.schemas import BacktestRequest, BacktestResponse
-from backtester.api.serialization import result_to_response
+from backtester.api.serialization import result_to_response, unique_bot_names
 from backtester.core.engine import BacktestConfig, BacktestEngine, Candle
 
 router = APIRouter(tags=["backtest"])
@@ -48,6 +48,11 @@ def run_backtest(
         slippage_pct=Decimal(str(req.slippage_pct)),
     )
 
+    bot_names = unique_bot_names(req.bots)
     engine = BacktestEngine(cfg)
-    result = engine.run(bots_instances, candles, symbol=req.symbol.upper(), timeframe=req.timeframe)
+    result = engine.run(
+        bots_instances, candles,
+        symbol=req.symbol.upper(), timeframe=req.timeframe,
+        bot_names=bot_names,
+    )
     return result_to_response([b.model_dump() for b in req.bots], result, candles)

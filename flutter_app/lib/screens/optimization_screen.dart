@@ -21,8 +21,9 @@ class OptimizationResult {
 
 class OptimizationScreen extends StatefulWidget {
   final ApiService apiService;
+  final WsService wsService;
   final ValueChanged<OptimizationResult>? onApplyBest;
-  const OptimizationScreen({super.key, required this.apiService, this.onApplyBest});
+  const OptimizationScreen({super.key, required this.apiService, required this.wsService, this.onApplyBest});
 
   @override
   State<OptimizationScreen> createState() => _OptimizationScreenState();
@@ -55,21 +56,14 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   int _optunaTrials = 100;
   String _objective = 'total_return_pct';
 
-  late final WsService _ws;
+  WsService get _ws => widget.wsService;
   StreamSubscription<WsEvent>? _wsSub;
 
   @override
   void initState() {
     super.initState();
-    _ws = WsService();
-    _connectWs();
-    _loadCatalog();
-  }
-
-  void _connectWs() {
-    _wsSub?.cancel();
-    _ws.connect();
     _wsSub = _ws.events.listen(_onWsEvent);
+    _loadCatalog();
   }
 
   void _onWsEvent(WsEvent ev) {
@@ -125,7 +119,6 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   void dispose() {
     _poll?.cancel();
     _wsSub?.cancel();
-    _ws.disconnect();
     super.dispose();
   }
 

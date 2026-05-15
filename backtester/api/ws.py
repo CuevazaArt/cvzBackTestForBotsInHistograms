@@ -15,7 +15,7 @@ from decimal import Decimal
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backtester.api.schemas import BacktestRequest, OptimizeRequest
-from backtester.api.serialization import json_default
+from backtester.api.serialization import json_default, unique_bot_names
 from backtester.core.engine import BacktestConfig, Candle
 
 _LOG = logging.getLogger("backtester.api.ws")
@@ -97,7 +97,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 engine = StreamingEngine(cfg, on_event=_send, total=len(candles))
                 # Run the synchronous engine in a worker thread so the WS
                 # event loop stays responsive (and pings can fly through).
-                bot_names = [b.name for b in req.bots]
+                bot_names = unique_bot_names(req.bots)
 
                 await asyncio.to_thread(
                     engine.run,
