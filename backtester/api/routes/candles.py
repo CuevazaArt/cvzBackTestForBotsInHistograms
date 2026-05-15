@@ -118,5 +118,29 @@ def get_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> JobStatus:
 
 
 @router.get("/jobs", response_model=list[JobStatus])
-def list_jobs(ctx: AppContext = Depends(get_ctx)) -> list[JobStatus]:
-    return [JobStatus(**d) for d in ctx.jobs.list_all()]
+def list_jobs(
+    kind: str | None = Query(None, description="Filter by job kind"),
+    status: str | None = Query(None, description="Filter by job status"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    ctx: AppContext = Depends(get_ctx),
+) -> list[JobStatus]:
+    return [
+        JobStatus(**d)
+        for d in ctx.jobs.list_filtered(kind=kind, status=status, limit=limit, offset=offset)
+    ]
+
+
+@router.delete("/jobs/{job_id}")
+def delete_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> dict[str, bool]:
+    if not ctx.jobs.delete(job_id):
+        raise HTTPException(404, f"Job '{job_id}' not found")
+    return {"deleted": True}
+
+
+@router.post("/jobs/cleanup")
+def cleanup_jobs(
+    older_than_seconds: int = Query(7 * 86400, ge=60),
+    ctx: AppContext = Depends(get_ctx),
+) -> dict[str, int]:
+    return {"deleted": ctx.jobs.cleanup_older_than(older_than_seconds)}
