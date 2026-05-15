@@ -1,0 +1,36 @@
+{
+  "symbol": "BTCUSDT",
+  "timeframe": "1h",
+  "bot_class": "EMACross",
+  "objective": "total_return_pct",
+  "fixed_params": {},
+  "initial_cash": 10000.0,
+  "taker_fee_pct": 0.1,
+  "slippage_pct": 0.05,
+  "search_space": {
+    "fast_ema": {
+      "type": "int",
+      "low": 5,
+      "high": 30,
+      "step": 1
+    },
+    "slow_ema": {
+      "type": "int",
+      "low": 20,
+      "high": 100,
+      "step": 1
+    },
+    "profit_factor": {
+      "type": "float",
+      "low": 0.005,
+      "high": 0.10,
+      "step": 0.001
+    },
+    "stop_loss_pct": {
+      "type": "float",
+      "low": 0.01,
+      "high": 0.20,
+      "step": 0.005
+    }
+  }
+}

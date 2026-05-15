@@ -1,0 +1,26 @@
+# Normalize line endings to LF in the repo; checkout as-is on each platform
+* text=auto eol=lf
+
+# Dart / Flutter
+*.dart text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+
+# Python
+*.py   text eol=lf
+*.txt  text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# Web
+*.html text eol=lf
+*.css  text eol=lf
+*.js   text eol=lf
+
+# Binary — never convert
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.ico  binary
+*.woff2 binary

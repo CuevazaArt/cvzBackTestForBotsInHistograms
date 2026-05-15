@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backtester Charts</title>
+  <link rel="stylesheet" href="/static/assets/css/style.css" />
+</head>
+<body>
+
+<div id="root">
+
+  <!-- ── Top bar ──────────────────────────────────────────────── -->
+  <div id="topbar">
+    <span id="topbar-symbol" class="symbol-badge">—</span>
+    <span id="topbar-tf" class="tf-badge">—</span>
+    <span id="topbar-bot" class="tf-badge" style="color:#2962ff">—</span>
+    <span class="sep"></span>
+    <span id="topbar-daterange" style="font-size:11px;color:#787b86">—</span>
+  </div>
+
+  <!-- ── Charts ───────────────────────────────────────────────── -->
+  <div id="charts">
+    <div class="chart-panel">
+      <span class="chart-label">Price</span>
+      <div id="main-chart" class="chart-inner"></div>
+    </div>
+    <div class="chart-panel">
+      <span class="chart-label">Equity</span>
+      <div id="equity-chart" class="chart-inner"></div>
+    </div>
+    <div class="chart-panel">
+      <span class="chart-label">Drawdown</span>
+      <div id="drawdown-chart" class="chart-inner"></div>
+    </div>
+  </div>
+
+  <!-- ── Status bar ───────────────────────────────────────────── -->
+  <div id="statusbar">
+    <span class="ws-dot" id="ws-dot"></span>
+    <span id="ws-label">Disconnected</span>
+    <span style="width:1px;height:12px;background:#2a2e39;display:inline-block"></span>
+
+    <span class="stat">Return <span class="val" id="stat-return">—</span></span>
+    <span class="stat">MDD <span class="val" id="stat-mdd">—</span></span>
+    <span class="stat">Trades <span class="val" id="stat-trades">—</span></span>
+    <span class="stat">WR <span class="val" id="stat-wr">—</span></span>
+    <span class="stat">PF <span class="val" id="stat-pf">—</span></span>
+    <span class="sep" style="flex:1"></span>
+    <span id="progress-pct" style="color:#2962ff"></span>
+  </div>
+
+</div>
+
+<!-- Vendored Lightweight Charts v5 (no network dependency) -->
+<script src="/static/assets/js/lightweight-charts.standalone.production.js"></script>
+
+<!-- Chart modules -->
+<script src="/static/assets/js/charts/main-chart.js"></script>
+<script src="/static/assets/js/charts/equity-chart.js"></script>
+<script src="/static/assets/js/charts/drawdown-chart.js"></script>
+
+<!-- Flutter ↔ Python bridge -->
+<script src="/static/assets/js/bridge.js"></script>
+
+<script>
+(function () {
+  // ── Init charts ──────────────────────────────────────────────
+  MainChart.init("main-chart");
+  EquityChart.init("equity-chart");
+  DrawdownChart.init("drawdown-chart");
+
+  // ── Auto-resize on window resize ─────────────────────────────
+  function _resize() {
+    document.querySelectorAll(".chart-inner").forEach((el) => {
+      const id = el.id;
+      const w  = el.offsetWidth;
+      const h  = el.offsetHeight;
+      if (id === "main-chart")      MainChart.resize(w, h);
+      if (id === "equity-chart")    EquityChart.resize(w, h);
+      if (id === "drawdown-chart")  DrawdownChart.resize(w, h);
+    });
+  }
+  window.addEventListener("resize", _resize);
+
+  // ── Connect WS ───────────────────────────────────────────────
+  // Flutter will call window.initBridge(wsUrl, token?) after load,
+  // or we auto-connect in standalone browser mode.
+  window.initBridge = function (wsUrl, token) {
+    const url = token ? wsUrl + "?token=" + encodeURIComponent(token) : wsUrl;
+    Bridge.connectWS(url);
+  };
+
+  // Standalone browser mode: auto-connect to same host
+  const standalone = !window.flutter_inappwebview;
+  if (standalone) {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = proto + "//" + location.host + "/ws";
+    Bridge.connectWS(wsUrl);
+  }
+
+  // ── Expose topbar updater for Flutter ────────────────────────
+  window.setTopbar = function (symbol, tf, bot, dateRange) {
+    document.getElementById("topbar-symbol").textContent = symbol || "—";
+    document.getElementById("topbar-tf").textContent     = tf     || "—";
+    document.getElementById("topbar-bot").textContent    = bot    || "—";
+    document.getElementById("topbar-daterange").textContent = dateRange || "";
+  };
+
+  // Signal Flutter that the page is ready
+  if (window.flutter_inappwebview) {
+    window.flutter_inappwebview.callHandler("onPageReady");
+  }
+})();
+</script>
+
+</body>
+</html>
