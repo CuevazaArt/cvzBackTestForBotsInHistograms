@@ -414,3 +414,56 @@ def test_advanced_metrics_present_in_response(app_with_synthetic_data):
         val = summary[key]
         assert isinstance(val, (int, float)), f"{key} should be numeric, got {type(val)}"
         assert not math.isnan(val) and not math.isinf(val), f"{key} is not finite: {val}"
+
+
+# ── Sprint 6: trade export ───────────────────────────────────────
+
+
+def test_export_trades_csv(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    payload = {
+        "symbol": "TESTUSDT",
+        "timeframe": "1h",
+        "bots": [{"name": "EMACross", "params": {"fast_ema": 5, "slow_ema": 15}}],
+        "initial_cash": 10000.0,
+    }
+    res = client.post("/api/backtest/export/trades?format=csv", json=payload)
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "attachment" in res.headers["content-disposition"]
+    lines = res.text.strip().splitlines()
+    header = lines[0].split(",")
+    for col in (
+        "bot_id", "entry_time", "exit_time", "entry_price", "exit_price",
+        "qty", "pnl", "pnl_pct", "fee_usdt", "reason",
+    ):
+        assert col in header, f"Missing CSV column {col}"
+    # At least the header + one trade row.
+    assert len(lines) >= 2
+
+
+def test_export_trades_json(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    payload = {
+        "symbol": "TESTUSDT",
+        "timeframe": "1h",
+        "bots": [{"name": "EMACross", "params": {"fast_ema": 5, "slow_ema": 15}}],
+        "initial_cash": 10000.0,
+    }
+    res = client.post("/api/backtest/export/trades?format=json", json=payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["symbol"] == "TESTUSDT"
+    assert isinstance(body["trades"], list)
+    assert body["summary"]["trades"] >= 1
+
+
+def test_export_trades_rejects_invalid_format(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    payload = {
+        "symbol": "TESTUSDT",
+        "timeframe": "1h",
+        "bots": [{"name": "EMACross", "params": {"fast_ema": 5, "slow_ema": 15}}],
+    }
+    res = client.post("/api/backtest/export/trades?format=xml", json=payload)
+    assert res.status_code == 422

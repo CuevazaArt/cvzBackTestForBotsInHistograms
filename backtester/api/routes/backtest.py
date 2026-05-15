@@ -1,10 +1,13 @@
-"""POST /backtest/run — synchronous full-history backtest."""
+"""POST /backtest/run — synchronous full-history backtest, with CSV/JSON export."""
 
 from __future__ import annotations
 
+import csv
+import io
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse, Response
 
 from backtester.api.deps import AppContext, get_ctx
 from backtester.api.schemas import BacktestRequest, BacktestResponse
@@ -14,21 +17,31 @@ from backtester.core.engine import BacktestConfig, BacktestEngine, Candle
 router = APIRouter(tags=["backtest"])
 
 
-@router.post("/backtest/run", response_model=BacktestResponse)
-def run_backtest(
-    req: BacktestRequest, ctx: AppContext = Depends(get_ctx),
-) -> BacktestResponse:
+_CSV_COLUMNS = [
+    "bot_id",
+    "entry_time",
+    "exit_time",
+    "entry_price",
+    "exit_price",
+    "qty",
+    "pnl",
+    "pnl_pct",
+    "fee_usdt",
+    "reason",
+]
+
+
+def _execute(req: BacktestRequest, ctx: AppContext) -> BacktestResponse:
     if not req.bots:
         raise HTTPException(400, "At least one bot is required")
-        
+
     bots_instances = []
     for b in req.bots:
         bot_cls = ctx.bot_registry.get(b.name)
         if bot_cls is None:
             raise HTTPException(404, f"Bot '{b.name}' not found")
         try:
-            bot = bot_cls(**b.params)
-            bots_instances.append(bot)
+            bots_instances.append(bot_cls(**b.params))
         except TypeError as e:
             raise HTTPException(400, f"Invalid params for {b.name}: {e}")
 
@@ -58,3 +71,49 @@ def run_backtest(
         indicator_specs=indicator_specs,
     )
     return result_to_response([b.model_dump() for b in req.bots], result, candles)
+
+
+@router.post("/backtest/run", response_model=BacktestResponse)
+def run_backtest(
+    req: BacktestRequest, ctx: AppContext = Depends(get_ctx),
+) -> BacktestResponse:
+    return _execute(req, ctx)
+
+
+@router.post("/backtest/export/trades")
+def export_trades(
+    req: BacktestRequest,
+    fmt: str = Query("csv", alias="format", pattern="^(csv|json)$"),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Run the backtest and return its trades in the requested format.
+
+    Why stateless: /backtest/run is synchronous and we don't (yet) persist
+    full results — re-running with the same request is cheap and avoids a
+    server-side cache. Switch to job-id lookup once async backtests land.
+    """
+    resp = _execute(req, ctx)
+    trades = [t.model_dump() for t in resp.trades]
+
+    if fmt == "json":
+        return JSONResponse(
+            content={
+                "symbol": resp.symbol,
+                "timeframe": resp.timeframe,
+                "trades": trades,
+                "summary": resp.summary,
+            }
+        )
+
+    # CSV
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_CSV_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for t in trades:
+        writer.writerow(t)
+    filename = f"trades_{resp.symbol}_{resp.timeframe}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
