@@ -7,7 +7,6 @@ Fixes vs previous version:
 - ``risk_per_trade_pct`` exposed as a configurable param.
 """
 
-from decimal import Decimal
 from typing import Any
 
 from backtester.bots.bot_base import BotBase
@@ -42,7 +41,7 @@ class RSIReversion(BotBase):
         self._avg_gain: float | None = None
         self._avg_loss: float | None = None
         self._prev_price: float | None = None
-        self._warmup_changes: list[float] = []
+        self._warmup_changes: list[tuple[float, float]] = []
         self._warmed_up: bool = False
         self._rsi_value: float | None = None
 
@@ -75,7 +74,7 @@ class RSIReversion(BotBase):
                 if len(self._warmup_changes) >= self.rsi_period:
                     # Seed with simple averages
                     self._avg_gain = sum(g for g, _ in self._warmup_changes) / self.rsi_period
-                    self._avg_loss = sum(l for _, l in self._warmup_changes) / self.rsi_period
+                    self._avg_loss = sum(loss_val for _, loss_val in self._warmup_changes) / self.rsi_period
                     self._warmed_up = True
             else:
                 # Wilder's smoothing

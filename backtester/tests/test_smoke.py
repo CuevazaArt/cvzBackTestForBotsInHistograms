@@ -8,7 +8,6 @@ from decimal import Decimal
 from pathlib import Path
 import tempfile
 
-import pytest
 
 
 # ── DuckDB downloader ──────────────────────────────────────────
@@ -47,7 +46,7 @@ def test_downloader_list_symbols_empty():
 def test_engine_empty_candles():
     """Engine should handle an empty candle list gracefully."""
     from backtester.core import BacktestEngine, BacktestConfig
-    from backtester.core.engine import BacktestBot, Candle, Portfolio
+    from backtester.core.engine import BacktestBot
 
     class NoopBot(BacktestBot):
         def on_candle(self, candle, portfolio):
@@ -63,7 +62,7 @@ def test_engine_empty_candles():
 def test_engine_single_candle_no_orders():
     """Engine with one candle and no orders should preserve initial cash."""
     from backtester.core import BacktestEngine, BacktestConfig
-    from backtester.core.engine import BacktestBot, Candle, Portfolio
+    from backtester.core.engine import BacktestBot, Candle
 
     class NoopBot(BacktestBot):
         def on_candle(self, candle, portfolio):
@@ -90,7 +89,7 @@ def test_engine_single_candle_no_orders():
 def test_engine_max_drawdown_peak_to_trough():
     """Max drawdown should capture the worst peak-to-trough, not just final."""
     from backtester.core import BacktestEngine, BacktestConfig
-    from backtester.core.engine import BacktestBot, Candle, Portfolio
+    from backtester.core.engine import BacktestBot, Candle
 
     class BuyThenHold(BacktestBot):
         """Buys 1 unit on the first candle, then holds."""

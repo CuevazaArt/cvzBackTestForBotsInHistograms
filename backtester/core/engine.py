@@ -187,7 +187,7 @@ class BacktestEngine:
             for bot, portfolio, bot_id in zip(bots, portfolios, names):
                 try:
                     orders = bot.on_candle(candle, portfolio)
-                except Exception as exc:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     _LOG.exception("[%s] on_candle crashed; skipping candle", bot_id)
                     orders = []
                 for order in orders:
@@ -223,7 +223,6 @@ class BacktestEngine:
         result.max_drawdown_pct = max_dd * 100
 
         # Per-bot breakdown
-        from backtester.core.metrics import compute_metrics  # avoid circular at module level
         for bot_id, portfolio in zip(names, portfolios):
             bot_trades = portfolio.closed_trades
             wins = [t for t in bot_trades if t.pnl > 0]

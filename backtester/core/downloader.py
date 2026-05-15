@@ -8,8 +8,7 @@ import time
 import zipfile
 import io
 import csv
-from datetime import datetime, timedelta
-from decimal import Decimal
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 

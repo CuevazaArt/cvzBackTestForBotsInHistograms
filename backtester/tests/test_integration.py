@@ -40,10 +40,10 @@ def _synthetic_klines(n: int = 300) -> list[list]:
         # Small intra-candle range:
         o = base + 30 * math.sin((i - 1) / 18.0) + (i - 1) * 0.05 if i > 0 else close
         h = max(o, close) + 0.3
-        l = min(o, close) - 0.3
+        low_p = min(o, close) - 0.3
         ts_ms = i * 3_600_000  # 1h candles, starting at epoch
         # Binance kline shape: [open_time, open, high, low, close, vol, close_time, quote_vol, ...]
-        klines.append([ts_ms, o, h, l, close, 100.0, ts_ms + 3_599_999, 10000.0])
+        klines.append([ts_ms, o, h, low_p, close, 100.0, ts_ms + 3_599_999, 10000.0])
     return klines
 
 
@@ -324,9 +324,9 @@ def _downtrend_recovery_klines(n: int = 200) -> list[list]:
         close = base + offset + (i * 0.01)  # tiny drift
         o = close - 0.2
         h = max(o, close) + 0.3
-        l = min(o, close) - 0.3
+        low_p = min(o, close) - 0.3
         ts_ms = i * 3_600_000
-        klines.append([ts_ms, o, h, l, close, 150.0, ts_ms + 3_599_999, 15000.0])
+        klines.append([ts_ms, o, h, low_p, close, 150.0, ts_ms + 3_599_999, 15000.0])
     return klines
 
 
@@ -362,7 +362,6 @@ def test_dorothy_dca_runs_end_to_end():
 def test_dorothy_dca_via_http(app_with_synthetic_data):
     """DorothyDCA should work through the REST API."""
     # First insert some data with the downtrend pattern
-    from backtester.core import BinanceDownloader
 
     ctx = app_with_synthetic_data.state.ctx
     ctx.downloader._save_batch("TESTUSDT", "1h", _downtrend_recovery_klines(200))

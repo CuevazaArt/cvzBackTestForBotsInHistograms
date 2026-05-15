@@ -1,4 +1,3 @@
-import pytest
 from backtester.core.engine import BacktestEngine, BacktestConfig, Candle
 from backtester.bots.macd_cross import MACDCross
 from backtester.bots.rsi_reversion import RSIReversion

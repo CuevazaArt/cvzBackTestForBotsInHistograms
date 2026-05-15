@@ -14,7 +14,6 @@ from backtester.bots import EMACross, RSIReversion
 from backtester.core import (
     BinanceDownloader,
     BacktestEngine,
-    BacktestConfig,
     CredentialManager,
     Candle,
     compute_metrics,
@@ -276,7 +275,7 @@ class BacktesterCLI:
         output_file: Path,
     ) -> None:
         """Pretty-print top trials."""
-        console.print(f"\n[bold green]═══ Top 10 Trials ═══[/bold green]\n")
+        console.print("\n[bold green]═══ Top 10 Trials ═══[/bold green]\n")
 
         table = Table(title=f"Best {cfg.objective}")
         table.add_column("#", style="dim")

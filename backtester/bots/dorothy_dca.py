@@ -9,7 +9,6 @@ Strategy:
   - Stop-loss: if price drops below avg_cost * (1 - stop_loss_pct), liquidate all.
 """
 
-from decimal import Decimal
 from typing import Any
 
 from backtester.bots.bot_base import BotBase

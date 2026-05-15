@@ -7,7 +7,6 @@ Fixes vs previous version:
 - ``risk_per_trade_pct`` exposed as a configurable param.
 """
 
-from decimal import Decimal
 from typing import Any
 
 from backtester.bots.bot_base import BotBase

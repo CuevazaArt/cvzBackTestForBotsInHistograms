@@ -8,7 +8,6 @@ Entry / exit:
 All EMAs are computed incrementally (O(1) per candle).
 """
 
-from decimal import Decimal
 from typing import Any
 
 from backtester.bots.bot_base import BotBase
