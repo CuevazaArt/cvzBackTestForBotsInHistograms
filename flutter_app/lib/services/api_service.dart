@@ -107,12 +107,25 @@ class JobStatus {
 /// HTTP client for the FastAPI backend
 class ApiService {
   final String baseUrl;
+  final String apiToken;
 
-  ApiService({this.baseUrl = 'http://127.0.0.1:8002'});
+  ApiService({this.baseUrl = 'http://127.0.0.1:8002', this.apiToken = ''});
+
+  Map<String, String> get _authHeaders => {
+        if (apiToken.trim().isNotEmpty) 'x-api-key': apiToken.trim(),
+      };
+
+  Map<String, String> get _jsonHeaders => {
+        'Content-Type': 'application/json',
+        ..._authHeaders,
+      };
 
   Future<HealthStatus> checkHealth() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/health')).timeout(
+      final res = await http.get(
+        Uri.parse('$baseUrl/health'),
+        headers: _authHeaders,
+      ).timeout(
             const Duration(seconds: 3),
           );
       if (res.statusCode == 200) {
@@ -128,7 +141,10 @@ class ApiService {
   // ── Credentials ──
 
   Future<bool> credentialsExist() async {
-    final res = await http.get(Uri.parse('$baseUrl/api/credentials/exists'));
+    final res = await http.get(
+      Uri.parse('$baseUrl/api/credentials/exists'),
+      headers: _authHeaders,
+    );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return data['exists'] as bool? ?? false;
@@ -137,33 +153,45 @@ class ApiService {
   Future<void> saveCredentials(String apiKey, String apiSecret) async {
     final res = await http.post(
       Uri.parse('$baseUrl/api/credentials'),
-      headers: {'Content-Type': 'application/json'},
+      headers: _jsonHeaders,
       body: jsonEncode({'api_key': apiKey, 'api_secret': apiSecret}),
     );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
   }
 
   Future<void> deleteCredentials() async {
-    final res = await http.delete(Uri.parse('$baseUrl/api/credentials'));
+    final res = await http.delete(
+      Uri.parse('$baseUrl/api/credentials'),
+      headers: _authHeaders,
+    );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
   }
 
   Future<List<SymbolEntry>> listSymbols() async {
-    final res = await http.get(Uri.parse('$baseUrl/api/candles/symbols'));
+    final res = await http.get(
+      Uri.parse('$baseUrl/api/candles/symbols'),
+      headers: _authHeaders,
+    );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final List<dynamic> data = jsonDecode(res.body) as List<dynamic>;
     return data.map((e) => SymbolEntry.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<List<BotInfo>> listBots() async {
-    final res = await http.get(Uri.parse('$baseUrl/api/bots'));
+    final res = await http.get(
+      Uri.parse('$baseUrl/api/bots'),
+      headers: _authHeaders,
+    );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final List<dynamic> data = jsonDecode(res.body) as List<dynamic>;
     return data.map((e) => BotInfo.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<BotParamsResponse> getBotParams(String botName) async {
-    final res = await http.get(Uri.parse('$baseUrl/api/bots/$botName/params'));
+    final res = await http.get(
+      Uri.parse('$baseUrl/api/bots/$botName/params'),
+      headers: _authHeaders,
+    );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     return BotParamsResponse.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
@@ -176,7 +204,7 @@ class ApiService {
   }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/api/candles/download'),
-      headers: {'Content-Type': 'application/json'},
+      headers: _jsonHeaders,
       body: jsonEncode({
         'symbol': symbol,
         'timeframe': timeframe,
@@ -196,7 +224,7 @@ class ApiService {
   }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/api/candles/download/zip'),
-      headers: {'Content-Type': 'application/json'},
+      headers: _jsonHeaders,
       body: jsonEncode({
         'symbol': symbol,
         'timeframe': timeframe,
@@ -209,8 +237,20 @@ class ApiService {
   }
 
   Future<JobStatus> getJob(String jobId) async {
-    final res = await http.get(Uri.parse('$baseUrl/api/jobs/$jobId'));
+    final res = await http.get(
+      Uri.parse('$baseUrl/api/jobs/$jobId'),
+      headers: _authHeaders,
+    );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    return JobStatus.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  Future<JobStatus> cancelJob(String jobId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/jobs/$jobId/cancel'),
+      headers: _authHeaders,
+    );
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}: ${res.body}');
     return JobStatus.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
@@ -225,15 +265,21 @@ class ApiService {
     required String timeframe,
     required List<Map<String, dynamic>> bots,
     int workers = 4,
+    double initialCash = 10000.0,
+    double takerFeePct = 0.1,
+    double slippagePct = 0.05,
   }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/api/experiments/run'),
-      headers: {'Content-Type': 'application/json'},
+      headers: _jsonHeaders,
       body: jsonEncode({
         'symbol': symbol,
         'timeframe': timeframe,
         'bots': bots,
         'workers': workers,
+        'initial_cash': initialCash,
+        'taker_fee_pct': takerFeePct,
+        'slippage_pct': slippagePct,
       }),
     );
     if (res.statusCode == 422) {
@@ -262,10 +308,13 @@ class ApiService {
     double initialCash = 10000.0,
     double takerFeePct = 0.1,
     double slippagePct = 0.05,
+    double validationSplitPct = 0.2,
+    int minTrades = 0,
+    double? maxDrawdownPctLimit,
   }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/api/optimize/run'),
-      headers: {'Content-Type': 'application/json'},
+      headers: _jsonHeaders,
       body: jsonEncode({
         'symbol': symbol,
         'timeframe': timeframe,
@@ -278,6 +327,9 @@ class ApiService {
         'initial_cash': initialCash,
         'taker_fee_pct': takerFeePct,
         'slippage_pct': slippagePct,
+        'validation_split_pct': validationSplitPct,
+        'min_trades': minTrades,
+        if (maxDrawdownPctLimit != null) 'max_drawdown_pct_limit': maxDrawdownPctLimit,
       }),
     );
     if (res.statusCode == 422) {

@@ -26,7 +26,12 @@ class ChartWebViewController {
 
 class ChartWebView extends StatefulWidget {
   final ChartWebViewController controller;
-  const ChartWebView({super.key, required this.controller});
+  final String chartUrl;
+  const ChartWebView({
+    super.key,
+    required this.controller,
+    required this.chartUrl,
+  });
 
   @override
   State<ChartWebView> createState() => _ChartWebViewState();
@@ -45,7 +50,7 @@ class _ChartWebViewState extends State<ChartWebView> {
 
   Future<void> _initWebview() async {
     await _wv.initialize();
-    await _wv.loadUrl('http://127.0.0.1:8002/static/index.html');
+    await _wv.loadUrl(widget.chartUrl);
     if (mounted) setState(() => _initialized = true);
   }
 

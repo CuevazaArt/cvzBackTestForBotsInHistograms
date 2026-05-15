@@ -12,9 +12,10 @@ import json
 import logging
 from decimal import Decimal
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from backtester.api.schemas import BacktestRequest, OptimizeRequest
+from backtester.api.security import validate_ws_token
 from backtester.api.serialization import json_default, unique_bot_names
 from backtester.core.engine import BacktestConfig, Candle
 
@@ -25,6 +26,11 @@ router = APIRouter()
 
 @router.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
+    try:
+        validate_ws_token(websocket)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     ctx = websocket.app.state.ctx
     loop = asyncio.get_running_loop()
@@ -148,6 +154,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     initial_cash=req_opt.initial_cash,
                     taker_fee_pct=req_opt.taker_fee_pct,
                     slippage_pct=req_opt.slippage_pct,
+                    validation_split_pct=req_opt.validation_split_pct,
+                    min_trades=req_opt.min_trades,
+                    max_drawdown_pct_limit=req_opt.max_drawdown_pct_limit,
                 )
                 objective = Objective(opt_cfg, ctx.downloader, ctx.bot_registry)
 

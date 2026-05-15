@@ -8,6 +8,7 @@ import threading
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from backtester.api.deps import AppContext, get_ctx
+from backtester.api.security import audit_event
 from backtester.api.schemas import (
     CandleDTO,
     DownloadRequest,
@@ -34,18 +35,55 @@ def start_download(
     ctx: AppContext = Depends(get_ctx),
 ) -> JobStatus:
     job = ctx.jobs.create("download")
+    run_id = ctx.jobs.create_run(
+        "download",
+        {
+            "symbol": req.symbol.upper(),
+            "timeframe": req.timeframe,
+            "date_from": req.date_from,
+            "date_to": req.date_to,
+        },
+    )
     ctx.jobs.update(
         job.id,
         status="pending",
+        run_id=run_id,
         message=f"Queued {req.symbol} {req.timeframe} {req.date_from}→{req.date_to}",
+    )
+    audit_event(
+        "candles.download_started",
+        {
+            "job_id": job.id,
+            "run_id": run_id,
+            "symbol": req.symbol.upper(),
+            "timeframe": req.timeframe,
+            "date_from": req.date_from,
+            "date_to": req.date_to,
+        },
     )
 
     def _run() -> None:
         ctx.jobs.update(job.id, status="running")
         try:
+            if ctx.jobs.is_cancel_requested(job.id):
+                ctx.jobs.update(
+                    job.id,
+                    status="cancelled",
+                    message="Cancelled before start",
+                )
+                return
             count = ctx.downloader.download(
                 req.symbol.upper(), req.timeframe, req.date_from, req.date_to,
             )
+            if ctx.jobs.is_cancel_requested(job.id):
+                ctx.jobs.update(
+                    job.id,
+                    status="cancelled",
+                    progress=1.0,
+                    message="Cancelled",
+                    result={"candles_added": count},
+                )
+                return
             ctx.jobs.update(
                 job.id, status="done", progress=1.0,
                 message=f"Downloaded {count} candles",
@@ -68,18 +106,55 @@ def start_download_zip(
     ctx: AppContext = Depends(get_ctx),
 ) -> JobStatus:
     job = ctx.jobs.create("download_zip")
+    run_id = ctx.jobs.create_run(
+        "download_zip",
+        {
+            "symbol": req.symbol.upper(),
+            "timeframe": req.timeframe,
+            "year": req.year,
+            "month": req.month,
+        },
+    )
     ctx.jobs.update(
         job.id,
         status="pending",
+        run_id=run_id,
         message=f"Queued ZIP {req.symbol} {req.timeframe} {req.year}-{req.month:02d}",
+    )
+    audit_event(
+        "candles.download_zip_started",
+        {
+            "job_id": job.id,
+            "run_id": run_id,
+            "symbol": req.symbol.upper(),
+            "timeframe": req.timeframe,
+            "year": req.year,
+            "month": req.month,
+        },
     )
 
     def _run() -> None:
         ctx.jobs.update(job.id, status="running")
         try:
+            if ctx.jobs.is_cancel_requested(job.id):
+                ctx.jobs.update(
+                    job.id,
+                    status="cancelled",
+                    message="Cancelled before start",
+                )
+                return
             count = ctx.downloader.download_vision_zip(
                 req.symbol.upper(), req.timeframe, req.year, req.month,
             )
+            if ctx.jobs.is_cancel_requested(job.id):
+                ctx.jobs.update(
+                    job.id,
+                    status="cancelled",
+                    progress=1.0,
+                    message="Cancelled",
+                    result={"candles_added": count},
+                )
+                return
             ctx.jobs.update(
                 job.id, status="done", progress=1.0,
                 message=f"Downloaded {count} candles via ZIP",
@@ -120,3 +195,19 @@ def get_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> JobStatus:
 @router.get("/jobs", response_model=list[JobStatus])
 def list_jobs(ctx: AppContext = Depends(get_ctx)) -> list[JobStatus]:
     return [JobStatus(**d) for d in ctx.jobs.list_all()]
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobStatus)
+def cancel_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> JobStatus:
+    job = ctx.jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"Job '{job_id}' not found")
+    if job.status in ("done", "error", "cancelled"):
+        return JobStatus(**job.to_dict())
+    ctx.jobs.request_cancel(job_id)
+    ctx.jobs.update(job_id, message="Cancellation requested")
+    audit_event("jobs.cancel_requested", {"job_id": job_id})
+    updated = ctx.jobs.get(job_id)
+    if updated is None:
+        raise HTTPException(404, f"Job '{job_id}' not found")
+    return JobStatus(**updated.to_dict())

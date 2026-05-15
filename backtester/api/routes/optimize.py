@@ -8,6 +8,7 @@ import threading
 from fastapi import APIRouter, Depends, HTTPException
 
 from backtester.api.deps import AppContext, get_ctx
+from backtester.api.security import audit_event
 from backtester.api.schemas import JobStatus, OptimizeRequest
 from backtester.optimize import Objective, OptimizationConfig
 
@@ -40,10 +41,32 @@ def start_optimization(
         search_space[name] = entry
 
     job = ctx.jobs.create("optimize")
+    run_id = ctx.jobs.create_run(
+        "optimize",
+        {
+            "symbol": req.symbol.upper(),
+            "timeframe": req.timeframe,
+            "bot": req.bot,
+            "objective": req.objective,
+            "trials": req.trials,
+            "sampler": req.sampler,
+        },
+    )
     ctx.jobs.update(
         job.id,
         status="pending",
+        run_id=run_id,
         message=f"Queued Optuna {req.sampler} {req.trials} trials for {req.bot}",
+    )
+    audit_event(
+        "optimize.started",
+        {
+            "job_id": job.id,
+            "run_id": run_id,
+            "bot": req.bot,
+            "symbol": req.symbol.upper(),
+            "timeframe": req.timeframe,
+        },
     )
 
     total_trials = req.trials
@@ -51,6 +74,9 @@ def start_optimization(
     def _run() -> None:
         ctx.jobs.update(job.id, status="running", message="Loading candles...")
         try:
+            if ctx.jobs.is_cancel_requested(job.id):
+                ctx.jobs.update(job.id, status="cancelled", message="Cancelled before start")
+                return
             from backtester.optimize.optuna_runner import run_optuna
 
             opt_cfg = OptimizationConfig(
@@ -63,12 +89,17 @@ def start_optimization(
                 initial_cash=req.initial_cash,
                 taker_fee_pct=req.taker_fee_pct,
                 slippage_pct=req.slippage_pct,
+                validation_split_pct=req.validation_split_pct,
+                min_trades=req.min_trades,
+                max_drawdown_pct_limit=req.max_drawdown_pct_limit,
             )
             objective = Objective(opt_cfg, ctx.downloader, ctx.bot_registry)
 
             collected_trials: list[dict] = []
 
             def _on_trial(trial_number: int, result) -> None:
+                if ctx.jobs.is_cancel_requested(job.id):
+                    raise RuntimeError("Job cancelled by user")
                 collected_trials.append({
                     "trial": trial_number,
                     "params": result.params,
@@ -119,6 +150,9 @@ def start_optimization(
                     "best_score": best.score if best else 0,
                     "objective": req.objective,
                     "sampler": req.sampler,
+                    "validation_split_pct": req.validation_split_pct,
+                    "min_trades": req.min_trades,
+                    "max_drawdown_pct_limit": req.max_drawdown_pct_limit,
                 },
             )
         except ImportError as exc:
@@ -128,8 +162,11 @@ def start_optimization(
                 message="Optuna not installed. Run: pip install -r backtester/requirements-optimize.txt",
             )
         except Exception as exc:  # noqa: BLE001
-            _LOG.exception("Optimization job failed")
-            ctx.jobs.update(job.id, status="error", message=str(exc))
+            if "cancelled" in str(exc).lower():
+                ctx.jobs.update(job.id, status="cancelled", message="Cancelled")
+            else:
+                _LOG.exception("Optimization job failed")
+                ctx.jobs.update(job.id, status="error", message=str(exc))
 
     threading.Thread(target=_run, daemon=True).start()
     return JobStatus(**ctx.jobs.get(job.id).to_dict())

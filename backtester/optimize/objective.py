@@ -31,6 +31,9 @@ class OptimizationConfig:
     initial_cash: float = 10000.0
     taker_fee_pct: float = 0.1
     slippage_pct: float = 0.05
+    validation_split_pct: float = 0.2
+    min_trades: int = 0
+    max_drawdown_pct_limit: float | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "OptimizationConfig":
@@ -97,10 +100,56 @@ class Objective:
             taker_fee_pct=Decimal(str(self.cfg.taker_fee_pct)),
             slippage_pct=Decimal(str(self.cfg.slippage_pct)),
         ))
-        result = engine.run(bot, self._load_candles(), self.cfg.symbol, self.cfg.timeframe)
-        metrics = compute_metrics(result)
+        candles = self._load_candles()
+        split = int(len(candles) * (1.0 - self.cfg.validation_split_pct))
+        if split <= 0 or split >= len(candles):
+            split = len(candles)
+        train_candles = candles[:split]
+        val_candles = candles[split:] if split < len(candles) else []
 
-        score = float(metrics.get(self.cfg.objective, 0))
+        train_result = engine.run(bot, train_candles, self.cfg.symbol, self.cfg.timeframe)
+        train_metrics = compute_metrics(train_result)
+
+        val_metrics = None
+        if val_candles:
+            bot_val = bot_cls(**full_params)
+            val_result = engine.run(bot_val, val_candles, self.cfg.symbol, self.cfg.timeframe)
+            val_metrics = compute_metrics(val_result)
+
+        metrics = dict(train_metrics)
+        if val_metrics:
+            metrics.update({
+                "validation_total_return_pct": val_metrics.get("total_return_pct", 0.0),
+                "validation_win_rate_pct": val_metrics.get("win_rate_pct", 0.0),
+                "validation_profit_factor": val_metrics.get("profit_factor", 0.0),
+                "validation_max_drawdown_pct": val_metrics.get("max_drawdown_pct", 0.0),
+                "validation_trades": val_metrics.get("trades", 0),
+            })
+            train_score_raw = float(train_metrics.get(self.cfg.objective, 0))
+            val_score_raw = float(val_metrics.get(self.cfg.objective, 0))
+            # Favor robust params that work in both train and validation windows.
+            score = (train_score_raw * 0.4) + (val_score_raw * 0.6)
+        else:
+            score = float(train_metrics.get(self.cfg.objective, 0))
+
+        # Constraints are evaluated against training-window metrics.
+        # This is intentional: validation data should test generalization,
+        # not be filtered by constraints that could bias the search.
+        penalties: list[str] = []
+
+        trades = int(metrics.get("trades", 0))
+        if trades < self.cfg.min_trades:
+            penalties.append(f"min_trades<{self.cfg.min_trades}")
+
+        if self.cfg.max_drawdown_pct_limit is not None:
+            dd = float(metrics.get("max_drawdown_pct", 0))
+            if dd > self.cfg.max_drawdown_pct_limit:
+                penalties.append(f"max_drawdown_pct>{self.cfg.max_drawdown_pct_limit}")
+
+        if penalties:
+            score = -1e9 if self._direction == "max" else 1e9
+            metrics["constraint_penalty"] = "; ".join(penalties)
+
         # For Optuna/Nevergrad: both maximize by default, so negate "min" objectives
         # when needed (each backend handles direction in its own way; we expose raw).
         return OptimizationResult(params=full_params, score=score, metrics=metrics)

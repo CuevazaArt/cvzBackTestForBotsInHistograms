@@ -34,7 +34,7 @@ class AppContext:
             downloader=BinanceDownloader(data_dir / "candles.db"),
             credentials=CredentialManager(vault_dir),
             bot_registry=dict(BOT_REGISTRY),
-            jobs=JobRegistry(),
+            jobs=JobRegistry(data_dir / "jobs.sqlite3"),
         )
 
 

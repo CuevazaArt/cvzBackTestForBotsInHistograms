@@ -12,12 +12,14 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from backtester.api.config import load_api_settings
 from backtester.api.deps import AppContext
 from backtester.api.routes import backtest, bots, candles, credentials, experiments, optimize
+from backtester.api.security import require_api_token
 from backtester.api.ws import router as ws_router
 
 _LOG = logging.getLogger("backtester.api.server")
@@ -25,27 +27,34 @@ _LOG = logging.getLogger("backtester.api.server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.settings = load_api_settings()
     app.state.ctx = AppContext.build()
-    _LOG.info("AppContext initialized: %s", app.state.ctx.base_dir)
+    _LOG.info(
+        "AppContext initialized: %s | auth=%s",
+        app.state.ctx.base_dir,
+        "enabled" if app.state.settings.auth_enabled else "disabled",
+    )
     yield
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Backtester API", version="0.1.0", lifespan=lifespan)
 
+    settings = load_api_settings()
+    allow_origins = ["*"] if settings.allow_all_cors else settings.cors_allow_origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # local dev — Flutter desktop + browser
+        allow_origins=allow_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
     for r in (bots.router, candles.router, backtest.router,
               experiments.router, credentials.router, optimize.router):
-        app.include_router(r, prefix="/api")
+        app.include_router(r, prefix="/api", dependencies=[Depends(require_api_token)])
     app.include_router(ws_router)
 
-    @app.get("/health")
+    @app.get("/health", dependencies=[Depends(require_api_token)])
     def health() -> dict[str, str | int]:
         from backtester.core.downloader import BINANCE_USED_WEIGHT_1M
         return {"status": "ok", "binance_weight_1m": BINANCE_USED_WEIGHT_1M}

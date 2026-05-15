@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Typed WebSocket events from the StreamingEngine
@@ -53,6 +54,7 @@ enum WsStatus { disconnected, connecting, connected, reconnecting }
 /// Manages the WebSocket connection to /ws with auto-reconnect.
 class WsService {
   final String wsUrl;
+  final String apiToken;
   final int maxReconnectAttempts;
   WebSocketChannel? _channel;
   StreamController<WsEvent>? _controller;
@@ -64,6 +66,7 @@ class WsService {
 
   WsService({
     this.wsUrl = 'ws://127.0.0.1:8002/ws',
+    this.apiToken = '',
     this.maxReconnectAttempts = 8,
   });
 
@@ -82,7 +85,12 @@ class WsService {
     status.value = WsStatus.connecting;
 
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      _channel = IOWebSocketChannel.connect(
+        Uri.parse(wsUrl),
+        headers: {
+          if (apiToken.trim().isNotEmpty) 'x-api-key': apiToken.trim(),
+        },
+      );
       _channel!.stream.listen(
         (raw) {
           try {
@@ -189,6 +197,9 @@ class WsService {
     double initialCash = 10000,
     double takerFeePct = 0.1,
     double slippagePct = 0.05,
+    double validationSplitPct = 0.2,
+    int minTrades = 0,
+    double? maxDrawdownPctLimit,
   }) {
     send({
       'action': 'optimize',
@@ -204,6 +215,9 @@ class WsService {
         'initial_cash': initialCash,
         'taker_fee_pct': takerFeePct,
         'slippage_pct': slippagePct,
+        'validation_split_pct': validationSplitPct,
+        'min_trades': minTrades,
+        if (maxDrawdownPctLimit != null) 'max_drawdown_pct_limit': maxDrawdownPctLimit,
       },
     });
   }

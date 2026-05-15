@@ -31,7 +31,6 @@ flutter_app/.flutter-plugins-dependencies
 flutter_app/build/
 flutter_app/windows/flutter/ephemeral/
 flutter_app/.idea/
-flutter_app/pubspec.lock
 
 # Env / secrets
 .env

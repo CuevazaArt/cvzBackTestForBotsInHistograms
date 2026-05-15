@@ -25,11 +25,19 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r backtester/requirements.txt
-        pip install pytest pytest-cov
+        pip install pytest pytest-cov ruff mypy
         
+    - name: Ruff
+      run: |
+        ruff check backtester
+
+    - name: Mypy
+      run: |
+        mypy backtester --ignore-missing-imports
+
     - name: Run Tests
       run: |
-        PYTHONPATH=. pytest backtester/tests/ -v --cov=backtester --cov-report=term-missing
+        PYTHONPATH=. pytest backtester/tests/ -v --cov=backtester --cov-report=term-missing --cov-fail-under=35
 
   # ── Flutter Desktop Analysis ──────────────────────────────────
   analyze-flutter:
@@ -49,4 +57,8 @@ jobs:
       
     - name: Analyze
       working-directory: flutter_app
-      run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      run: flutter analyze
+
+    - name: Flutter tests
+      working-directory: flutter_app
+      run: flutter test

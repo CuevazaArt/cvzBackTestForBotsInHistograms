@@ -14,6 +14,7 @@ Run:
 from __future__ import annotations
 
 import math
+import os
 import tempfile
 from decimal import Decimal
 from pathlib import Path
@@ -76,7 +77,7 @@ def app_with_synthetic_data():
         downloader=downloader,
         credentials=CredentialManager(vault_dir),
         bot_registry=dict(BOT_REGISTRY),
-        jobs=JobRegistry(),
+        jobs=JobRegistry(data_dir / "jobs.sqlite3"),
     )
     return app
 
@@ -412,3 +413,20 @@ def test_advanced_metrics_present_in_response(app_with_synthetic_data):
         val = summary[key]
         assert isinstance(val, (int, float)), f"{key} should be numeric, got {type(val)}"
         assert not math.isnan(val) and not math.isinf(val), f"{key} is not finite: {val}"
+
+
+def test_job_cancel_unknown_returns_404(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    res = client.post("/api/jobs/does-not-exist/cancel")
+    assert res.status_code == 404
+
+
+def test_health_requires_token_when_configured(app_with_synthetic_data):
+    os.environ["BACKTESTER_API_TOKEN"] = "abc123"
+    app_with_synthetic_data.state.settings = type("S", (), {"auth_enabled": True, "api_token": "abc123"})()
+    client = TestClient(app_with_synthetic_data)
+    unauthorized = client.get("/health")
+    assert unauthorized.status_code == 401
+    authorized = client.get("/health", headers={"x-api-key": "abc123"})
+    assert authorized.status_code == 200
+    os.environ.pop("BACKTESTER_API_TOKEN", None)
