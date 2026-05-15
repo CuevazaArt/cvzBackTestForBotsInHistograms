@@ -10,7 +10,7 @@ import io
 import csv
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import requests
 
@@ -73,6 +73,8 @@ class BinanceDownloader:
         date_from: str,
         date_to: str,
         batch_size: int = 1000,
+        start_from_ms: Optional[int] = None,
+        on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         """
         Download candles from Binance.
@@ -83,6 +85,9 @@ class BinanceDownloader:
             date_from: "2024-01-01"
             date_to: "2024-12-31"
             batch_size: candles per request (max 1000)
+            start_from_ms: if set, skip ahead to this timestamp (resume support)
+            on_progress: optional callback(candles_added, current_ts) called after
+                each batch; use to persist progress for resumable downloads
 
         Returns:
             Number of candles downloaded.
@@ -94,7 +99,7 @@ class BinanceDownloader:
         end_ts = self._parse_date(date_to) + 86400000  # Include full end date
         candles_added = 0
 
-        current_ts = start_ts
+        current_ts = start_from_ms if start_from_ms is not None else start_ts
         while current_ts < end_ts:
             batch = self._fetch_batch(symbol, timeframe, current_ts, batch_size)
             if not batch:
@@ -114,6 +119,9 @@ class BinanceDownloader:
                 f"{symbol} {timeframe}: {candles_added} candles "
                 f"({progress*100:.1f}% complete)"
             )
+
+            if on_progress is not None:
+                on_progress(candles_added, current_ts)
 
         return candles_added
 
