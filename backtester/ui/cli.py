@@ -10,7 +10,7 @@ from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
 
-from backtester.bots import EMACross, RSIReversion
+from backtester.bots import BOT_REGISTRY
 from backtester.core import (
     BinanceDownloader,
     BacktestEngine,
@@ -24,11 +24,6 @@ from backtester.optimize import OptimizationConfig, Objective, OptimizationResul
 console = Console()
 logging.basicConfig(level=logging.INFO)
 _LOG = logging.getLogger("backtester.cli")
-
-BOT_REGISTRY = {
-    "EMACross": EMACross,
-    "RSIReversion": RSIReversion,
-}
 
 
 class BacktesterCLI:

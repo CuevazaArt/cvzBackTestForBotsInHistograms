@@ -21,6 +21,8 @@ from backtester.core.engine import (
     Candle,
     Portfolio,
     Trade,
+    build_per_bot_breakdown,
+    compute_max_drawdown_pct,
 )
 
 _LOG = logging.getLogger("backtester.engine.stream")
@@ -210,39 +212,11 @@ class StreamingEngine(BacktestEngine):
             )
 
             # True peak-to-trough max drawdown on global equity
-            if result.peak_equity > 0:
-                max_dd = Decimal("0")
-                running_peak = Decimal("0")
-                for eq in result.equity_curve:
-                    if eq > running_peak:
-                        running_peak = eq
-                    if running_peak > 0:
-                        dd = (running_peak - eq) / running_peak
-                        if dd > max_dd:
-                            max_dd = dd
-                result.max_drawdown_pct = max_dd * 100
+            result.max_drawdown_pct = compute_max_drawdown_pct(result.equity_curve)
 
-            # Per-bot breakdown (mirrors engine.py logic)
-            for bot_id, portfolio in zip(names, portfolios):
-                bot_trades   = portfolio.closed_trades
-                wins         = [t for t in bot_trades if t.pnl > 0]
-                gross_profit = sum(t.pnl for t in wins)
-                gross_loss   = abs(sum(t.pnl for t in bot_trades if t.pnl < 0))
-                final_eq     = float(portfolio.total_equity(
-                    candles[-1].close if candles else Decimal("0")
-                ))
-                result.per_bot[bot_id] = {
-                    "bot_id":           bot_id,
-                    "trades":           len(bot_trades),
-                    "wins":             len(wins),
-                    "win_rate_pct":     float(len(wins) / len(bot_trades) * 100) if bot_trades else 0.0,
-                    "total_return_pct": float((final_eq - float(capital_per_bot)) / float(capital_per_bot) * 100),
-                    "total_pnl":        float(sum(t.pnl for t in bot_trades)),
-                    "total_fees_usdt":  float(sum(t.fee_usdt for t in bot_trades)),
-                    "profit_factor":    float(gross_profit / gross_loss) if gross_loss > 0 else 0.0,
-                    "final_equity":     final_eq,
-                    "initial_cash":     float(capital_per_bot),
-                }
+            # Per-bot breakdown
+            last_close = candles[-1].close if candles else Decimal("0")
+            result.per_bot = build_per_bot_breakdown(names, portfolios, capital_per_bot, last_close)
 
             # Force one last progress + final equity point
             self._emit_progress(len(candles))

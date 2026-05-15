@@ -9,16 +9,8 @@ from typing import Callable
 from fastapi import Request
 
 from backtester.api.jobs import JobRegistry
-from backtester.bots import DorothyDCA, EMACross, MACDCross, RSIReversion
+from backtester.bots import BOT_REGISTRY  # re-export
 from backtester.core import BinanceDownloader, CredentialManager
-
-
-BOT_REGISTRY: dict[str, Callable] = {
-    "EMACross": EMACross,
-    "RSIReversion": RSIReversion,
-    "MACDCross": MACDCross,
-    "DorothyDCA": DorothyDCA,
-}
 
 
 @dataclass

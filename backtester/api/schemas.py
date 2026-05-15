@@ -169,6 +169,7 @@ class TradeDTO(BaseModel):
     pnl_pct: float
     fee_usdt: float
     reason: str
+    bot_id: str = ""
 
 
 class EquityPoint(BaseModel):

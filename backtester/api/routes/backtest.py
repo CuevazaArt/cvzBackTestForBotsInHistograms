@@ -50,9 +50,11 @@ def run_backtest(
 
     bot_names = unique_bot_names(req.bots)
     engine = BacktestEngine(cfg)
+    indicator_specs = [{"name": i.name, **i.to_kwargs()} for i in req.indicators]
     result = engine.run(
         bots_instances, candles,
         symbol=req.symbol.upper(), timeframe=req.timeframe,
         bot_names=bot_names,
+        indicator_specs=indicator_specs,
     )
     return result_to_response([b.model_dump() for b in req.bots], result, candles)
