@@ -14,6 +14,8 @@ enum WsEventType {
   result,
   error,
   pong,
+  trialCompleted,
+  optimizeDone,
   // Synthetic (client-side)
   disconnected,
   reconnecting,
@@ -37,6 +39,8 @@ class WsEvent {
       'result' => WsEventType.result,
       'error' => WsEventType.error,
       'pong' => WsEventType.pong,
+      'trial_completed' => WsEventType.trialCompleted,
+      'optimize_done' => WsEventType.optimizeDone,
       _ => WsEventType.unknown,
     };
     return WsEvent(t, (j['data'] as Map<String, dynamic>?) ?? {});
@@ -111,6 +115,7 @@ class WsService {
   void _onDisconnect({String? error}) {
     if (status.value == WsStatus.disconnected) return;
     status.value = WsStatus.disconnected;
+    // ignore: use_null_aware_elements
     _controller?.add(WsEvent(WsEventType.disconnected, {if (error != null) 'message': error}));
 
     if (_wantConnected && _reconnectAttempts < maxReconnectAttempts) {
@@ -160,12 +165,45 @@ class WsService {
         'bots': bots,
         'symbol': symbol,
         'timeframe': timeframe,
+        // ignore: use_null_aware_elements
         if (startMs != null) 'start_ms': startMs,
+        // ignore: use_null_aware_elements
         if (endMs != null) 'end_ms': endMs,
         'initial_cash': initialCash,
         'taker_fee_pct': takerFeePct,
         'slippage_pct': slippagePct,
         'indicators': indicators ?? [],
+      },
+    });
+  }
+
+  void runOptimize({
+    required String bot,
+    required String symbol,
+    required String timeframe,
+    required Map<String, dynamic> searchSpace,
+    required Map<String, dynamic> fixedParams,
+    required String objective,
+    required int trials,
+    required String sampler,
+    double initialCash = 10000,
+    double takerFeePct = 0.1,
+    double slippagePct = 0.05,
+  }) {
+    send({
+      'action': 'optimize',
+      'config': {
+        'bot': bot,
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'search_space': searchSpace,
+        'fixed_params': fixedParams,
+        'objective': objective,
+        'trials': trials,
+        'sampler': sampler,
+        'initial_cash': initialCash,
+        'taker_fee_pct': takerFeePct,
+        'slippage_pct': slippagePct,
       },
     });
   }

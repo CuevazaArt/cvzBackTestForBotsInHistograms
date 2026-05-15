@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from backtester.api.schemas import BacktestRequest
+from backtester.api.schemas import BacktestRequest, OptimizeRequest
 from backtester.api.serialization import json_default
 from backtester.core.engine import BacktestConfig, Candle
 
@@ -108,6 +108,87 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     indicator_specs=[{"name": i.name, **i.to_kwargs()} for i in req.indicators],
                     bot_names=bot_names,
                 )
+
+            elif action == "optimize":
+                try:
+                    req_opt = OptimizeRequest(**msg["config"])
+                except Exception as exc:  # noqa: BLE001
+                    _send("error", {"message": f"Bad config: {exc}"})
+                    continue
+
+                if req_opt.bot not in ctx.bot_registry:
+                    _send("error", {"message": f"Unknown bot '{req_opt.bot}'"})
+                    continue
+
+                search_space: dict = {}
+                for name, param in req_opt.search_space.items():
+                    entry: dict = {
+                        "type": param.type,
+                        "low": param.low,
+                        "high": param.high,
+                    }
+                    if param.step is not None:
+                        entry["step"] = param.step
+                    if param.log:
+                        entry["log"] = True
+                    if param.choices is not None:
+                        entry["choices"] = param.choices
+                    search_space[name] = entry
+
+                from backtester.optimize.optuna_runner import run_optuna
+                from backtester.optimize import Objective, OptimizationConfig
+
+                opt_cfg = OptimizationConfig(
+                    symbol=req_opt.symbol.upper(),
+                    timeframe=req_opt.timeframe,
+                    bot_class=req_opt.bot,
+                    search_space=search_space,
+                    objective=req_opt.objective,
+                    fixed_params=req_opt.fixed_params,
+                    initial_cash=req_opt.initial_cash,
+                    taker_fee_pct=req_opt.taker_fee_pct,
+                    slippage_pct=req_opt.slippage_pct,
+                )
+                objective = Objective(opt_cfg, ctx.downloader, ctx.bot_registry)
+
+                def _on_trial(trial_number: int, result) -> None:
+                    _send("trial_completed", {
+                        "trial": trial_number,
+                        "params": result.params,
+                        "score": result.score,
+                        "metrics": result.metrics,
+                    })
+
+                def _run_opt():
+                    try:
+                        results = run_optuna(
+                            objective,
+                            trials=req_opt.trials,
+                            sampler=req_opt.sampler,
+                            on_trial=_on_trial,
+                        )
+                        runs = [
+                            {
+                                "bot": req_opt.bot,
+                                "params": r.params,
+                                "success": True,
+                                "metrics": r.metrics,
+                                "score": r.score,
+                                "error": None,
+                            }
+                            for r in results
+                        ]
+                        best = results[0] if results else None
+                        _send("optimize_done", {
+                            "runs": runs,
+                            "best_params": best.params if best else {},
+                            "best_score": best.score if best else 0,
+                        })
+                    except Exception as e:
+                        _LOG.exception("Optuna WS failed")
+                        _send("error", {"message": str(e)})
+
+                await asyncio.to_thread(_run_opt)
 
             else:
                 _send("error", {"message": f"Unknown action '{action}'"})

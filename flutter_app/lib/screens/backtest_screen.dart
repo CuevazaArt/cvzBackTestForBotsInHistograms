@@ -35,7 +35,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   List<SymbolEntry> _symbols = [];
   List<BotInfo> _bots = [];
-  Map<String, BotParamsResponse> _botParamSpecs = {};
+  final Map<String, BotParamsResponse> _botParamSpecs = {};
   String? _selectedSymbol;
   String _selectedTimeframe = '1h';
   List<String> _selectedBots = [];
@@ -1066,7 +1066,7 @@ class _BotParamEditorState extends State<_BotParamEditor> {
                   style: const TextStyle(color: Color(0xFF787B86), fontSize: 10)),
               if (p.min != null && p.max != null) ...[
                 Slider(
-                  value: (cur as num).toDouble().clamp(p.min!, p.max!),
+                  value: cur.toDouble().clamp(p.min!, p.max!),
                   min: p.min!,
                   max: p.max!,
                   divisions: p.step != null
@@ -1074,12 +1074,12 @@ class _BotParamEditorState extends State<_BotParamEditor> {
                       : null,
                   label: isInt
                       ? cur.toString()
-                      : (cur as num).toStringAsFixed(3),
+                      : cur.toStringAsFixed(3),
                   onChanged: (v) => _update(key, isInt ? v.round() : double.parse(v.toStringAsFixed(4))),
                   activeColor: const Color(0xFF26a69a),
                 ),
                 Text(
-                  isInt ? '${(cur as num).toInt()}' : '${(cur as num).toStringAsFixed(3)}',
+                  isInt ? '${cur.toInt()}' : cur.toStringAsFixed(3),
                   style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11),
                 ),
               ] else
@@ -1287,7 +1287,9 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                 });
               }
             }
-          } catch (e) {}
+          } catch (e) {
+            // Ignored, we just poll again
+          }
         });
       }
     } catch (e) {
@@ -1340,7 +1342,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
-                    value: _tf,
+                    initialValue: _tf,
                     items: _timeframes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
                     onChanged: (v) {
                       if (v != null) setState(() => _tf = v);

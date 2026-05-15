@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:backtester_shell/services/api_service.dart';
+import 'package:backtester_shell/services/ws_service.dart';
 import 'package:backtester_shell/utils/param_grid.dart';
 import 'package:backtester_shell/widgets/param_bounds_editor.dart';
 
@@ -54,15 +55,77 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   int _optunaTrials = 100;
   String _objective = 'total_return_pct';
 
+  late final WsService _ws;
+  StreamSubscription<WsEvent>? _wsSub;
+
   @override
   void initState() {
     super.initState();
+    _ws = WsService();
+    _connectWs();
     _loadCatalog();
+  }
+
+  void _connectWs() {
+    _wsSub?.cancel();
+    _ws.connect();
+    _wsSub = _ws.events.listen(_onWsEvent);
+  }
+
+  void _onWsEvent(WsEvent ev) {
+    switch (ev.type) {
+      case WsEventType.trialCompleted:
+        if (!mounted) return;
+        final m = ev.data['metrics'] as Map<String, dynamic>? ?? {};
+        setState(() {
+          _progress = (ev.data['trial'] as int) / _optunaTrials * 100;
+          _info = 'Completed trial ${ev.data['trial']} / $_optunaTrials';
+          _trials.add(_TrialRow(
+            bot: _selectedBot ?? '?',
+            params: Map<String, dynamic>.from(ev.data['params'] ?? {}),
+            success: true,
+            error: null,
+            returnPct: (m['total_return_pct'] as num?)?.toDouble() ?? double.nan,
+            trades: (m['trades'] as num?)?.toInt() ?? 0,
+            winRatePct: (m['win_rate_pct'] as num?)?.toDouble() ?? 0,
+            profitFactor: (m['profit_factor'] as num?)?.toDouble() ?? 0,
+            maxDdPct: (m['max_drawdown_pct'] as num?)?.toDouble() ?? 0,
+            finalEquity: (m['final_equity'] as num?)?.toDouble() ?? 0,
+          ));
+          _trials.sort((a, b) => b.returnPct.compareTo(a.returnPct));
+        });
+      case WsEventType.optimizeDone:
+        if (!mounted) return;
+        setState(() {
+          _running = false;
+          _progress = 100;
+          _info = 'Optimization completed.';
+        });
+      case WsEventType.error:
+        if (!mounted) return;
+        setState(() {
+          _running = false;
+          _error = ev.data['message'] as String? ?? 'Optimization error';
+        });
+      case WsEventType.reconnecting:
+      case WsEventType.disconnected:
+        if (!mounted) return;
+        if (_running) {
+          setState(() {
+            _running = false;
+            _error = 'Connection lost';
+          });
+        }
+      default:
+        break;
+    }
   }
 
   @override
   void dispose() {
     _poll?.cancel();
+    _wsSub?.cancel();
+    _ws.disconnect();
     super.dispose();
   }
 
@@ -175,7 +238,7 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
     });
 
     try {
-      final jobId = await widget.apiService.runOptunaOptimization(
+      _ws.runOptimize(
         symbol: _selectedSymbol!,
         timeframe: _selectedTimeframe,
         bot: _selectedBot!,
@@ -185,7 +248,6 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         trials: _optunaTrials,
         sampler: _mode == 'cmaes' ? 'cma' : _mode,
       );
-      _startPolling(jobId);
     } on ApiValidationError catch (e) {
       setState(() {
         _running = false;
