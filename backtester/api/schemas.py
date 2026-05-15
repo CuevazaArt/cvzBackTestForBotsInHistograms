@@ -10,17 +10,18 @@ from pydantic import BaseModel, Field
 # ───────────────────────── Bots ─────────────────────────
 
 
-class BotInfo(BaseModel):
-    name: str
-    description: Optional[str] = None
-
-
 class ParamSpec(BaseModel):
-    type: str  # "int" | "float" | "str"
+    type: str  # "int" | "float" | "bool" | "str"
     default: Any
     min: Optional[float] = None
     max: Optional[float] = None
     step: Optional[float] = None
+
+
+class BotInfo(BaseModel):
+    name: str
+    description: Optional[str] = None
+    params: dict[str, ParamSpec] = Field(default_factory=dict)
 
 
 class BotParamsResponse(BaseModel):
@@ -32,8 +33,8 @@ class BotParamsResponse(BaseModel):
 
 
 class CandleDTO(BaseModel):
-    """Lightweight Charts expects `time` in seconds (epoch)."""
-    time: int
+    """Lightweight Charts expects `time` in epoch *seconds*."""
+    time: int       # epoch seconds (ms // 1000)
     open: float
     high: float
     low: float
@@ -81,19 +82,19 @@ class BacktestRequest(BaseModel):
 
 
 class TradeDTO(BaseModel):
-    entry_time: int     # epoch seconds
-    exit_time: int      # epoch seconds
+    entry_time: int           # epoch seconds
+    exit_time: Optional[int] = None   # None if still open at end of history
     entry_price: float
     exit_price: float
     qty: float
     pnl: float
     pnl_pct: float
     fee_usdt: float
-    reason: str
+    reason: Optional[str] = None
 
 
 class EquityPoint(BaseModel):
-    time: int           # epoch seconds
+    time: int     # epoch seconds
     value: float
 
 
@@ -103,8 +104,9 @@ class BacktestResponse(BaseModel):
     bot: str
     params: dict[str, Any]
     summary: dict[str, Any]
-    trades: list[TradeDTO]
-    equity_curve: list[EquityPoint]
+    candles: list[CandleDTO] = Field(default_factory=list)   # OHLCV for main chart
+    trades: list[TradeDTO] = Field(default_factory=list)
+    equity_curve: list[EquityPoint] = Field(default_factory=list)
 
 
 # ───────────────────────── Experiments ─────────────────────────

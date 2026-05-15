@@ -37,10 +37,13 @@ class ApiClient {
   }
 
   // ── Bots ─────────────────────────────────────────────────────────────────
+  // GET /api/bots now returns [{name, description, params: {key: ParamSpec}}]
 
   Future<List<BotSpec>> fetchBots() => _get(
         '/api/bots',
-        (j) => (j as List).map((b) => BotSpec.fromJson(b as Map<String, dynamic>)).toList(),
+        (j) => (j as List)
+            .map((b) => BotSpec.fromJson(b as Map<String, dynamic>))
+            .toList(),
       );
 
   // ── Candles ───────────────────────────────────────────────────────────────
@@ -73,21 +76,21 @@ class ApiClient {
     required String symbol,
     required String timeframe,
     double initialCash = 10000.0,
-    double takerFeePct = 0.05,
-    double slippagePct = 0.02,
+    double takerFeePct = 0.1,
+    double slippagePct = 0.05,
     int? startMs,
     int? endMs,
   }) =>
       _post(
         '/api/backtest/run',
         {
-          'bot': bot,
-          'params': params,
-          'symbol': symbol,
-          'timeframe': timeframe,
-          'initial_cash': initialCash,
+          'bot':           bot,
+          'params':        params,
+          'symbol':        symbol,
+          'timeframe':     timeframe,
+          'initial_cash':  initialCash,
           'taker_fee_pct': takerFeePct,
-          'slippage_pct': slippagePct,
+          'slippage_pct':  slippagePct,
           if (startMs != null) 'start_ms': startMs,
           if (endMs != null)   'end_ms':   endMs,
         },
@@ -117,6 +120,5 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $body';
 }
 
-// Singleton accessible from anywhere via `ref.read(apiClientProvider)`
 final _defaultClient = ApiClient();
 ApiClient get defaultApiClient => _defaultClient;

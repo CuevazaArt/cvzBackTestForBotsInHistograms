@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any
 
 from backtester.api.schemas import (
@@ -11,18 +10,30 @@ from backtester.api.schemas import (
     EquityPoint,
     TradeDTO,
 )
-from backtester.core.engine import BacktestResult, Trade
+from backtester.core.engine import BacktestResult, Candle, Trade
 
 
-def ms_to_s(ms: int) -> int:
-    """Convert epoch ms → epoch seconds (Lightweight Charts time unit)."""
+def ms_to_s(ms: int | None) -> int | None:
+    """Convert epoch ms → epoch seconds (Lightweight Charts time unit).
+    Returns None if ms is None (open trades with no exit).
+    """
+    if ms is None:
+        return None
     return int(ms) // 1000
 
 
-def row_to_candle_dto(row: dict) -> CandleDTO:
-    """SQLite row → Lightweight Charts candle."""
+def candle_to_dto(c: Candle) -> CandleDTO:
+    """Engine Candle → Lightweight Charts candle (time in seconds)."""
     return CandleDTO(
-        time=ms_to_s(row["timestamp_ms"]),
+        time=int(c.timestamp_ms) // 1000,
+        open=c.open, high=c.high, low=c.low, close=c.close, volume=c.volume,
+    )
+
+
+def row_to_candle_dto(row: dict) -> CandleDTO:
+    """SQLite row → Lightweight Charts candle (time in seconds)."""
+    return CandleDTO(
+        time=int(row["timestamp_ms"]) // 1000,
         open=float(row["open"]),
         high=float(row["high"]),
         low=float(row["low"]),
@@ -33,35 +44,32 @@ def row_to_candle_dto(row: dict) -> CandleDTO:
 
 def trade_to_dto(t: Trade) -> TradeDTO:
     return TradeDTO(
-        entry_time=ms_to_s(t.entry_time),
-        exit_time=ms_to_s(t.exit_time),
+        entry_time=int(t.entry_time) // 1000,
+        exit_time=int(t.exit_time) // 1000 if t.exit_time else None,
         entry_price=float(t.entry_price),
         exit_price=float(t.exit_price),
         qty=float(t.qty),
         pnl=float(t.pnl),
         pnl_pct=float(t.pnl_pct),
         fee_usdt=float(t.fee_usdt),
-        reason=t.reason,
+        reason=t.reason or None,
     )
 
 
-def equity_curve_dto(result: BacktestResult, candles: list) -> list[EquityPoint]:
-    """Align equity curve to candle timestamps."""
-    out: list[EquityPoint] = []
+def equity_curve_to_dtos(result: BacktestResult, candles: list[Candle]) -> list[EquityPoint]:
+    """Align equity curve samples to candle timestamps (one-to-one)."""
     n = min(len(result.equity_curve), len(candles))
-    for i in range(n):
-        out.append(EquityPoint(
-            time=ms_to_s(candles[i].timestamp_ms),
-            value=float(result.equity_curve[i]),
-        ))
-    return out
+    return [
+        EquityPoint(time=int(candles[i].timestamp_ms) // 1000, value=result.equity_curve[i])
+        for i in range(n)
+    ]
 
 
 def result_to_response(
     bot_name: str,
     params: dict[str, Any],
     result: BacktestResult,
-    candles: list,
+    candles: list[Candle],
 ) -> BacktestResponse:
     return BacktestResponse(
         symbol=result.symbol,
@@ -69,13 +77,18 @@ def result_to_response(
         bot=bot_name,
         params=params,
         summary=result.summary(),
+        candles=[candle_to_dto(c) for c in candles],       # ← main chart OHLCV
         trades=[trade_to_dto(t) for t in result.trades],
-        equity_curve=equity_curve_dto(result, candles),
+        equity_curve=equity_curve_to_dtos(result, candles),
     )
 
 
-def json_default(o: Any):
-    """Custom JSON encoder for Decimal etc. (used in WS streaming)."""
-    if isinstance(o, Decimal):
-        return float(o)
+def json_default(o: Any) -> Any:
+    """Custom JSON encoder for types that aren't JSON-native."""
+    if isinstance(o, float):
+        # Guard against inf/nan which break JSON spec
+        if o != o:        return None  # NaN
+        if o == float("inf"):   return 1e308
+        if o == float("-inf"):  return -1e308
+        return o
     raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
