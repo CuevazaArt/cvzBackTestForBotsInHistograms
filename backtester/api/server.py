@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backtester.api.deps import AppContext
 from backtester.api.routes import (
-    backtest, bots, candles, credentials, experiments, optimize, presets, results,
+    analysis, backtest, bots, candles, credentials, experiments, optimize, presets, results,
 )
 from backtester.api.ws import router as ws_router
 
@@ -44,7 +44,7 @@ def create_app() -> FastAPI:
 
     for r in (bots.router, candles.router, backtest.router,
               experiments.router, credentials.router, optimize.router,
-              presets.router, results.router):
+              presets.router, results.router, analysis.router):
         app.include_router(r, prefix="/api")
     app.include_router(ws_router)
 

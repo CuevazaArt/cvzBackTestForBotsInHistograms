@@ -291,6 +291,156 @@ class ApiService {
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     return body['id'] as String;
   }
+
+  // ── Phase 3: Results history + decision-support analysis ──────────────
+
+  /// Browse persisted backtest results (newest first).
+  Future<List<Map<String, dynamic>>> listResults({
+    String? symbol,
+    String? timeframe,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final qp = <String, String>{
+      'limit': '$limit',
+      'offset': '$offset',
+      if (symbol != null && symbol.isNotEmpty) 'symbol': symbol,
+      if (timeframe != null && timeframe.isNotEmpty) 'timeframe': timeframe,
+    };
+    final uri = Uri.parse('$baseUrl/api/backtest').replace(queryParameters: qp);
+    final res = await http.get(uri);
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body);
+    final list = decoded is List
+        ? decoded
+        : (decoded as Map<String, dynamic>)['results'] as List? ?? [];
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  /// Fetch a single persisted result by run_id.
+  Future<Map<String, dynamic>> getResult(String runId) async {
+    final res = await http.get(Uri.parse('$baseUrl/api/backtest/$runId'));
+    if (res.statusCode == 404) {
+      throw ApiError(404, 'Run $runId not found');
+    }
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode, res.body);
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Delete a persisted result.
+  Future<void> deleteResult(String runId) async {
+    final res = await http.delete(Uri.parse('$baseUrl/api/backtest/$runId'));
+    if (res.statusCode != 200 && res.statusCode != 204) {
+      throw ApiError(res.statusCode, res.body);
+    }
+  }
+
+  /// Walk-Forward Analysis — rolling train/test validation.
+  Future<Map<String, dynamic>> runWalkForward({
+    required String symbol,
+    required String timeframe,
+    required String bot,
+    required Map<String, dynamic> baseParams,
+    required Map<String, List<double>> paramRanges,
+    required int trainSize,
+    required int testSize,
+    int? stepSize,
+    bool anchored = false,
+    int trialsPerWindow = 20,
+    String objectiveMetric = 'total_return_pct',
+    double initialCash = 10000.0,
+    double takerFeePct = 0.1,
+    double slippagePct = 0.05,
+    int? startMs,
+    int? endMs,
+  }) async {
+    final body = {
+      'symbol': symbol,
+      'timeframe': timeframe,
+      'bot': bot,
+      'base_params': baseParams,
+      'param_ranges': paramRanges,
+      'train_size': trainSize,
+      'test_size': testSize,
+      if (stepSize != null) 'step_size': stepSize,
+      'anchored': anchored,
+      'trials_per_window': trialsPerWindow,
+      'objective_metric': objectiveMetric,
+      'initial_cash': initialCash,
+      'taker_fee_pct': takerFeePct,
+      'slippage_pct': slippagePct,
+      if (startMs != null) 'start_ms': startMs,
+      if (endMs != null) 'end_ms': endMs,
+    };
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/analysis/walk-forward'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (res.statusCode == 422) {
+      throw ApiValidationError.fromBody(res.body);
+    }
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode, res.body);
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Monte Carlo simulation — pass either a runId or raw trade PnLs.
+  Future<Map<String, dynamic>> runMonteCarlo({
+    String? runId,
+    List<double>? tradePnls,
+    int trials = 1000,
+    String method = 'shuffle',
+    int? seed,
+    double initialEquity = 10000.0,
+  }) async {
+    final body = <String, dynamic>{
+      if (runId != null) 'run_id': runId,
+      if (tradePnls != null) 'trade_pnls': tradePnls,
+      'trials': trials,
+      'method': method,
+      if (seed != null) 'seed': seed,
+      'initial_equity': initialEquity,
+    };
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/analysis/monte-carlo'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (res.statusCode == 422) {
+      throw ApiValidationError.fromBody(res.body);
+    }
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode, res.body);
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Robustness ranking — pass candidates with metrics, get back ranked list.
+  Future<List<Map<String, dynamic>>> rankRobustness({
+    required List<Map<String, dynamic>> candidates,
+    Map<String, double>? weights,
+  }) async {
+    final body = {
+      'candidates': candidates,
+      if (weights != null) 'weights': weights,
+    };
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/analysis/robustness'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode, res.body);
+    }
+    final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+    return (decoded['ranked'] as List? ?? []).cast<Map<String, dynamic>>();
+  }
 }
 
 /// One field-level validation issue returned by FastAPI/Pydantic.

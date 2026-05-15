@@ -36,17 +36,45 @@ class Candle:
 
 @dataclass
 class Position:
-    """Open trading position."""
+    """Open trading position.
+
+    Tracks Maximum Favorable Excursion (MFE) and Maximum Adverse Excursion (MAE)
+    so closed trades can report how far in-favor / against the trade went before
+    being closed. Useful for stop placement and trade quality analysis.
+    """
     entry_price: Decimal
     qty: Decimal
     entry_idx: int
     entry_time: int
     bot_id: str = ""
+    # Running excursion trackers (updated each candle while position is open)
+    max_favorable_price: Decimal = Decimal("0")  # Highest price seen → MFE
+    max_adverse_price: Decimal = Decimal("0")    # Lowest price seen  → MAE
+
+    def update_excursion(self, high: Decimal, low: Decimal) -> None:
+        """Update MFE/MAE trackers given the current candle's high/low.
+
+        Initializes from entry_price on first call; subsequent calls expand
+        the favorable/adverse extremes.
+        """
+        if self.max_favorable_price == 0:
+            self.max_favorable_price = self.entry_price
+            self.max_adverse_price = self.entry_price
+        if high > self.max_favorable_price:
+            self.max_favorable_price = high
+        if low < self.max_adverse_price or self.max_adverse_price == 0:
+            self.max_adverse_price = low
 
 
 @dataclass
 class Trade:
-    """Closed trade record."""
+    """Closed trade record.
+
+    Includes Maximum Favorable Excursion (MFE) and Maximum Adverse Excursion
+    (MAE) — the highest unrealized profit and lowest unrealized loss reached
+    while the position was open. Reported in absolute Decimal and as percent
+    of entry price for easy comparison across symbols.
+    """
     entry_price: Decimal
     exit_price: Decimal
     qty: Decimal
@@ -59,6 +87,10 @@ class Trade:
     fee_usdt: Decimal
     reason: str
     bot_id: str = ""
+    # Excursion stats (snapshot from Position at close time)
+    mfe_pct: Decimal = Decimal("0")  # Max favorable excursion %
+    mae_pct: Decimal = Decimal("0")  # Max adverse excursion % (negative)
+    duration_bars: int = 0  # Number of bars position was held
 
 
 @dataclass
@@ -244,6 +276,10 @@ class BacktestEngine:
                     elif side == "SELL":
                         self._process_sell(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
 
+                # Update MFE/MAE trackers for all open positions in this bot
+                for pos in portfolio.positions:
+                    pos.update_excursion(candle.high, candle.low)
+
             # Global equity = sum of all bot portfolios
             total_equity = sum(p.total_equity(candle.close) for p in portfolios)
             result.equity_curve.append(total_equity)
@@ -330,6 +366,17 @@ class BacktestEngine:
 
             portfolio.cash += revenue_this - prorated_fee
 
+            # Compute MFE/MAE %: position is long-only, so MFE uses the highest
+            # high seen, MAE uses the lowest low. Falls back gracefully if the
+            # position closed on the same candle it opened (no excursion data).
+            if pos.entry_price > 0 and pos.max_favorable_price > 0:
+                mfe_pct = (pos.max_favorable_price - pos.entry_price) / pos.entry_price * 100
+                mae_pct = (pos.max_adverse_price - pos.entry_price) / pos.entry_price * 100
+            else:
+                mfe_pct = Decimal("0")
+                mae_pct = Decimal("0")
+            duration_bars = max(0, len(result.equity_curve) - pos.entry_idx)
+
             trade = Trade(
                 entry_price=pos.entry_price,
                 exit_price=fill_price,
@@ -343,6 +390,9 @@ class BacktestEngine:
                 fee_usdt=prorated_fee,
                 reason=reason,
                 bot_id=bot_id,
+                mfe_pct=mfe_pct,
+                mae_pct=mae_pct,
+                duration_bars=duration_bars,
             )
             portfolio.closed_trades.append(trade)
 

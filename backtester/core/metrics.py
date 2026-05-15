@@ -119,7 +119,126 @@ def compute_metrics(result: BacktestResult) -> dict[str, Any]:
     if durations_ms:
         avg_ms = sum(durations_ms) / len(durations_ms)
         base["avg_trade_duration_hrs"] = round(avg_ms / 3_600_000, 2)
+        base["median_trade_duration_hrs"] = round(
+            sorted(durations_ms)[len(durations_ms) // 2] / 3_600_000, 2,
+        )
     else:
         base["avg_trade_duration_hrs"] = 0.0
+        base["median_trade_duration_hrs"] = 0.0
+
+    # ── Advanced metrics (Phase 3) ───────────────────────────────
+    base["ulcer_index"] = _ulcer_index(result.equity_curve)
+    base["recovery_factor"] = _recovery_factor(result, base["total_return_pct"])
+    base.update(_streak_analysis(closed))
+    base.update(_excursion_stats(closed))
 
     return base
+
+
+# ── Advanced metric helpers ──────────────────────────────────────
+
+
+def _ulcer_index(equity_curve: list[Decimal]) -> float:
+    """Ulcer Index — RMS of percentage drawdowns at every bar.
+
+    Penalizes deep AND prolonged drawdowns more harshly than max-DD alone.
+    Lower is better. Used for risk-aware ranking (Martin ratio = return / UI).
+    """
+    if not equity_curve:
+        return 0.0
+    peak = Decimal("0")
+    squared = []
+    for eq in equity_curve:
+        if eq > peak:
+            peak = eq
+        if peak > 0:
+            dd = float((peak - eq) / peak * 100)  # %
+            squared.append(dd * dd)
+    if not squared:
+        return 0.0
+    return round(math.sqrt(sum(squared) / len(squared)), 4)
+
+
+def _recovery_factor(result: BacktestResult, total_return_pct: float) -> float:
+    """Recovery Factor — total net return divided by max drawdown.
+
+    Measures how efficiently the strategy recovers from its worst dip.
+    Values >2 are typically considered strong; <1 is concerning.
+    """
+    dd = float(result.max_drawdown_pct)
+    if dd <= 0:
+        return 0.0
+    return round(abs(total_return_pct) / dd, 4)
+
+
+def _streak_analysis(closed_trades: list) -> dict[str, Any]:
+    """Compute consecutive win/loss streaks and stability metrics.
+
+    Returns:
+        max_consecutive_wins  : longest winning streak count
+        max_consecutive_losses: longest losing streak count
+        avg_consecutive_wins  : mean length of winning runs
+        avg_consecutive_losses: mean length of losing runs
+    """
+    if not closed_trades:
+        return {
+            "max_consecutive_wins": 0,
+            "max_consecutive_losses": 0,
+            "avg_consecutive_wins": 0.0,
+            "avg_consecutive_losses": 0.0,
+        }
+    win_runs: list[int] = []
+    loss_runs: list[int] = []
+    cur_win, cur_loss = 0, 0
+    for t in closed_trades:
+        if t.pnl > 0:
+            cur_win += 1
+            if cur_loss > 0:
+                loss_runs.append(cur_loss)
+                cur_loss = 0
+        elif t.pnl < 0:
+            cur_loss += 1
+            if cur_win > 0:
+                win_runs.append(cur_win)
+                cur_win = 0
+        # break-even (pnl == 0) does not extend either streak
+    if cur_win > 0:
+        win_runs.append(cur_win)
+    if cur_loss > 0:
+        loss_runs.append(cur_loss)
+    return {
+        "max_consecutive_wins": max(win_runs) if win_runs else 0,
+        "max_consecutive_losses": max(loss_runs) if loss_runs else 0,
+        "avg_consecutive_wins": round(sum(win_runs) / len(win_runs), 2) if win_runs else 0.0,
+        "avg_consecutive_losses": round(sum(loss_runs) / len(loss_runs), 2) if loss_runs else 0.0,
+    }
+
+
+def _excursion_stats(closed_trades: list) -> dict[str, Any]:
+    """Aggregate MFE/MAE statistics over all closed trades.
+
+    Helps decide stop-loss / take-profit placement:
+    - High avg_mfe with low avg_pnl → exits too early (leaving money)
+    - High avg_mae with positive avg_pnl → stops too tight (good risk)
+    """
+    if not closed_trades:
+        return {
+            "avg_mfe_pct": 0.0,
+            "avg_mae_pct": 0.0,
+            "max_mfe_pct": 0.0,
+            "max_mae_pct": 0.0,
+            "mfe_to_pnl_ratio": 0.0,
+        }
+    mfes = [float(t.mfe_pct) for t in closed_trades]
+    maes = [float(t.mae_pct) for t in closed_trades]
+    pnl_pcts = [float(t.pnl_pct) for t in closed_trades]
+    avg_mfe = sum(mfes) / len(mfes)
+    avg_pnl_pct = sum(pnl_pcts) / len(pnl_pcts)
+    return {
+        "avg_mfe_pct": round(avg_mfe, 4),
+        "avg_mae_pct": round(sum(maes) / len(maes), 4),
+        "max_mfe_pct": round(max(mfes), 4),
+        "max_mae_pct": round(min(maes), 4),
+        # mfe_to_pnl > 2 suggests exits leave a lot of profit on the table
+        "mfe_to_pnl_ratio": round(avg_mfe / abs(avg_pnl_pct), 4) if avg_pnl_pct != 0 else 0.0,
+    }
