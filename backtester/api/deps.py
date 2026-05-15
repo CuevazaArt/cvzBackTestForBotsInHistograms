@@ -11,6 +11,7 @@ from fastapi import Request
 from backtester.api.jobs import JobRegistry
 from backtester.bots import BOT_REGISTRY  # re-export
 from backtester.core import BinanceDownloader, CredentialManager
+from backtester.core.preset_store import PresetStore
 
 
 @dataclass
@@ -20,6 +21,7 @@ class AppContext:
     credentials: CredentialManager
     bot_registry: dict[str, Callable]
     jobs: JobRegistry
+    presets: PresetStore
 
     @classmethod
     def build(cls, base_dir: Path | None = None) -> "AppContext":
@@ -35,6 +37,7 @@ class AppContext:
             credentials=CredentialManager(vault_dir),
             bot_registry=dict(BOT_REGISTRY),
             jobs=JobRegistry(data_dir / "jobs.sqlite"),
+            presets=PresetStore(data_dir / "presets.sqlite"),
         )
 
 
