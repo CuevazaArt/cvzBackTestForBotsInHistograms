@@ -4,6 +4,8 @@ import 'package:backtester_shell/services/api_service.dart';
 import 'package:backtester_shell/services/ws_service.dart';
 import 'package:backtester_shell/utils/param_grid.dart';
 import 'package:backtester_shell/widgets/param_bounds_editor.dart';
+import 'package:backtester_shell/widgets/optimization_heatmap.dart';
+import 'package:backtester_shell/widgets/validation_error_dialog.dart';
 
 /// Payload handed off to the Backtest screen when the user clicks "Apply best".
 class OptimizationResult {
@@ -56,6 +58,13 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   int _optunaTrials = 100;
   String _objective = 'total_return_pct';
 
+  // ── Heatmap ───────────────────────────────────────────────────
+  String? _heatParamX;
+  String? _heatParamY;
+  String _heatMetric = 'total_return_pct';
+  int? _heatHighlightIndex;  // index in _sorted leaderboard rows
+  final ScrollController _leaderboardScroll = ScrollController();
+
   WsService get _ws => widget.wsService;
   StreamSubscription<WsEvent>? _wsSub;
 
@@ -71,21 +80,23 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
       case WsEventType.trialCompleted:
         if (!mounted) return;
         final m = ev.data['metrics'] as Map<String, dynamic>? ?? {};
+        final newRow = _TrialRow(
+          bot: _selectedBot ?? '?',
+          params: Map<String, dynamic>.from(ev.data['params'] ?? {}),
+          success: true,
+          error: null,
+          returnPct: (m['total_return_pct'] as num?)?.toDouble() ?? double.nan,
+          trades: (m['trades'] as num?)?.toInt() ?? 0,
+          winRatePct: (m['win_rate_pct'] as num?)?.toDouble() ?? 0,
+          profitFactor: (m['profit_factor'] as num?)?.toDouble() ?? 0,
+          maxDdPct: (m['max_drawdown_pct'] as num?)?.toDouble() ?? 0,
+          finalEquity: (m['final_equity'] as num?)?.toDouble() ?? 0,
+        );
+        _autoPickHeatParams([newRow]);
         setState(() {
           _progress = (ev.data['trial'] as int) / _optunaTrials * 100;
           _info = 'Completed trial ${ev.data['trial']} / $_optunaTrials';
-          _trials.add(_TrialRow(
-            bot: _selectedBot ?? '?',
-            params: Map<String, dynamic>.from(ev.data['params'] ?? {}),
-            success: true,
-            error: null,
-            returnPct: (m['total_return_pct'] as num?)?.toDouble() ?? double.nan,
-            trades: (m['trades'] as num?)?.toInt() ?? 0,
-            winRatePct: (m['win_rate_pct'] as num?)?.toDouble() ?? 0,
-            profitFactor: (m['profit_factor'] as num?)?.toDouble() ?? 0,
-            maxDdPct: (m['max_drawdown_pct'] as num?)?.toDouble() ?? 0,
-            finalEquity: (m['final_equity'] as num?)?.toDouble() ?? 0,
-          ));
+          _trials.add(newRow);
           _trials.sort((a, b) => b.returnPct.compareTo(a.returnPct));
         });
       case WsEventType.optimizeDone:
@@ -119,7 +130,49 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   void dispose() {
     _poll?.cancel();
     _wsSub?.cancel();
+    _leaderboardScroll.dispose();
     super.dispose();
+  }
+
+  // Auto-pick heatmap axes from the first trial's param keys when not yet set.
+  void _autoPickHeatParams(List<_TrialRow> rows) {
+    if (rows.isEmpty) return;
+    final keys = rows.first.params.keys.toList();
+    if (_heatParamX == null && keys.isNotEmpty) {
+      _heatParamX = keys[0];
+    }
+    if (_heatParamY == null && keys.length > 1) {
+      _heatParamY = keys[1];
+    }
+  }
+
+  void _onHeatCellTap(HeatmapTrial tapped, List<_TrialRow> sorted) {
+    // Find matching leaderboard row by comparing params.
+    int idx = -1;
+    for (int i = 0; i < sorted.length; i++) {
+      final r = sorted[i];
+      if (!r.success) continue;
+      bool match = true;
+      for (final entry in tapped.params.entries) {
+        final rv = r.params[entry.key];
+        if (rv == null) { match = false; break; }
+        if ((rv as num).toDouble() != entry.value.toDouble()) {
+          match = false;
+          break;
+        }
+      }
+      if (match) { idx = i; break; }
+    }
+    if (idx < 0) return;
+    setState(() => _heatHighlightIndex = idx);
+    // Scroll leaderboard to the matching row (+1 for the header row).
+    const rowH = 26.0;
+    final offset = (idx + 1) * rowH;
+    _leaderboardScroll.animateTo(
+      offset.clamp(0.0, _leaderboardScroll.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeInOut,
+    );
   }
 
   Future<void> _loadCatalog() async {
@@ -174,6 +227,9 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
       _progress = 0;
       _trials = [];
       _jobMessage = null;
+      _heatParamX = null;
+      _heatParamY = null;
+      _heatHighlightIndex = null;
     });
 
     try {
@@ -187,10 +243,8 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
       );
       _startPolling(jobId);
     } on ApiValidationError catch (e) {
-      setState(() {
-        _running = false;
-        _error = 'Validation: $e';
-      });
+      setState(() { _running = false; });
+      if (mounted) await ValidationErrorDialog.show(context, e);
     } catch (e) {
       setState(() {
         _running = false;
@@ -228,6 +282,9 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
       _progress = 0;
       _trials = [];
       _jobMessage = null;
+      _heatParamX = null;
+      _heatParamY = null;
+      _heatHighlightIndex = null;
     });
 
     try {
@@ -242,10 +299,8 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         sampler: _mode == 'cmaes' ? 'cma' : _mode,
       );
     } on ApiValidationError catch (e) {
-      setState(() {
-        _running = false;
-        _error = 'Validation: $e';
-      });
+      setState(() { _running = false; });
+      if (mounted) await ValidationErrorDialog.show(context, e);
     } catch (e) {
       setState(() {
         _running = false;
@@ -309,12 +364,157 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
       if (b.returnPct.isNaN) return -1;
       return b.returnPct.compareTo(a.returnPct);
     });
+    _autoPickHeatParams(rows);
     setState(() {
       _running = false;
       _trials = rows;
       _info = 'Completed ${rows.length} trials. Top: '
           '${rows.isNotEmpty && rows.first.success ? "${rows.first.returnPct.toStringAsFixed(2)}%" : "n/a"}';
     });
+  }
+
+  Widget _buildRightPanel() {
+    // Build the sorted trial list once so both leaderboard and heatmap share it.
+    final sorted = _trials.isEmpty
+        ? <_TrialRow>[]
+        : (() {
+            final list = List<_TrialRow>.from(_trials);
+            list.sort((a, b) {
+              if (a.success != b.success) return a.success ? -1 : 1;
+              if (a.returnPct.isNaN) return 1;
+              if (b.returnPct.isNaN) return -1;
+              return b.returnPct.compareTo(a.returnPct);
+            });
+            return list;
+          })();
+
+    final paramKeys = sorted.isNotEmpty ? sorted.first.params.keys.toList() : <String>[];
+    final showHeatmap = sorted.length >= 4 &&
+        paramKeys.length >= 2 &&
+        _heatParamX != null &&
+        _heatParamY != null;
+
+    // Convert _TrialRow list → HeatmapTrial list
+    List<HeatmapTrial> toHeatTrials(List<_TrialRow> rows) => rows
+        .where((r) => r.success)
+        .map((r) => HeatmapTrial(
+              params: r.params.map((k, v) {
+                final n = v is num ? v : num.tryParse(v.toString()) ?? 0;
+                return MapEntry(k, n);
+              }),
+              metrics: {
+                'total_return_pct': r.returnPct.isFinite ? r.returnPct : 0.0,
+                'win_rate_pct': r.winRatePct,
+                'profit_factor': r.profitFactor,
+                'max_drawdown_pct': r.maxDdPct,
+                'final_equity': r.finalEquity,
+                'trades': r.trades.toDouble(),
+              },
+            ))
+        .toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ── Leaderboard header ──────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Row(
+            children: [
+              const Text('LEADERBOARD',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                      color: Color(0xFF787B86), letterSpacing: 1)),
+              const Spacer(),
+              if (_trials.isNotEmpty && widget.onApplyBest != null)
+                FilledButton.icon(
+                  onPressed: _applyBest,
+                  icon: const Icon(Icons.shortcut, size: 14),
+                  label: const Text('Apply best to Backtest'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF26a69a),
+                    minimumSize: const Size(0, 30),
+                    textStyle: const TextStyle(fontSize: 11),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        // ── Leaderboard table ───────────────────────────────────
+        Expanded(
+          flex: showHeatmap ? 3 : 1,
+          child: _trials.isEmpty
+              ? Center(
+                  child: Text(
+                    _running
+                        ? 'Running trials…'
+                        : 'Configure bounds and click Run to start.',
+                    style: const TextStyle(color: Color(0xFF787B86), fontSize: 12),
+                  ),
+                )
+              : _LeaderboardTable(
+                  rows: _trials,
+                  scrollController: _leaderboardScroll,
+                  highlightIndex: _heatHighlightIndex,
+                ),
+        ),
+        // ── Heatmap section ─────────────────────────────────────
+        if (sorted.isNotEmpty) ...[
+          const Divider(height: 1, color: Color(0xFF2B2B43)),
+          // Controls row
+          Container(
+            color: const Color(0xFF1E222D),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Row(
+              children: [
+                const Text('HEATMAP',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                        color: Color(0xFF787B86), letterSpacing: 1)),
+                const SizedBox(width: 12),
+                _HeatDropdown(
+                  label: 'X',
+                  value: _heatParamX,
+                  items: paramKeys,
+                  onChanged: (v) => setState(() => _heatParamX = v),
+                ),
+                const SizedBox(width: 8),
+                _HeatDropdown(
+                  label: 'Y',
+                  value: _heatParamY,
+                  items: paramKeys,
+                  onChanged: (v) => setState(() => _heatParamY = v),
+                ),
+                const SizedBox(width: 8),
+                _HeatDropdown(
+                  label: 'Metric',
+                  value: _heatMetric,
+                  items: const [
+                    'total_return_pct',
+                    'win_rate_pct',
+                    'profit_factor',
+                    'max_drawdown_pct',
+                    'trades',
+                    'final_equity',
+                  ],
+                  onChanged: (v) { if (v != null) setState(() => _heatMetric = v); },
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: showHeatmap ? 2 : 0,
+            child: showHeatmap
+                ? OptimizationHeatmap(
+                    trials: toHeatTrials(sorted),
+                    paramX: _heatParamX!,
+                    paramY: _heatParamY!,
+                    metric: _heatMetric,
+                    onCellTap: (t) => _onHeatCellTap(t, sorted),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ],
+    );
   }
 
   void _applyBest() {
@@ -445,47 +645,9 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
                   ),
                 ),
               ),
-              // Right: Leaderboard
+              // Right: Leaderboard + Heatmap
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                      child: Row(
-                        children: [
-                          const Text('LEADERBOARD',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                                  color: Color(0xFF787B86), letterSpacing: 1)),
-                          const Spacer(),
-                          if (_trials.isNotEmpty && widget.onApplyBest != null)
-                            FilledButton.icon(
-                              onPressed: _applyBest,
-                              icon: const Icon(Icons.shortcut, size: 14),
-                              label: const Text('Apply best to Backtest'),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF26a69a),
-                                minimumSize: const Size(0, 30),
-                                textStyle: const TextStyle(fontSize: 11),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: _trials.isEmpty
-                          ? Center(
-                              child: Text(
-                                _running
-                                    ? 'Running trials…'
-                                    : 'Configure bounds and click Run to start.',
-                                style: const TextStyle(color: Color(0xFF787B86), fontSize: 12),
-                              ),
-                            )
-                          : _LeaderboardTable(rows: _trials),
-                    ),
-                  ],
-                ),
+                child: _buildRightPanel(),
               ),
             ],
           ),
@@ -525,7 +687,9 @@ class _TrialRow {
 
 class _LeaderboardTable extends StatefulWidget {
   final List<_TrialRow> rows;
-  const _LeaderboardTable({required this.rows});
+  final ScrollController? scrollController;
+  final int? highlightIndex;
+  const _LeaderboardTable({required this.rows, this.scrollController, this.highlightIndex});
 
   @override
   State<_LeaderboardTable> createState() => _LeaderboardTableState();
@@ -574,10 +738,12 @@ class _LeaderboardTableState extends State<_LeaderboardTable> {
   Widget build(BuildContext context) {
     final rows = _sorted;
     return ListView.builder(
+      controller: widget.scrollController,
       itemCount: rows.length + 1,
       itemBuilder: (ctx, i) {
         if (i == 0) return _header();
-        return _row(rows[i - 1], i, i.isEven);
+        final highlighted = widget.highlightIndex != null && widget.highlightIndex == (i - 1);
+        return _row(rows[i - 1], i, i.isEven, highlighted: highlighted);
       },
     );
   }
@@ -627,7 +793,7 @@ class _LeaderboardTableState extends State<_LeaderboardTable> {
     );
   }
 
-  Widget _row(_TrialRow t, int rank, bool alt) {
+  Widget _row(_TrialRow t, int rank, bool alt, {bool highlighted = false}) {
     final ret = t.returnPct;
     final retColor = !t.success || ret.isNaN
         ? const Color(0xFF787B86)
@@ -660,7 +826,9 @@ class _LeaderboardTableState extends State<_LeaderboardTable> {
         .join(' · ');
 
     return Container(
-      color: alt ? const Color(0xFF1A1D26) : const Color(0xFF1E222D),
+      color: highlighted
+          ? const Color(0xFFb388ff).withValues(alpha: 0.18)
+          : (alt ? const Color(0xFF1A1D26) : const Color(0xFF1E222D)),
       child: Row(
         children: [
           cell('$rank', flex: 1, color: const Color(0xFF787B86)),
@@ -859,6 +1027,43 @@ class _OptTopBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _HeatDropdown extends StatelessWidget {
+  final String label;
+  final String? value;
+  final List<String> items;
+  final ValueChanged<String?> onChanged;
+
+  const _HeatDropdown({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('$label:', style: const TextStyle(color: Color(0xFF787B86), fontSize: 10)),
+        const SizedBox(width: 4),
+        DropdownButton<String>(
+          value: value,
+          isDense: true,
+          underline: const SizedBox(),
+          style: const TextStyle(color: Color(0xFFb388ff), fontSize: 11),
+          dropdownColor: const Color(0xFF1E222D),
+          hint: Text(label, style: const TextStyle(color: Color(0xFF787B86), fontSize: 11)),
+          items: items
+              .map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 11))))
+              .toList(),
+          onChanged: onChanged,
+        ),
+      ],
     );
   }
 }

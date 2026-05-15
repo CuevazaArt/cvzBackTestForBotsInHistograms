@@ -64,7 +64,7 @@ def start_optimization(
                 taker_fee_pct=req.taker_fee_pct,
                 slippage_pct=req.slippage_pct,
             )
-            objective = Objective(opt_cfg, ctx.downloader, ctx.bot_registry)
+            objective = Objective(opt_cfg, ctx.downloader, ctx.bot_registry, cache=ctx.indicator_cache)
 
             collected_trials: list[dict] = []
 
@@ -107,6 +107,7 @@ def start_optimization(
                 f"Best: {req.objective}={best.score:.4f}" if best else "No results"
             )
 
+            cache_stats = objective._cache.stats() if objective._cache is not None else None
             ctx.jobs.update(
                 job.id,
                 status="done",
@@ -119,6 +120,7 @@ def start_optimization(
                     "best_score": best.score if best else 0,
                     "objective": req.objective,
                     "sampler": req.sampler,
+                    "cache_stats": cache_stats,
                 },
             )
         except ImportError as exc:

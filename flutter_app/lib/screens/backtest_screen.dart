@@ -11,6 +11,7 @@ import 'package:backtester_shell/widgets/chart_webview.dart';
 import 'package:backtester_shell/widgets/results_panel.dart';
 import 'package:backtester_shell/widgets/trades_table.dart';
 import 'package:backtester_shell/widgets/mini_weight_chart.dart';
+import 'package:backtester_shell/widgets/validation_error_dialog.dart';
 
 /// Main backtest workspace: controls + chart + results.
 class BacktestScreen extends StatefulWidget {
@@ -464,7 +465,8 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onRun: _runBacktest,
           onDownload: () => _showDownloadDialog(context),
           onSavePreset: _savePresetDialog,
-          onLoadPreset: _loadPresetDialog,
+          onApplyPreset: _applyPreset,
+          onManagePresets: _loadPresetDialog,
           onReconnect: _ws.connect,
         ),
         if (_symbols.isEmpty)
@@ -559,7 +561,8 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onRun;
   final VoidCallback onDownload;
   final VoidCallback onSavePreset;
-  final VoidCallback onLoadPreset;
+  final void Function(BacktestPreset) onApplyPreset;
+  final VoidCallback onManagePresets;
   final VoidCallback onReconnect;
 
   const _TopBar({
@@ -589,7 +592,8 @@ class _TopBar extends StatelessWidget {
     required this.onRun,
     required this.onDownload,
     required this.onSavePreset,
-    required this.onLoadPreset,
+    required this.onApplyPreset,
+    required this.onManagePresets,
     required this.onReconnect,
   });
 
@@ -667,18 +671,10 @@ class _TopBar extends StatelessWidget {
           ),
           const SizedBox(width: 4),
           // ── Presets ─────────────────────────────────────────────
-          PopupMenuButton<String>(
-            tooltip: 'Presets',
-            icon: const Icon(Icons.bookmarks_outlined, size: 16, color: Color(0xFFD9D9D9)),
-            color: const Color(0xFF1E222D),
-            onSelected: (v) {
-              if (v == 'save') onSavePreset();
-              if (v == 'load') onLoadPreset();
-            },
-            itemBuilder: (ctx) => const [
-              PopupMenuItem(value: 'save', child: Text('Save current as preset')),
-              PopupMenuItem(value: 'load', child: Text('Load preset…')),
-            ],
+          _PresetsToolbar(
+            onSavePreset: onSavePreset,
+            onApplyPreset: onApplyPreset,
+            onManagePresets: onManagePresets,
           ),
           const SizedBox(width: 8),
           FilledButton.icon(
@@ -1088,6 +1084,100 @@ class _BotParamEditorState extends State<_BotParamEditor> {
   }
 }
 
+// ── Presets toolbar ───────────────────────────────────────────
+
+/// Inline dropdown + save button for presets.
+/// Manages its own preset list so _TopBar stays stateless.
+class _PresetsToolbar extends StatefulWidget {
+  final VoidCallback onSavePreset;
+  final void Function(BacktestPreset) onApplyPreset;
+  /// Optional callback to open the full preset manager dialog (with delete).
+  final VoidCallback? onManagePresets;
+  const _PresetsToolbar({
+    required this.onSavePreset,
+    required this.onApplyPreset,
+    this.onManagePresets,
+  });
+
+  @override
+  State<_PresetsToolbar> createState() => _PresetsToolbarState();
+}
+
+class _PresetsToolbarState extends State<_PresetsToolbar> {
+  final _svc = PresetsService();
+  List<BacktestPreset> _presets = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final list = await _svc.list();
+    if (mounted) setState(() => _presets = list);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DropdownButton<BacktestPreset>(
+          hint: const Text('Preset',
+              style: TextStyle(color: Color(0xFF787B86), fontSize: 12)),
+          value: null,
+          items: _presets
+              .map((p) => DropdownMenuItem(
+                    value: p,
+                    child: Text(p.name,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFFD9D9D9))),
+                  ))
+              .toList(),
+          onChanged: (p) {
+            if (p != null) widget.onApplyPreset(p);
+          },
+          onTap: _reload,
+          underline: const SizedBox(),
+          isDense: true,
+          style: const TextStyle(color: Color(0xFFD9D9D9)),
+          dropdownColor: const Color(0xFF1E222D),
+          iconEnabledColor: const Color(0xFF787B86),
+          iconSize: 16,
+        ),
+        Tooltip(
+          message: 'Save current as preset',
+          child: IconButton(
+            iconSize: 14,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+            icon: const Icon(Icons.bookmark_add_outlined, color: Color(0xFF787B86)),
+            onPressed: () {
+              widget.onSavePreset();
+              // Reload after a brief delay to catch the newly saved preset.
+              Future.delayed(const Duration(milliseconds: 500), _reload);
+            },
+          ),
+        ),
+        if (widget.onManagePresets != null)
+          Tooltip(
+            message: 'Manage presets',
+            child: IconButton(
+              iconSize: 14,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+              icon: const Icon(Icons.bookmarks_outlined, color: Color(0xFF787B86)),
+              onPressed: () async {
+                widget.onManagePresets!();
+                Future.delayed(const Duration(milliseconds: 500), _reload);
+              },
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 // ── Download dialog ────────────────────────────────────────────
 
 class _DownloadDialog extends StatefulWidget {
@@ -1280,6 +1370,9 @@ class _DownloadDialogState extends State<_DownloadDialog> {
           }
         });
       }
+    } on ApiValidationError catch (e) {
+      setState(() { _loading = false; });
+      if (mounted) await ValidationErrorDialog.show(context, e);
     } catch (e) {
       setState(() {
         _loading = false;

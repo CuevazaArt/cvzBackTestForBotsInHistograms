@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:backtester_shell/services/api_service.dart';
 import 'package:backtester_shell/screens/backtest_screen.dart';
@@ -28,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<State<BacktestScreen>> _backtestKey = GlobalKey();
 
   late final WsService _wsService;
+  Timer? _healthTimer;
 
   @override
   void initState() {
@@ -39,16 +41,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _healthTimer?.cancel();
     _wsService.disconnect();
     super.dispose();
   }
 
   Future<void> _pollHealth() async {
-    while (mounted) {
-      final h = await widget.apiService.checkHealth();
-      if (mounted) setState(() { _backendOnline = h.ok; _checking = false; });
-      await Future.delayed(const Duration(seconds: 5));
-    }
+    if (!mounted) return;
+    final h = await widget.apiService.checkHealth();
+    if (!mounted) return;
+    setState(() { _backendOnline = h.ok; _checking = false; });
+    _healthTimer = Timer(const Duration(seconds: 5), () { _pollHealth(); });
   }
 
   void _onApplyBest(OptimizationResult result) {
