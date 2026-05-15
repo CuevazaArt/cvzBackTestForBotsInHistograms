@@ -83,7 +83,10 @@ class WsService {
     this.maxReconnectAttempts = 8,
   });
 
-  Stream<WsEvent> get events => _controller!.stream;
+  Stream<WsEvent> get events {
+    _controller ??= StreamController<WsEvent>.broadcast();
+    return _controller!.stream;
+  }
   bool get isConnected => status.value == WsStatus.connected;
 
   Future<void> connect() async {
