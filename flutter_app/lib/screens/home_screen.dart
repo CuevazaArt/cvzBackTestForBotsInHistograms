@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:backtester_shell/services/api_service.dart';
+import 'package:backtester_shell/screens/analysis_screen.dart';
 import 'package:backtester_shell/screens/backtest_screen.dart';
 import 'package:backtester_shell/screens/optimization_screen.dart';
 import 'package:backtester_shell/screens/settings_screen.dart';
@@ -136,6 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   defaultSlippagePct: _settings.defaultSlippagePct,
                   onApplyBest: _onApplyBest,
                 ),
+              2 => AnalysisScreen(apiService: _apiService),
               _ => SettingsScreen(
                   apiService: _apiService,
                   initialSettings: _settings,
@@ -169,6 +171,7 @@ class _Sidebar extends StatelessWidget {
     const items = [
       (Icons.candlestick_chart, 'Backtest'),
       (Icons.science_outlined, 'Optimize'),
+      (Icons.analytics_outlined, 'Analysis'),
       (Icons.settings_outlined, 'Settings'),
     ];
 

@@ -10,9 +10,13 @@ from __future__ import annotations
 import math
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from backtester.core.cache import IndicatorCache
 from backtester.core.engine import BacktestConfig, Candle
+
+if TYPE_CHECKING:
+    from backtester.core import BinanceDownloader
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -105,7 +109,7 @@ def test_streaming_engine_no_cache_still_works():
 # ── ExperimentRunner cache_stats tests ───────────────────────────────────────
 
 
-def _make_downloader(tmp_path: Path) -> "BinanceDownloader":  # type: ignore[name-defined]
+def _make_downloader(tmp_path: Path) -> BinanceDownloader:
     """Create a downloader pre-seeded with synthetic candles."""
     import math
     from backtester.core import BinanceDownloader

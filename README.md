@@ -62,6 +62,35 @@ flutter run -d windows
 - 🔐 Credenciales encriptadas con Fernet (local)
 - 🖥️ Interfaz nativa Flutter + gráficos profesionales TradingView
 
+## Phase 3 — Decision-Support Tools (2026-05-15)
+
+Funcionalidades para responder las preguntas que un trader hace **antes** de poner capital en un bot:
+
+### Backend (`backtester/analysis/`)
+- **Walk-Forward Analysis** — Optimización rolling con validación out-of-sample. Veredicto automático (`robust`/`weak`/`overfit`/`inconclusive`) basado en eficiencia IS→OOS, consistencia y ratio de ventanas rentables.
+- **Monte Carlo Simulation** — Resampling de trades (shuffle/bootstrap) con 1000+ trials para obtener percentiles de retorno y drawdown, probabilidad de ruina y Value-at-Risk (VaR/CVaR 95%).
+- **Robustness Score** — Ranking multi-métrica ponderada (Sharpe 35% + Profit Factor 20% + Recovery 20% + Win Rate 15% + Penalización por bajo nº trades 10%) para comparar candidatos de forma estable.
+- **Métricas avanzadas en el engine**:
+  - MAE/MFE por trade (Maximum Adverse/Favorable Excursion) — útil para colocar stops y take-profits
+  - Ulcer Index, Recovery Factor, streaks consecutivos (wins/losses), distribución de duración de trades
+
+### Frontend (`flutter_app/lib/screens/analysis_screen.dart`)
+Nuevo tab "Analysis" en el sidebar con 4 sub-pestañas:
+- **History** — Browser de runs persistidos con filtros symbol/timeframe y vista detallada incluyendo tabla de trades con MAE/MFE
+- **Walk-Forward** — Form de configuración + visualización de ventanas y veredicto coloreado
+- **Monte Carlo** — Selección de run, percentiles P5/P25/P50/P75/P95, equity curves muestreadas
+- **Robustness** — Leaderboard con medallas (oro/plata/bronce) rankando todos los runs guardados
+
+### API endpoints
+- `POST /api/analysis/walk-forward` — Lanza WFA con Optuna por ventana
+- `POST /api/analysis/monte-carlo` — Lanza MC (acepta `run_id` o `trade_pnls` raw)
+- `POST /api/analysis/robustness` — Rankea lista de candidatos
+
+### Tests
++15 tests específicos en `backtester/tests/test_analysis.py` (87 tests totales pasando)
+
+---
+
 ## Phase 2 Deliverables (2026-05-15)
 
 Completadas 7 características en dos pistas paralelas (Backend A / Frontend B):

@@ -79,16 +79,19 @@ class StreamingEngine(BacktestEngine):
 
     def _emit_trade(self, t: Trade) -> None:
         self._emit("trade", {
-            "entry_time":  t.entry_time // 1000,
-            "exit_time":   t.exit_time // 1000,
-            "entry_price": float(t.entry_price),
-            "exit_price":  float(t.exit_price),
-            "qty":         float(t.qty),
-            "pnl":         float(t.pnl),
-            "pnl_pct":     float(t.pnl_pct),
-            "fee_usdt":    float(t.fee_usdt),
-            "reason":      t.reason,
-            "bot_id":      t.bot_id,          # ← new: used by JS to color markers
+            "entry_time":     t.entry_time // 1000,
+            "exit_time":      t.exit_time // 1000,
+            "entry_price":    float(t.entry_price),
+            "exit_price":     float(t.exit_price),
+            "qty":            float(t.qty),
+            "pnl":            float(t.pnl),
+            "pnl_pct":        float(t.pnl_pct),
+            "fee_usdt":       float(t.fee_usdt),
+            "reason":         t.reason,
+            "bot_id":         t.bot_id,
+            "mfe_pct":        float(t.mfe_pct),       # ← Max Favorable Excursion
+            "mae_pct":        float(t.mae_pct),       # ← Max Adverse Excursion
+            "duration_bars":  t.duration_bars,
         })
 
     def _emit_equity(self, ts_ms: int, value: Decimal, bot_id: str = "total") -> None:
@@ -167,6 +170,11 @@ class StreamingEngine(BacktestEngine):
                 for bi, (bot, portfolio, bot_id) in enumerate(
                     zip(bots, portfolios, names)
                 ):
+                    # Update MFE/MAE BEFORE the bot runs so positions that
+                    # close on this candle capture its full high/low range.
+                    for pos in portfolio.positions:
+                        pos.update_excursion(candle.high, candle.low)
+
                     try:
                         orders = bot.on_candle(candle, portfolio)
                     except Exception as exc:  # noqa: BLE001
