@@ -6,8 +6,6 @@ import tempfile
 import time
 from pathlib import Path
 
-import pytest
-
 from backtester.core.job_store import JobStore
 
 
@@ -55,9 +53,13 @@ def test_persistence_across_instances():
 
 def test_list_filtered_by_kind_and_status():
     store, _ = _make_store()
-    a = store.create("download"); store.update(a.id, status="done")
-    b = store.create("experiment"); store.update(b.id, status="running")
-    c = store.create("download"); store.update(c.id, status="error")
+    a = store.create("download")
+    store.update(a.id, status="done")
+    b = store.create("experiment")
+    store.update(b.id, status="running")
+    c = store.create("download")
+    store.update(c.id, status="error")
+    _ = c  # keep reference
 
     done_downloads = store.list_filtered(kind="download", status="done")
     assert len(done_downloads) == 1 and done_downloads[0]["id"] == a.id
@@ -94,7 +96,8 @@ def test_cleanup_older_than_only_terminal_states():
 
 def test_pagination():
     store, _ = _make_store()
-    ids = [store.create("download").id for _ in range(5)]
+    for _ in range(5):
+        store.create("download")
     page1 = store.list_filtered(limit=2, offset=0)
     page2 = store.list_filtered(limit=2, offset=2)
     assert len(page1) == 2 and len(page2) == 2
