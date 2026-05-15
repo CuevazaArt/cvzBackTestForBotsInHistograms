@@ -184,6 +184,7 @@ class ApiService {
         'date_to': dateTo,
       }),
     );
+    if (res.statusCode == 422) throw ApiValidationError.fromBody(res.body);
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -204,6 +205,7 @@ class ApiService {
         'month': month,
       }),
     );
+    if (res.statusCode == 422) throw ApiValidationError.fromBody(res.body);
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }

@@ -5,6 +5,7 @@ import 'package:backtester_shell/services/ws_service.dart';
 import 'package:backtester_shell/utils/param_grid.dart';
 import 'package:backtester_shell/widgets/param_bounds_editor.dart';
 import 'package:backtester_shell/widgets/optimization_heatmap.dart';
+import 'package:backtester_shell/widgets/validation_error_dialog.dart';
 
 /// Payload handed off to the Backtest screen when the user clicks "Apply best".
 class OptimizationResult {
@@ -242,10 +243,8 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
       );
       _startPolling(jobId);
     } on ApiValidationError catch (e) {
-      setState(() {
-        _running = false;
-        _error = 'Validation: $e';
-      });
+      setState(() { _running = false; });
+      if (mounted) await ValidationErrorDialog.show(context, e);
     } catch (e) {
       setState(() {
         _running = false;
@@ -300,10 +299,8 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         sampler: _mode == 'cmaes' ? 'cma' : _mode,
       );
     } on ApiValidationError catch (e) {
-      setState(() {
-        _running = false;
-        _error = 'Validation: $e';
-      });
+      setState(() { _running = false; });
+      if (mounted) await ValidationErrorDialog.show(context, e);
     } catch (e) {
       setState(() {
         _running = false;
