@@ -31,20 +31,43 @@ def list_symbols(ctx: AppContext = Depends(get_ctx)) -> list[SymbolEntry]:
 def start_download(
     req: DownloadRequest,
     bg: BackgroundTasks,
+    resume_job_id: str | None = Query(None, description="Resume a previous download job"),
     ctx: AppContext = Depends(get_ctx),
 ) -> JobStatus:
+    start_from_ms: int | None = None
+    if resume_job_id is not None:
+        prev = ctx.jobs.get(resume_job_id)
+        if prev is None:
+            raise HTTPException(404, f"Job '{resume_job_id}' not found")
+        if prev.status == "running":
+            raise HTTPException(409, f"Job '{resume_job_id}' is still running")
+        prev_result = prev.result or {}
+        start_from_ms = prev_result.get("last_timestamp_ms")
+
     job = ctx.jobs.create("download")
     ctx.jobs.update(
         job.id,
         status="pending",
-        message=f"Queued {req.symbol} {req.timeframe} {req.date_from}→{req.date_to}",
+        message=f"Queued {req.symbol} {req.timeframe} {req.date_from}→{req.date_to}"
+        + (f" (resuming from {start_from_ms})" if start_from_ms else ""),
     )
 
     def _run() -> None:
         ctx.jobs.update(job.id, status="running")
         try:
+            def _on_progress(candles_added: int, last_ts: int) -> None:
+                ctx.jobs.update(
+                    job.id,
+                    result={"candles_added": candles_added, "last_timestamp_ms": last_ts},
+                )
+
             count = ctx.downloader.download(
-                req.symbol.upper(), req.timeframe, req.date_from, req.date_to,
+                req.symbol.upper(),
+                req.timeframe,
+                req.date_from,
+                req.date_to,
+                start_from_ms=start_from_ms,
+                on_progress=_on_progress,
             )
             ctx.jobs.update(
                 job.id, status="done", progress=1.0,
