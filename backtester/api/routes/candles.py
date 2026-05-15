@@ -32,7 +32,9 @@ def list_symbols(ctx: AppContext = Depends(get_ctx)) -> list[SymbolEntry]:
 def start_download(
     req: DownloadRequest,
     bg: BackgroundTasks,
-    resume_job_id: str | None = Query(None, description="Resume a previous download job"),
+    resume_job_id: str | None = Query(
+        None, description="Resume a previous download job"
+    ),
     ctx: AppContext = Depends(get_ctx),
 ) -> JobStatus:
     start_from_ms: int | None = None
@@ -55,9 +57,8 @@ def start_download(
             "date_to": req.date_to,
         },
     )
-    msg = (
-        f"Queued {req.symbol} {req.timeframe} {req.date_from}→{req.date_to}"
-        + (f" (resuming from {start_from_ms})" if start_from_ms else "")
+    msg = f"Queued {req.symbol} {req.timeframe} {req.date_from}→{req.date_to}" + (
+        f" (resuming from {start_from_ms})" if start_from_ms else ""
     )
     ctx.jobs.update(
         job.id,
@@ -91,7 +92,10 @@ def start_download(
             def _on_progress(candles_added: int, last_ts: int) -> None:
                 ctx.jobs.update(
                     job.id,
-                    result={"candles_added": candles_added, "last_timestamp_ms": last_ts},
+                    result={
+                        "candles_added": candles_added,
+                        "last_timestamp_ms": last_ts,
+                    },
                 )
 
             count = ctx.downloader.download(
@@ -112,7 +116,9 @@ def start_download(
                 )
                 return
             ctx.jobs.update(
-                job.id, status="done", progress=1.0,
+                job.id,
+                status="done",
+                progress=1.0,
                 message=f"Downloaded {count} candles",
                 result={"candles_added": count},
             )
@@ -171,7 +177,10 @@ def start_download_zip(
                 )
                 return
             count = ctx.downloader.download_vision_zip(
-                req.symbol.upper(), req.timeframe, req.year, req.month,
+                req.symbol.upper(),
+                req.timeframe,
+                req.year,
+                req.month,
             )
             if ctx.jobs.is_cancel_requested(job.id):
                 ctx.jobs.update(
@@ -183,7 +192,9 @@ def start_download_zip(
                 )
                 return
             ctx.jobs.update(
-                job.id, status="done", progress=1.0,
+                job.id,
+                status="done",
+                progress=1.0,
                 message=f"Downloaded {count} candles via ZIP",
                 result={"candles_added": count},
             )
@@ -205,11 +216,16 @@ def get_candles(
     ctx: AppContext = Depends(get_ctx),
 ) -> list[CandleDTO]:
     rows = ctx.downloader.load_candles(
-        symbol.upper(), timeframe, start_ms=start_ms, end_ms=end_ms, limit=limit,
+        symbol.upper(),
+        timeframe,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        limit=limit,
     )
     if not rows:
         raise HTTPException(404, f"No candles for {symbol} {timeframe}")
     return [row_to_candle_dto(r) for r in rows]
+
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
 def get_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> JobStatus:
@@ -229,7 +245,9 @@ def list_jobs(
 ) -> list[JobStatus]:
     return [
         JobStatus(**d)
-        for d in ctx.jobs.list_filtered(kind=kind, status=status, limit=limit, offset=offset)
+        for d in ctx.jobs.list_filtered(
+            kind=kind, status=status, limit=limit, offset=offset
+        )
     ]
 
 

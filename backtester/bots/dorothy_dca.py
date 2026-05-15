@@ -44,11 +44,41 @@ class DorothyDCA(BotBase):
     @classmethod
     def param_spec(cls) -> dict[str, dict[str, Any]]:
         return {
-            "profit_factor":      {"type": "float", "default": 0.05,  "min": 0.005, "max": 0.5,  "step": 0.005},
-            "margin_drop_factor": {"type": "float", "default": 0.004, "min": 0.001, "max": 0.2,  "step": 0.001},
-            "max_positions":      {"type": "int",   "default": 3,     "min": 1,     "max": 10,   "step": 1},
-            "stop_loss_pct":      {"type": "float", "default": 0.15,  "min": 0.02,  "max": 0.5,  "step": 0.01},
-            "risk_per_trade_pct": {"type": "float", "default": 5.0,   "min": 1.0,   "max": 20.0, "step": 1.0},
+            "profit_factor": {
+                "type": "float",
+                "default": 0.05,
+                "min": 0.005,
+                "max": 0.5,
+                "step": 0.005,
+            },
+            "margin_drop_factor": {
+                "type": "float",
+                "default": 0.004,
+                "min": 0.001,
+                "max": 0.2,
+                "step": 0.001,
+            },
+            "max_positions": {
+                "type": "int",
+                "default": 3,
+                "min": 1,
+                "max": 10,
+                "step": 1,
+            },
+            "stop_loss_pct": {
+                "type": "float",
+                "default": 0.15,
+                "min": 0.02,
+                "max": 0.5,
+                "step": 0.01,
+            },
+            "risk_per_trade_pct": {
+                "type": "float",
+                "default": 5.0,
+                "min": 1.0,
+                "max": 20.0,
+                "step": 1.0,
+            },
         }
 
     def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict[str, Any]]:
@@ -65,7 +95,9 @@ class DorothyDCA(BotBase):
             if price < avg_cost * (1 - self.stop_loss_pct):
                 qty = self.max_sell_qty(portfolio)
                 if qty > 0:
-                    orders.append({"side": "SELL", "qty": float(qty), "reason": "STOP_LOSS"})
+                    orders.append(
+                        {"side": "SELL", "qty": float(qty), "reason": "STOP_LOSS"}
+                    )
                 self._last_buy_price = None
                 self._sell_target = None
                 return orders
@@ -75,7 +107,9 @@ class DorothyDCA(BotBase):
             if price >= self._sell_target:
                 qty = self.max_sell_qty(portfolio)
                 if qty > 0:
-                    orders.append({"side": "SELL", "qty": float(qty), "reason": "TAKE_PROFIT"})
+                    orders.append(
+                        {"side": "SELL", "qty": float(qty), "reason": "TAKE_PROFIT"}
+                    )
                 self._last_buy_price = None
                 self._sell_target = None
                 return orders
@@ -98,7 +132,9 @@ class DorothyDCA(BotBase):
             if should_buy:
                 qty = self.calc_qty(candle.close, portfolio, self.risk_per_trade_pct)
                 if qty > 0:
-                    orders.append({"side": "BUY", "qty": float(qty), "reason": "DCA_BUY"})
+                    orders.append(
+                        {"side": "BUY", "qty": float(qty), "reason": "DCA_BUY"}
+                    )
                     self._last_buy_price = price
                     # Sell target is always relative to latest buy price
                     self._sell_target = price * (1 + self.profit_factor)

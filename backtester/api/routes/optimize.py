@@ -19,7 +19,8 @@ router = APIRouter(tags=["optimize"])
 
 @router.post("/optimize/run", response_model=JobStatus)
 def start_optimization(
-    req: OptimizeRequest, ctx: AppContext = Depends(get_ctx),
+    req: OptimizeRequest,
+    ctx: AppContext = Depends(get_ctx),
 ) -> JobStatus:
     if req.bot not in ctx.bot_registry:
         raise HTTPException(400, f"Unknown bot '{req.bot}'")
@@ -75,7 +76,9 @@ def start_optimization(
         ctx.jobs.update(job.id, status="running", message="Loading candles...")
         try:
             if ctx.jobs.is_cancel_requested(job.id):
-                ctx.jobs.update(job.id, status="cancelled", message="Cancelled before start")
+                ctx.jobs.update(
+                    job.id, status="cancelled", message="Cancelled before start"
+                )
                 return
             from backtester.optimize.optuna_runner import run_optuna
 
@@ -93,24 +96,28 @@ def start_optimization(
                 min_trades=req.min_trades,
                 max_drawdown_pct_limit=req.max_drawdown_pct_limit,
             )
-            objective = Objective(opt_cfg, ctx.downloader, ctx.bot_registry, cache=ctx.indicator_cache)
+            objective = Objective(
+                opt_cfg, ctx.downloader, ctx.bot_registry, cache=ctx.indicator_cache
+            )
 
             collected_trials: list[dict] = []
 
             def _on_trial(trial_number: int, result) -> None:
                 if ctx.jobs.is_cancel_requested(job.id):
                     raise RuntimeError("Job cancelled by user")
-                collected_trials.append({
-                    "trial": trial_number,
-                    "params": result.params,
-                    "score": result.score,
-                    "metrics": result.metrics,
-                })
+                collected_trials.append(
+                    {
+                        "trial": trial_number,
+                        "params": result.params,
+                        "score": result.score,
+                        "metrics": result.metrics,
+                    }
+                )
                 ctx.jobs.update(
                     job.id,
                     progress=(trial_number + 1) / total_trials,
                     message=f"Trial {trial_number + 1}/{total_trials} "
-                            f"score={result.score:.4f}",
+                    f"score={result.score:.4f}",
                 )
 
             results = run_optuna(
@@ -138,7 +145,9 @@ def start_optimization(
                 f"Best: {req.objective}={best.score:.4f}" if best else "No results"
             )
 
-            cache_stats = objective._cache.stats() if objective._cache is not None else None
+            cache_stats = (
+                objective._cache.stats() if objective._cache is not None else None
+            )
             ctx.jobs.update(
                 job.id,
                 status="done",
@@ -160,7 +169,8 @@ def start_optimization(
         except ImportError as exc:
             _LOG.error("Optuna not installed: %s", exc)
             ctx.jobs.update(
-                job.id, status="error",
+                job.id,
+                status="error",
                 message="Optuna not installed. Run: pip install -r backtester/requirements-optimize.txt",
             )
         except Exception as exc:  # noqa: BLE001

@@ -40,8 +40,13 @@ def test_upsert_overwrites(store: ResultStore) -> None:
 
 
 def test_list_recent_order(store: ResultStore) -> None:
+    # Insert with small sleeps to ensure strictly increasing created_at,
+    # preventing the sub-millisecond collision that causes flakiness on fast CI.
+    import time
+
     for i in range(5):
         store.save(f"run-{i}", "BTCUSDT", "1h", _CONFIG, {"final_equity": float(i)})
+        time.sleep(0.005)
     items = store.list_recent(limit=10)
     assert len(items) == 5
     # newest first
@@ -68,6 +73,7 @@ def test_delete_missing_returns_false(store: ResultStore) -> None:
 
 def test_cleanup_older_than(store: ResultStore) -> None:
     import time
+
     store.save("old", "BTCUSDT", "1h", _CONFIG, _RESULT)
     time.sleep(0.05)
     cutoff = 0.01  # 10ms — everything older than 10ms should be deleted

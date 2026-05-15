@@ -53,9 +53,27 @@ class EMACross(BotBase):
         return {
             "fast_ema": {"type": "int", "default": 12, "min": 2, "max": 50, "step": 1},
             "slow_ema": {"type": "int", "default": 26, "min": 5, "max": 200, "step": 1},
-            "profit_factor": {"type": "float", "default": 0.02, "min": 0.001, "max": 0.5, "step": 0.001},
-            "stop_loss_pct": {"type": "float", "default": 0.05, "min": 0.005, "max": 0.5, "step": 0.005},
-            "risk_per_trade_pct": {"type": "float", "default": 2.0, "min": 0.5, "max": 20.0, "step": 0.5},
+            "profit_factor": {
+                "type": "float",
+                "default": 0.02,
+                "min": 0.001,
+                "max": 0.5,
+                "step": 0.001,
+            },
+            "stop_loss_pct": {
+                "type": "float",
+                "default": 0.05,
+                "min": 0.005,
+                "max": 0.5,
+                "step": 0.005,
+            },
+            "risk_per_trade_pct": {
+                "type": "float",
+                "default": 2.0,
+                "min": 0.5,
+                "max": 20.0,
+                "step": 0.5,
+            },
         }
 
     def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict[str, Any]]:
@@ -67,7 +85,7 @@ class EMACross(BotBase):
             self._warmup_prices.append(price)
             if len(self._warmup_prices) >= self.slow_ema:
                 # Seed both EMAs with their respective SMA
-                fast_prices = self._warmup_prices[-self.fast_ema:]
+                fast_prices = self._warmup_prices[-self.fast_ema :]
                 self._fast_ema = sum(fast_prices) / len(fast_prices)
                 self._slow_ema = sum(self._warmup_prices) / len(self._warmup_prices)
                 self._prev_fast = self._fast_ema
@@ -87,7 +105,9 @@ class EMACross(BotBase):
             if price < stop_price:
                 qty = self.max_sell_qty(portfolio)
                 if qty > 0:
-                    orders.append({"side": "SELL", "qty": float(qty), "reason": "STOP_LOSS"})
+                    orders.append(
+                        {"side": "SELL", "qty": float(qty), "reason": "STOP_LOSS"}
+                    )
                 self._in_position = False
                 self._entry_price = None
                 return orders  # No more signals this candle
@@ -98,7 +118,9 @@ class EMACross(BotBase):
             if price >= tp_price:
                 qty = self.max_sell_qty(portfolio)
                 if qty > 0:
-                    orders.append({"side": "SELL", "qty": float(qty), "reason": "TAKE_PROFIT"})
+                    orders.append(
+                        {"side": "SELL", "qty": float(qty), "reason": "TAKE_PROFIT"}
+                    )
                 self._in_position = False
                 self._entry_price = None
                 return orders
@@ -108,19 +130,23 @@ class EMACross(BotBase):
             return orders
 
         golden = self._prev_fast <= self._prev_slow and self._fast_ema > self._slow_ema
-        death  = self._prev_fast >= self._prev_slow and self._fast_ema < self._slow_ema
+        death = self._prev_fast >= self._prev_slow and self._fast_ema < self._slow_ema
 
         if golden and not self._in_position:
             qty = self.calc_qty(candle.close, portfolio, self.risk_per_trade_pct)
             if qty > 0:
-                orders.append({"side": "BUY", "qty": float(qty), "reason": "GOLDEN_CROSS"})
+                orders.append(
+                    {"side": "BUY", "qty": float(qty), "reason": "GOLDEN_CROSS"}
+                )
                 self._in_position = True
                 self._entry_price = price
 
         elif death and self._in_position:
             qty = self.max_sell_qty(portfolio)
             if qty > 0:
-                orders.append({"side": "SELL", "qty": float(qty), "reason": "DEATH_CROSS"})
+                orders.append(
+                    {"side": "SELL", "qty": float(qty), "reason": "DEATH_CROSS"}
+                )
             self._in_position = False
             self._entry_price = None
 

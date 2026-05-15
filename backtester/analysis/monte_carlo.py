@@ -35,9 +35,10 @@ _LOG = logging.getLogger("backtester.analysis.monte_carlo")
 @dataclass
 class MonteCarloConfig:
     """Monte Carlo simulation configuration."""
-    trials: int = 1000                # number of simulated equity curves
-    method: str = "shuffle"           # "shuffle" or "bootstrap"
-    seed: Optional[int] = None        # for reproducibility
+
+    trials: int = 1000  # number of simulated equity curves
+    method: str = "shuffle"  # "shuffle" or "bootstrap"
+    seed: Optional[int] = None  # for reproducibility
     initial_equity: float = 10_000.0
     # Drawdown % that counts as "ruin" when computing prob_ruin. 50% by default
     # but conservative traders might set 25% (institutional limit) or aggressive
@@ -57,6 +58,7 @@ class MonteCarloConfig:
 @dataclass
 class MonteCarloPercentiles:
     """Percentile stats for a single metric across simulations."""
+
     p5: float
     p25: float
     p50: float
@@ -67,25 +69,30 @@ class MonteCarloPercentiles:
 
     def to_dict(self) -> dict[str, float]:
         return {
-            "p5": self.p5, "p25": self.p25, "p50": self.p50,
-            "p75": self.p75, "p95": self.p95,
-            "mean": self.mean, "std": self.std,
+            "p5": self.p5,
+            "p25": self.p25,
+            "p50": self.p50,
+            "p75": self.p75,
+            "p95": self.p95,
+            "mean": self.mean,
+            "std": self.std,
         }
 
 
 @dataclass
 class MonteCarloResult:
     """Aggregated Monte Carlo simulation results."""
+
     config: MonteCarloConfig
     n_trials: int
-    n_trades: int                                # trades in source data
+    n_trades: int  # trades in source data
     return_pct: MonteCarloPercentiles
     max_drawdown_pct: MonteCarloPercentiles
     worst_losing_streak: MonteCarloPercentiles
-    prob_profit: float                           # P(final return > 0)
-    prob_ruin: float                             # P(max DD > 50% of initial)
-    var_95_pct: float                            # Value-at-Risk: -P5 of returns
-    cvar_95_pct: float                           # Conditional VaR: mean of returns below P5
+    prob_profit: float  # P(final return > 0)
+    prob_ruin: float  # P(max DD > 50% of initial)
+    var_95_pct: float  # Value-at-Risk: -P5 of returns
+    cvar_95_pct: float  # Conditional VaR: mean of returns below P5
     # Sample of equity curves for plotting (max 20)
     sample_curves: list[list[float]] = field(default_factory=list)
 
@@ -121,7 +128,9 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
     floor = int(k)
     ceil_idx = min(floor + 1, len(sorted_values) - 1)
     frac = k - floor
-    return sorted_values[floor] + (sorted_values[ceil_idx] - sorted_values[floor]) * frac
+    return (
+        sorted_values[floor] + (sorted_values[ceil_idx] - sorted_values[floor]) * frac
+    )
 
 
 def _percentiles(values: list[float]) -> MonteCarloPercentiles:
@@ -130,7 +139,7 @@ def _percentiles(values: list[float]) -> MonteCarloPercentiles:
     s = sorted(values)
     mean = sum(values) / len(values)
     var = sum((v - mean) ** 2 for v in values) / len(values)
-    std = var ** 0.5
+    std = var**0.5
     return MonteCarloPercentiles(
         p5=round(_percentile(s, 5), 4),
         p25=round(_percentile(s, 25), 4),
@@ -170,7 +179,11 @@ def _simulate_curve(
         elif pnl > 0:
             cur_loss_streak = 0
         curve.append(equity)
-    ret_pct = (equity - initial_equity) / initial_equity * 100.0 if initial_equity > 0 else 0.0
+    ret_pct = (
+        (equity - initial_equity) / initial_equity * 100.0
+        if initial_equity > 0
+        else 0.0
+    )
     return ret_pct, max_dd, worst_streak, curve
 
 
@@ -192,9 +205,16 @@ def run_monte_carlo(
     if not trade_pnls:
         empty = MonteCarloPercentiles(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         return MonteCarloResult(
-            config=config, n_trials=0, n_trades=0,
-            return_pct=empty, max_drawdown_pct=empty, worst_losing_streak=empty,
-            prob_profit=0.0, prob_ruin=0.0, var_95_pct=0.0, cvar_95_pct=0.0,
+            config=config,
+            n_trials=0,
+            n_trades=0,
+            return_pct=empty,
+            max_drawdown_pct=empty,
+            worst_losing_streak=empty,
+            prob_profit=0.0,
+            prob_ruin=0.0,
+            var_95_pct=0.0,
+            cvar_95_pct=0.0,
             sample_curves=[],
         )
 
@@ -229,7 +249,9 @@ def run_monte_carlo(
     streak_perc = _percentiles(streaks)
 
     prob_profit = sum(1 for r in returns if r > 0) / len(returns)
-    prob_ruin = sum(1 for d in drawdowns if d > config.ruin_drawdown_pct) / len(drawdowns)
+    prob_ruin = sum(1 for d in drawdowns if d > config.ruin_drawdown_pct) / len(
+        drawdowns
+    )
     # 95% VaR: the worst loss we'd expect with 95% confidence
     var_95 = round(-ret_perc.p5, 4)
     # Conditional VaR (Expected Shortfall): mean return in the worst 5%

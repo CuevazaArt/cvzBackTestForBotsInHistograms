@@ -31,7 +31,11 @@ class AppContext:
         if self.indicator_cache is None:
             self.indicator_cache = IndicatorCache(max_entries=512)
         if self.result_store is None:
-            root = Path(self.base_dir) if self.base_dir else Path(__file__).resolve().parents[1]
+            root = (
+                Path(self.base_dir)
+                if self.base_dir
+                else Path(__file__).resolve().parents[1]
+            )
             data_dir = root / "data"
             data_dir.mkdir(parents=True, exist_ok=True)
             self.result_store = ResultStore(data_dir / "results.sqlite")

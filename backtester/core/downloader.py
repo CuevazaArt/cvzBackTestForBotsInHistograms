@@ -23,6 +23,7 @@ REQUEST_DELAY = 0.1  # 100ms between requests (safe margin)
 # Global variable to track API weight across the application
 BINANCE_USED_WEIGHT_1M = 0
 
+
 class BinanceDownloader:
     """Download historical OHLCV data from Binance REST API."""
 
@@ -150,7 +151,7 @@ class BinanceDownloader:
                 headers=headers,
                 timeout=10,
             )
-            
+
             # Track API Weight
             weight_header = resp.headers.get("X-MBX-USED-WEIGHT-1M")
             if weight_header:
@@ -159,7 +160,7 @@ class BinanceDownloader:
                     BINANCE_USED_WEIGHT_1M = int(weight_header)
                 except ValueError:
                     pass
-                    
+
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
@@ -188,25 +189,27 @@ class BinanceDownloader:
         try:
             resp = requests.get(url, timeout=30)
             if resp.status_code == 404:
-                _LOG.warning(f"Data not available for {symbol} {timeframe} {year}-{month_str}")
+                _LOG.warning(
+                    f"Data not available for {symbol} {timeframe} {year}-{month_str}"
+                )
                 return 0
             resp.raise_for_status()
-            
+
             with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
                 # The zip should contain one csv file
                 csv_filename = z.namelist()[0]
                 with z.open(csv_filename) as f:
-                    content = f.read().decode('utf-8')
-                    
+                    content = f.read().decode("utf-8")
+
             reader = csv.reader(io.StringIO(content))
             klines = []
             for row in reader:
                 if not row:
                     continue
                 klines.append(row)
-                
+
             return self._save_batch(symbol, timeframe, klines)
-            
+
         except Exception as e:
             _LOG.error(f"Failed to download/process ZIP for {symbol}: {e}")
             return 0
@@ -236,12 +239,15 @@ class BinanceDownloader:
             for k in klines
         ]
 
-        self.conn.executemany("""
+        self.conn.executemany(
+            """
             INSERT INTO candles
             (symbol, timeframe, timestamp_ms, open, high, low, close, volume)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (symbol, timeframe, timestamp_ms) DO NOTHING
-        """, data)
+        """,
+            data,
+        )
         return len(klines)
 
     def load_candles(
@@ -271,16 +277,15 @@ class BinanceDownloader:
             params.append(int(end_ms))
         query = (
             "SELECT timestamp_ms, open, high, low, close, volume "
-            "FROM candles WHERE " + " AND ".join(clauses) +
-            " ORDER BY timestamp_ms ASC"
+            "FROM candles WHERE " + " AND ".join(clauses) + " ORDER BY timestamp_ms ASC"
         )
         if limit:
             query += " LIMIT ?"
             params.append(int(limit))
-        
+
         df = self.conn.execute(query, params).df()
         # Convert pandas DataFrame to list of dicts for backward compatibility
-        return df.to_dict('records')
+        return df.to_dict("records")
 
     def list_symbols(self) -> list[dict]:
         """List distinct (symbol, timeframe) pairs available with row counts."""
@@ -289,10 +294,15 @@ class BinanceDownloader:
             "MIN(timestamp_ms) AS first_ms, MAX(timestamp_ms) AS last_ms "
             "FROM candles GROUP BY symbol, timeframe ORDER BY symbol, timeframe"
         ).df()
-        
+
         return [
-            {"symbol": r['symbol'], "timeframe": r['timeframe'], "candles": r['n'],
-             "first_ms": r['first_ms'], "last_ms": r['last_ms']}
+            {
+                "symbol": r["symbol"],
+                "timeframe": r["timeframe"],
+                "candles": r["n"],
+                "first_ms": r["first_ms"],
+                "last_ms": r["last_ms"],
+            }
             for _, r in df.iterrows()
         ]
 

@@ -33,14 +33,16 @@ def _candles(n: int = 200, *, trend: float = 0.0) -> list[Candle]:
     out = []
     for i in range(n):
         base = Decimal(str(100.0 + 30 * math.sin(i / 20.0) + trend * i))
-        out.append(Candle(
-            timestamp_ms=i * 3_600_000,
-            open=base,
-            high=base + Decimal("1.5"),
-            low=base - Decimal("1.5"),
-            close=base + Decimal("0.2"),
-            volume=Decimal("10"),
-        ))
+        out.append(
+            Candle(
+                timestamp_ms=i * 3_600_000,
+                open=base,
+                high=base + Decimal("1.5"),
+                low=base - Decimal("1.5"),
+                close=base + Decimal("0.2"),
+                volume=Decimal("10"),
+            )
+        )
     return out
 
 
@@ -81,10 +83,13 @@ def test_mfe_mae_includes_exit_candle_range():
     Build 3 candles where the exit candle has a clearly wider range than the
     entry candle; the trade's MFE/MAE should reflect that wider range.
     """
+
     class _BuyHoldSell:
         """Buy on first candle, hold through middle, sell on the third."""
+
         def __init__(self):
             self.n = 0
+
         def on_candle(self, candle, portfolio):
             self.n += 1
             if self.n == 1:
@@ -98,31 +103,49 @@ def test_mfe_mae_includes_exit_candle_range():
     # MFE must reflect 130, MAE must reflect 70.
     candles = [
         Candle(
-            timestamp_ms=0, open=Decimal("100"), high=Decimal("101"),
-            low=Decimal("99"), close=Decimal("100"), volume=Decimal("1"),
+            timestamp_ms=0,
+            open=Decimal("100"),
+            high=Decimal("101"),
+            low=Decimal("99"),
+            close=Decimal("100"),
+            volume=Decimal("1"),
         ),
         Candle(
-            timestamp_ms=3_600_000, open=Decimal("100"), high=Decimal("120"),
-            low=Decimal("80"), close=Decimal("100"), volume=Decimal("1"),
+            timestamp_ms=3_600_000,
+            open=Decimal("100"),
+            high=Decimal("120"),
+            low=Decimal("80"),
+            close=Decimal("100"),
+            volume=Decimal("1"),
         ),
         Candle(
-            timestamp_ms=7_200_000, open=Decimal("100"), high=Decimal("130"),
-            low=Decimal("70"), close=Decimal("100"), volume=Decimal("1"),
+            timestamp_ms=7_200_000,
+            open=Decimal("100"),
+            high=Decimal("130"),
+            low=Decimal("70"),
+            close=Decimal("100"),
+            volume=Decimal("1"),
         ),
     ]
-    engine = BacktestEngine(BacktestConfig(
-        initial_cash=Decimal("10000"),
-        taker_fee_pct=Decimal("0"),
-        slippage_pct=Decimal("0"),
-    ))
+    engine = BacktestEngine(
+        BacktestConfig(
+            initial_cash=Decimal("10000"),
+            taker_fee_pct=Decimal("0"),
+            slippage_pct=Decimal("0"),
+        )
+    )
     result = engine.run([_BuyHoldSell()], candles)
     assert len(result.trades) == 1
     t = result.trades[0]
     # Entry was at candle[0].close = 100. MFE should reach at least the third
     # candle's high (130) → +30%. MAE should reach the third candle's low
     # (70) → -30%. Allow small tolerance for slippage rounding.
-    assert float(t.mfe_pct) >= 29.0, f"MFE must include exit candle high, got {t.mfe_pct}"
-    assert float(t.mae_pct) <= -29.0, f"MAE must include exit candle low, got {t.mae_pct}"
+    assert (
+        float(t.mfe_pct) >= 29.0
+    ), f"MFE must include exit candle high, got {t.mfe_pct}"
+    assert (
+        float(t.mae_pct) <= -29.0
+    ), f"MAE must include exit candle low, got {t.mae_pct}"
 
 
 def test_metrics_include_advanced_fields():
@@ -133,10 +156,16 @@ def test_metrics_include_advanced_fields():
     result = engine.run([_AlwaysBuyAndSell()], _candles(200))
     m = compute_metrics(result)
     for key in (
-        "ulcer_index", "recovery_factor",
-        "max_consecutive_wins", "max_consecutive_losses",
-        "avg_mfe_pct", "avg_mae_pct", "max_mfe_pct", "max_mae_pct",
-        "mfe_to_pnl_ratio", "median_trade_duration_hrs",
+        "ulcer_index",
+        "recovery_factor",
+        "max_consecutive_wins",
+        "max_consecutive_losses",
+        "avg_mfe_pct",
+        "avg_mae_pct",
+        "max_mfe_pct",
+        "max_mae_pct",
+        "mfe_to_pnl_ratio",
+        "median_trade_duration_hrs",
     ):
         assert key in m, f"Missing metric: {key}"
 
@@ -181,7 +210,9 @@ def test_walk_forward_orchestration_with_stub_callbacks():
         return {"total_return_pct": (5.0 + idx) * 0.6}
 
     cfg = WalkForwardConfig(train_size=200, test_size=50, step_size=50)
-    result = run_walk_forward(n_candles=500, config=cfg, train_fn=train_fn, test_fn=test_fn)
+    result = run_walk_forward(
+        n_candles=500, config=cfg, train_fn=train_fn, test_fn=test_fn
+    )
 
     assert calls["train"] >= 3
     assert calls["test"] == calls["train"]
@@ -192,6 +223,7 @@ def test_walk_forward_orchestration_with_stub_callbacks():
 
 def test_walk_forward_overfit_verdict():
     """Strongly positive IS, negative OOS → overfit verdict."""
+
     def train_fn(is_s, is_e, idx):
         return {"x": 1}, {"total_return_pct": 30.0}
 
@@ -199,13 +231,16 @@ def test_walk_forward_overfit_verdict():
         return {"total_return_pct": -5.0}
 
     cfg = WalkForwardConfig(train_size=200, test_size=50)
-    result = run_walk_forward(n_candles=600, config=cfg, train_fn=train_fn, test_fn=test_fn)
+    result = run_walk_forward(
+        n_candles=600, config=cfg, train_fn=train_fn, test_fn=test_fn
+    )
     assert result.verdict == "overfit"
     assert result.avg_oos_return_pct < 0
 
 
 def test_walk_forward_robust_verdict():
     """Consistent positive OOS with good IS→OOS efficiency → robust."""
+
     def train_fn(is_s, is_e, idx):
         return {"x": 1}, {"total_return_pct": 10.0}
 
@@ -214,7 +249,9 @@ def test_walk_forward_robust_verdict():
         return {"total_return_pct": 8.0 + (idx % 2) * 0.5}
 
     cfg = WalkForwardConfig(train_size=200, test_size=50)
-    result = run_walk_forward(n_candles=800, config=cfg, train_fn=train_fn, test_fn=test_fn)
+    result = run_walk_forward(
+        n_candles=800, config=cfg, train_fn=train_fn, test_fn=test_fn
+    )
     assert result.verdict in ("robust", "weak")
     assert result.profitable_windows == result.total_windows
 
@@ -284,6 +321,7 @@ def test_monte_carlo_configurable_ruin_threshold():
 
 def test_monte_carlo_rejects_invalid_ruin_threshold():
     import pytest as _pytest
+
     with _pytest.raises(ValueError):
         MonteCarloConfig(trials=100, ruin_drawdown_pct=0.0)
     with _pytest.raises(ValueError):
@@ -299,25 +337,38 @@ def test_robustness_score_orders_by_composite():
         {
             "params": {"fast": 5},
             "metrics": {
-                "sharpe_ratio": 1.5, "profit_factor": 2.0, "recovery_factor": 3.0,
-                "win_rate_pct": 55.0, "trades": 100, "max_drawdown_pct": 8.0,
+                "sharpe_ratio": 1.5,
+                "profit_factor": 2.0,
+                "recovery_factor": 3.0,
+                "win_rate_pct": 55.0,
+                "trades": 100,
+                "max_drawdown_pct": 8.0,
             },
         },
         {
             "params": {"fast": 12},
             "metrics": {
-                "sharpe_ratio": 0.5, "profit_factor": 1.1, "recovery_factor": 1.2,
-                "win_rate_pct": 45.0, "trades": 50, "max_drawdown_pct": 25.0,
+                "sharpe_ratio": 0.5,
+                "profit_factor": 1.1,
+                "recovery_factor": 1.2,
+                "win_rate_pct": 45.0,
+                "trades": 50,
+                "max_drawdown_pct": 25.0,
             },
         },
         {
             "params": {"fast": 20},
             "metrics": {
-                "sharpe_ratio": 1.0, "profit_factor": 1.5, "recovery_factor": 2.0,
-                "win_rate_pct": 50.0, "trades": 80, "max_drawdown_pct": 15.0,
+                "sharpe_ratio": 1.0,
+                "profit_factor": 1.5,
+                "recovery_factor": 2.0,
+                "win_rate_pct": 50.0,
+                "trades": 80,
+                "max_drawdown_pct": 15.0,
             },
         },
     ]
+
     def _label(c):
         items = ", ".join(f"{k}={v}" for k, v in c["params"].items())
         return items or "default"
@@ -335,8 +386,11 @@ def test_robustness_score_handles_identical_candidates():
     same = {
         "params": {"x": 1},
         "metrics": {
-            "sharpe_ratio": 1.0, "profit_factor": 1.5,
-            "recovery_factor": 2.0, "win_rate_pct": 50.0, "trades": 100,
+            "sharpe_ratio": 1.0,
+            "profit_factor": 1.5,
+            "recovery_factor": 2.0,
+            "win_rate_pct": 50.0,
+            "trades": 100,
         },
     }
     ranked = score_runs([same, dict(same), dict(same)])

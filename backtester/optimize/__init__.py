@@ -8,6 +8,10 @@ Then use via CLI:
     python backtester/main.py --optimize optimize.json --backend nevergrad --budget 200
 """
 
-from backtester.optimize.objective import Objective, OptimizationConfig, OptimizationResult
+from backtester.optimize.objective import (
+    Objective,
+    OptimizationConfig,
+    OptimizationResult,
+)
 
 __all__ = ["Objective", "OptimizationConfig", "OptimizationResult"]

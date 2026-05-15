@@ -26,7 +26,7 @@ jobs:
       - name: Ruff check
         run: ruff check backtester/ --output-format=github
       - name: Ruff format check
-        run: ruff format --check backtester/ || echo "::warning::ruff format suggestions present"
+        run: ruff format --check backtester/
 
   # ── Python Type Check (mypy) ───────────────────────────────────
   typecheck-backend:
@@ -44,7 +44,7 @@ jobs:
           pip install -r backtester/requirements.txt
           pip install mypy==1.11.2 types-requests
       - name: Mypy
-        run: mypy backtester --ignore-missing-imports --no-strict-optional || echo "::warning::mypy findings (non-blocking)"
+        run: mypy backtester --ignore-missing-imports --no-strict-optional
 
   # ── Python Backend Tests ───────────────────────────────────────
   test-backend:
@@ -66,6 +66,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backtester/requirements.txt
+          pip install -r backtester/requirements-optimize.txt
           pip install pytest pytest-cov pytest-asyncio
       - name: Run Tests
         shell: bash
@@ -121,6 +122,7 @@ jobs:
       - name: Verify required jobs succeeded
         run: |
           if [ "${{ needs.lint-backend.result }}" != "success" ] || \
+             [ "${{ needs.typecheck-backend.result }}" != "success" ] || \
              [ "${{ needs.test-backend.result }}" != "success" ] || \
              [ "${{ needs.flutter.result }}" != "success" ]; then
             echo "One or more required jobs failed"

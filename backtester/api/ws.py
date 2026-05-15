@@ -39,7 +39,8 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     def _send(event_type: str, data: dict | None = None) -> None:
         """Thread-safe send (callable from worker threads)."""
         payload = json.dumps(
-            {"type": event_type, "data": data or {}}, default=json_default,
+            {"type": event_type, "data": data or {}},
+            default=json_default,
         )
         asyncio.run_coroutine_threadsafe(websocket.send_text(payload), loop)
 
@@ -101,8 +102,10 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     continue
 
                 rows = ctx.downloader.load_candles(
-                    req.symbol.upper(), req.timeframe,
-                    start_ms=req.start_ms, end_ms=req.end_ms,
+                    req.symbol.upper(),
+                    req.timeframe,
+                    start_ms=req.start_ms,
+                    end_ms=req.end_ms,
                 )
                 if not rows:
                     _send("error", {"message": "No candles in range"})
@@ -119,7 +122,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 run_id = str(uuid4())
                 _last_result: dict | None = None
 
-                def _send_with_capture(event_type: str, data: dict | None = None) -> None:
+                def _send_with_capture(
+                    event_type: str, data: dict | None = None
+                ) -> None:
                     nonlocal _last_result
                     if event_type == "result":
                         _last_result = data
@@ -127,7 +132,12 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                         data = {**(data or {}), "run_id": run_id}
                     _send(event_type, data)
 
-                engine = StreamingEngine(cfg, on_event=_send_with_capture, total=len(candles), cache=ctx.indicator_cache)
+                engine = StreamingEngine(
+                    cfg,
+                    on_event=_send_with_capture,
+                    total=len(candles),
+                    cache=ctx.indicator_cache,
+                )
                 # Run the synchronous engine in a worker thread so the WS
                 # event loop stays responsive (and pings can fly through).
                 bot_names = unique_bot_names(req.bots)
@@ -147,7 +157,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     candles=candles,
                     symbol=req.symbol.upper(),
                     timeframe=req.timeframe,
-                    indicator_specs=[{"name": i.name, **i.to_kwargs()} for i in req.indicators],
+                    indicator_specs=[
+                        {"name": i.name, **i.to_kwargs()} for i in req.indicators
+                    ],
                     bot_names=bot_names,
                 )
 
@@ -206,12 +218,15 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 objective = Objective(opt_cfg, ctx.downloader, ctx.bot_registry)
 
                 def _on_trial(trial_number: int, result) -> None:
-                    _send("trial_completed", {
-                        "trial": trial_number,
-                        "params": result.params,
-                        "score": result.score,
-                        "metrics": result.metrics,
-                    })
+                    _send(
+                        "trial_completed",
+                        {
+                            "trial": trial_number,
+                            "params": result.params,
+                            "score": result.score,
+                            "metrics": result.metrics,
+                        },
+                    )
 
                 def _run_opt():
                     try:
@@ -233,11 +248,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                             for r in results
                         ]
                         best = results[0] if results else None
-                        _send("optimize_done", {
-                            "runs": runs,
-                            "best_params": best.params if best else {},
-                            "best_score": best.score if best else 0,
-                        })
+                        _send(
+                            "optimize_done",
+                            {
+                                "runs": runs,
+                                "best_params": best.params if best else {},
+                                "best_score": best.score if best else 0,
+                            },
+                        )
                     except Exception as e:
                         _LOG.exception("Optuna WS failed")
                         _send("error", {"message": str(e)})

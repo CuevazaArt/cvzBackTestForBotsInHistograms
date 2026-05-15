@@ -98,6 +98,6 @@ def run_nevergrad(
         if on_trial is not None:
             on_trial(trial_idx, result)
 
-    reverse = (objective.direction == "max")
+    reverse = objective.direction == "max"
     collected.sort(key=lambda r: r.score, reverse=reverse)
     return collected

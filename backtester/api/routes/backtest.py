@@ -46,12 +46,15 @@ def _execute(req: BacktestRequest, ctx: AppContext) -> BacktestResponse:
             raise HTTPException(400, f"Invalid params for {b.name}: {e}")
 
     rows = ctx.downloader.load_candles(
-        req.symbol.upper(), req.timeframe,
-        start_ms=req.start_ms, end_ms=req.end_ms,
+        req.symbol.upper(),
+        req.timeframe,
+        start_ms=req.start_ms,
+        end_ms=req.end_ms,
     )
     if not rows:
         raise HTTPException(
-            400, f"No candles for {req.symbol} {req.timeframe} in range. Download first.",
+            400,
+            f"No candles for {req.symbol} {req.timeframe} in range. Download first.",
         )
 
     candles = [Candle.from_dict(r) for r in rows]
@@ -65,8 +68,10 @@ def _execute(req: BacktestRequest, ctx: AppContext) -> BacktestResponse:
     engine = BacktestEngine(cfg)
     indicator_specs = [{"name": i.name, **i.to_kwargs()} for i in req.indicators]
     result = engine.run(
-        bots_instances, candles,
-        symbol=req.symbol.upper(), timeframe=req.timeframe,
+        bots_instances,
+        candles,
+        symbol=req.symbol.upper(),
+        timeframe=req.timeframe,
         bot_names=bot_names,
         indicator_specs=indicator_specs,
     )
@@ -75,7 +80,8 @@ def _execute(req: BacktestRequest, ctx: AppContext) -> BacktestResponse:
 
 @router.post("/backtest/run", response_model=BacktestResponse)
 def run_backtest(
-    req: BacktestRequest, ctx: AppContext = Depends(get_ctx),
+    req: BacktestRequest,
+    ctx: AppContext = Depends(get_ctx),
 ) -> BacktestResponse:
     return _execute(req, ctx)
 

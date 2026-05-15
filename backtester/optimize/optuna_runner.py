@@ -13,6 +13,7 @@ _LOG = logging.getLogger("backtester.optimize.optuna")
 def _build_optuna_sampler(name: str):
     """Resolve sampler by name (lazy import keeps Optuna optional)."""
     import optuna
+
     name = (name or "tpe").lower()
     if name == "tpe":
         return optuna.samplers.TPESampler()
@@ -91,12 +92,14 @@ def run_optuna(
     study.optimize(_wrapped, n_trials=trials, show_progress_bar=False)
 
     # Attach final cache stats to every result (same snapshot for all trials)
-    final_cache_stats = objective._cache.stats() if objective._cache is not None else None
+    final_cache_stats = (
+        objective._cache.stats() if objective._cache is not None else None
+    )
     if final_cache_stats is not None:
         for r in collected:
             r.cache_stats = final_cache_stats
 
     # Sort: best first
-    reverse = (objective.direction == "max")
+    reverse = objective.direction == "max"
     collected.sort(key=lambda r: r.score, reverse=reverse)
     return collected

@@ -55,7 +55,9 @@ class PresetStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(
-            str(self.db_path), check_same_thread=False, isolation_level=None,
+            str(self.db_path),
+            check_same_thread=False,
+            isolation_level=None,
         )
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.row_factory = sqlite3.Row
@@ -72,7 +74,8 @@ class PresetStore:
         now = time.time()
         with self._lock:
             existing = self._conn.execute(
-                "SELECT created_at FROM presets WHERE name = ?", (name,),
+                "SELECT created_at FROM presets WHERE name = ?",
+                (name,),
             ).fetchone()
             created_at = existing["created_at"] if existing else now
             self._conn.execute(
@@ -95,7 +98,8 @@ class PresetStore:
     def get(self, name: str) -> Optional[Preset]:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM presets WHERE name = ?", (name,),
+                "SELECT * FROM presets WHERE name = ?",
+                (name,),
             ).fetchone()
         return self._row_to_preset(row) if row else None
 

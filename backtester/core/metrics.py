@@ -13,6 +13,7 @@ from backtester.core.engine import BacktestResult
 
 # ── Helpers ──────────────────────────────────────────────────────
 
+
 def _equity_returns(curve: list[Decimal]) -> list[float]:
     """Compute per-bar fractional returns from equity curve."""
     if len(curve) < 2:
@@ -42,6 +43,7 @@ def _annualization_factor(timeframe: str) -> float:
 
 
 # ── Core ─────────────────────────────────────────────────────────
+
 
 def compute_metrics(result: BacktestResult) -> dict[str, Any]:
     """Compute comprehensive performance metrics.
@@ -120,7 +122,8 @@ def compute_metrics(result: BacktestResult) -> dict[str, Any]:
         avg_ms = sum(durations_ms) / len(durations_ms)
         base["avg_trade_duration_hrs"] = round(avg_ms / 3_600_000, 2)
         base["median_trade_duration_hrs"] = round(
-            sorted(durations_ms)[len(durations_ms) // 2] / 3_600_000, 2,
+            sorted(durations_ms)[len(durations_ms) // 2] / 3_600_000,
+            2,
         )
     else:
         base["avg_trade_duration_hrs"] = 0.0
@@ -209,8 +212,12 @@ def _streak_analysis(closed_trades: list) -> dict[str, Any]:
     return {
         "max_consecutive_wins": max(win_runs) if win_runs else 0,
         "max_consecutive_losses": max(loss_runs) if loss_runs else 0,
-        "avg_consecutive_wins": round(sum(win_runs) / len(win_runs), 2) if win_runs else 0.0,
-        "avg_consecutive_losses": round(sum(loss_runs) / len(loss_runs), 2) if loss_runs else 0.0,
+        "avg_consecutive_wins": round(sum(win_runs) / len(win_runs), 2)
+        if win_runs
+        else 0.0,
+        "avg_consecutive_losses": round(sum(loss_runs) / len(loss_runs), 2)
+        if loss_runs
+        else 0.0,
     }
 
 
@@ -240,5 +247,7 @@ def _excursion_stats(closed_trades: list) -> dict[str, Any]:
         "max_mfe_pct": round(max(mfes), 4),
         "max_mae_pct": round(min(maes), 4),
         # mfe_to_pnl > 2 suggests exits leave a lot of profit on the table
-        "mfe_to_pnl_ratio": round(avg_mfe / abs(avg_pnl_pct), 4) if avg_pnl_pct != 0 else 0.0,
+        "mfe_to_pnl_ratio": round(avg_mfe / abs(avg_pnl_pct), 4)
+        if avg_pnl_pct != 0
+        else 0.0,
     }

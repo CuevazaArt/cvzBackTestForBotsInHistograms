@@ -15,7 +15,9 @@ from backtester.core.preset_store import PresetStore
 def test_preset_upsert_and_get(tmp_path):
     store = PresetStore(tmp_path / "presets.sqlite")
     try:
-        store.upsert("FastEMA", "EMACross", {"fast_ema": 5, "slow_ema": 15}, "fast scalp")
+        store.upsert(
+            "FastEMA", "EMACross", {"fast_ema": 5, "slow_ema": 15}, "fast scalp"
+        )
         got = store.get("FastEMA")
         assert got is not None
         assert got.name == "FastEMA"
@@ -116,9 +118,14 @@ def test_save_unknown_bot_returns_422(client):
 
 
 def test_delete_preset_via_api(client):
-    client.post("/api/presets", json={
-        "name": "tmp", "bot_name": "EMACross", "params": {"fast_ema": 5, "slow_ema": 15},
-    })
+    client.post(
+        "/api/presets",
+        json={
+            "name": "tmp",
+            "bot_name": "EMACross",
+            "params": {"fast_ema": 5, "slow_ema": 15},
+        },
+    )
     r = client.delete("/api/presets/tmp")
     assert r.status_code == 200
     assert r.json() == {"deleted": True}

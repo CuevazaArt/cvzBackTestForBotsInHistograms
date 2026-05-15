@@ -19,7 +19,15 @@ from fastapi.staticfiles import StaticFiles
 from backtester.api.config import load_api_settings
 from backtester.api.deps import AppContext
 from backtester.api.routes import (
-    analysis, backtest, bots, candles, credentials, experiments, optimize, presets, results,
+    analysis,
+    backtest,
+    bots,
+    candles,
+    credentials,
+    experiments,
+    optimize,
+    presets,
+    results,
 )
 from backtester.api.security import require_api_token
 from backtester.api.ws import router as ws_router
@@ -51,21 +59,32 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for r in (bots.router, candles.router, backtest.router,
-              experiments.router, credentials.router, optimize.router,
-              presets.router, results.router, analysis.router):
+    for r in (
+        bots.router,
+        candles.router,
+        backtest.router,
+        experiments.router,
+        credentials.router,
+        optimize.router,
+        presets.router,
+        results.router,
+        analysis.router,
+    ):
         app.include_router(r, prefix="/api", dependencies=[Depends(require_api_token)])
     app.include_router(ws_router)
 
     @app.get("/health", dependencies=[Depends(require_api_token)])
     def health() -> dict[str, str | int]:
         from backtester.core.downloader import BINANCE_USED_WEIGHT_1M
+
         return {"status": "ok", "binance_weight_1m": BINANCE_USED_WEIGHT_1M}
 
     # Static web (Lightweight Charts module). Created in Phase 3.
     web_dir = Path(__file__).resolve().parents[1] / "web"
     if web_dir.is_dir():
-        app.mount("/static", StaticFiles(directory=str(web_dir), html=True), name="static")
+        app.mount(
+            "/static", StaticFiles(directory=str(web_dir), html=True), name="static"
+        )
     else:
         _LOG.warning("web/ directory not found: %s — /static disabled", web_dir)
 
@@ -78,6 +97,7 @@ app = create_app()
 def main() -> None:
     """Run uvicorn programmatically (used by `python -m backtester.api.server`)."""
     import uvicorn
+
     logging.basicConfig(level=logging.INFO)
     uvicorn.run("backtester.api.server:app", host="127.0.0.1", port=8002, reload=False)
 

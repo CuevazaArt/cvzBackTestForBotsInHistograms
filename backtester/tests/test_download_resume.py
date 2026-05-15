@@ -13,14 +13,14 @@ from backtester.core.downloader import BinanceDownloader
 def _make_kline(ts_ms: int, price: float = 100.0) -> list:
     """Minimal kline row matching Binance API format."""
     return [
-        ts_ms,          # open time
-        str(price),     # open
-        str(price + 1), # high
-        str(price - 1), # low
-        str(price),     # close
-        "10.0",         # volume
+        ts_ms,  # open time
+        str(price),  # open
+        str(price + 1),  # high
+        str(price - 1),  # low
+        str(price),  # close
+        "10.0",  # volume
         ts_ms + 59999,  # close time
-        str(price * 10),# quote asset volume
+        str(price * 10),  # quote asset volume
     ]
 
 
@@ -46,8 +46,9 @@ def test_download_calls_fetch_from_start(dl: BinanceDownloader) -> None:
             return batch
         return []
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch), \
-         patch("backtester.core.downloader.time.sleep"):
+    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch), patch(
+        "backtester.core.downloader.time.sleep"
+    ):
         dl.download("BTCUSDT", "1m", "2024-01-01", "2024-01-01")
 
     assert fetch_calls[0] == start_ms
@@ -67,10 +68,14 @@ def test_start_from_ms_skips_earlier_batches(dl: BinanceDownloader) -> None:
             return batch
         return []
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch), \
-         patch("backtester.core.downloader.time.sleep"):
+    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch), patch(
+        "backtester.core.downloader.time.sleep"
+    ):
         count = dl.download(
-            "BTCUSDT", "1m", "2024-01-01", "2024-01-02",
+            "BTCUSDT",
+            "1m",
+            "2024-01-01",
+            "2024-01-02",
             start_from_ms=resume_ms,
         )
 
@@ -96,10 +101,14 @@ def test_on_progress_called_after_each_batch(dl: BinanceDownloader) -> None:
     def on_progress(candles_added: int, last_ts: int) -> None:
         call_log.append((candles_added, last_ts))
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch), \
-         patch("backtester.core.downloader.time.sleep"):
+    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch), patch(
+        "backtester.core.downloader.time.sleep"
+    ):
         dl.download(
-            "BTCUSDT", "1m", "2024-01-01", "2024-01-01",
+            "BTCUSDT",
+            "1m",
+            "2024-01-01",
+            "2024-01-01",
             on_progress=on_progress,
         )
 
@@ -124,8 +133,9 @@ def test_resume_produces_no_duplicates(dl: BinanceDownloader) -> None:
             return all_candles
         return []
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch_first), \
-         patch("backtester.core.downloader.time.sleep"):
+    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch_first), patch(
+        "backtester.core.downloader.time.sleep"
+    ):
         dl.download("BTCUSDT", "1m", "2024-01-01", "2024-01-01")
 
     # Now "resume" starting from candle 5 (overlaps with already-stored candles)
@@ -136,10 +146,14 @@ def test_resume_produces_no_duplicates(dl: BinanceDownloader) -> None:
             return second_half
         return []
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch_resume), \
-         patch("backtester.core.downloader.time.sleep"):
+    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch_resume), patch(
+        "backtester.core.downloader.time.sleep"
+    ):
         dl.download(
-            "BTCUSDT", "1m", "2024-01-01", "2024-01-01",
+            "BTCUSDT",
+            "1m",
+            "2024-01-01",
+            "2024-01-01",
             start_from_ms=resume_ms,
         )
 

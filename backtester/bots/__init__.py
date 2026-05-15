@@ -15,4 +15,12 @@ BOT_REGISTRY: dict[str, type] = {
     "BollingerReversion": BollingerReversion,
 }
 
-__all__ = ["BotBase", "DorothyDCA", "EMACross", "MACDCross", "RSIReversion", "BollingerReversion", "BOT_REGISTRY"]
+__all__ = [
+    "BotBase",
+    "DorothyDCA",
+    "EMACross",
+    "MACDCross",
+    "RSIReversion",
+    "BollingerReversion",
+    "BOT_REGISTRY",
+]

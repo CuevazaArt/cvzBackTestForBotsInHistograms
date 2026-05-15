@@ -38,7 +38,9 @@ def example_1_simple_backtest():
     candles_data = downloader.load_candles("BTCUSDT", "1h")
     if not candles_data:
         print("No candles for BTCUSDT 1h. Download first:")
-        print("  python backtester/main.py --download-candles BTCUSDT 1h 2024-01-01 2024-12-31")
+        print(
+            "  python backtester/main.py --download-candles BTCUSDT 1h 2024-01-01 2024-12-31"
+        )
         return
 
     # Convert to Candle objects
@@ -108,21 +110,29 @@ def example_3_parallel_experiments():
 
     # EMACross with 3 configs
     for fast, slow in [(10, 20), (12, 26), (15, 30)]:
-        experiments.append(Experiment(
-            symbol="BTCUSDT",
-            timeframe="1h",
-            bot_class="EMACross",
-            bot_params={"fast_ema": fast, "slow_ema": slow, "profit_factor": 0.02},
-        ))
+        experiments.append(
+            Experiment(
+                symbol="BTCUSDT",
+                timeframe="1h",
+                bot_class="EMACross",
+                bot_params={"fast_ema": fast, "slow_ema": slow, "profit_factor": 0.02},
+            )
+        )
 
     # RSIReversion with 2 configs
     for period in [14, 21]:
-        experiments.append(Experiment(
-            symbol="BTCUSDT",
-            timeframe="1h",
-            bot_class="RSIReversion",
-            bot_params={"rsi_period": period, "oversold_level": 30, "overbought_level": 70},
-        ))
+        experiments.append(
+            Experiment(
+                symbol="BTCUSDT",
+                timeframe="1h",
+                bot_class="RSIReversion",
+                bot_params={
+                    "rsi_period": period,
+                    "oversold_level": 30,
+                    "overbought_level": 70,
+                },
+            )
+        )
 
     # Run in parallel
     bot_registry = {
@@ -187,7 +197,9 @@ def example_4_analyze_trades():
             key=lambda t: t.pnl,
         )[:5]
         for t in losers:
-            print(f"  -${abs(t.pnl):.2f} ({t.pnl_pct:.2f}%) - Entry: ${t.entry_price:.2f}")
+            print(
+                f"  -${abs(t.pnl):.2f} ({t.pnl_pct:.2f}%) - Entry: ${t.entry_price:.2f}"
+            )
 
     print()
 
@@ -204,4 +216,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error: {e}")
         print("\nTip: Make sure you've downloaded candles first:")
-        print("  python backtester/main.py --download-candles BTCUSDT 1h 2024-01-01 2024-12-31")
+        print(
+            "  python backtester/main.py --download-candles BTCUSDT 1h 2024-01-01 2024-12-31"
+        )

@@ -255,12 +255,24 @@ def test_experiment_runner_processes_multiple_configs():
         )
 
         experiments = [
-            Experiment(symbol="TESTUSDT", timeframe="1h", bot_class="EMACross",
-                       bot_params={"fast_ema": 5, "slow_ema": 15}),
-            Experiment(symbol="TESTUSDT", timeframe="1h", bot_class="EMACross",
-                       bot_params={"fast_ema": 8, "slow_ema": 21}),
-            Experiment(symbol="TESTUSDT", timeframe="1h", bot_class="EMACross",
-                       bot_params={"fast_ema": 12, "slow_ema": 26}),
+            Experiment(
+                symbol="TESTUSDT",
+                timeframe="1h",
+                bot_class="EMACross",
+                bot_params={"fast_ema": 5, "slow_ema": 15},
+            ),
+            Experiment(
+                symbol="TESTUSDT",
+                timeframe="1h",
+                bot_class="EMACross",
+                bot_params={"fast_ema": 8, "slow_ema": 21},
+            ),
+            Experiment(
+                symbol="TESTUSDT",
+                timeframe="1h",
+                bot_class="EMACross",
+                bot_params={"fast_ema": 12, "slow_ema": 26},
+            ),
         ]
         # Workers=1 → keeps the test single-process; multiprocessing on Windows
         # with pytest fixtures can be flaky due to pickling.
@@ -291,11 +303,16 @@ def test_engine_isolates_bot_crash():
             raise RuntimeError("boom")
 
     candles = [
-        Candle.from_dict({
-            "timestamp_ms": i * 3_600_000,
-            "open": 100.0 + i, "high": 100.5 + i, "low": 99.5 + i,
-            "close": 100.0 + i, "volume": 100.0,
-        })
+        Candle.from_dict(
+            {
+                "timestamp_ms": i * 3_600_000,
+                "open": 100.0 + i,
+                "high": 100.5 + i,
+                "low": 99.5 + i,
+                "close": 100.0 + i,
+                "volume": 100.0,
+            }
+        )
         for i in range(50)
     ]
 
@@ -344,10 +361,19 @@ def test_dorothy_dca_runs_end_to_end():
     from backtester.core import BacktestConfig, BacktestEngine
     from backtester.core.engine import Candle
 
-    candles = [Candle.from_dict({
-        "timestamp_ms": k[0], "open": k[1], "high": k[2],
-        "low": k[3], "close": k[4], "volume": k[5],
-    }) for k in _downtrend_recovery_klines(200)]
+    candles = [
+        Candle.from_dict(
+            {
+                "timestamp_ms": k[0],
+                "open": k[1],
+                "high": k[2],
+                "low": k[3],
+                "close": k[4],
+                "volume": k[5],
+            }
+        )
+        for k in _downtrend_recovery_klines(200)
+    ]
 
     bot = DorothyDCA(
         profit_factor=0.05,
@@ -357,7 +383,9 @@ def test_dorothy_dca_runs_end_to_end():
         risk_per_trade_pct=5.0,
     )
     eng = BacktestEngine(BacktestConfig(initial_cash=Decimal("10000")))
-    result = eng.run([bot], candles, symbol="TESTUSDT", timeframe="1h", bot_names=["DorothyDCA"])
+    result = eng.run(
+        [bot], candles, symbol="TESTUSDT", timeframe="1h", bot_names=["DorothyDCA"]
+    )
 
     assert "DorothyDCA" in result.per_bot
     metrics = result.per_bot["DorothyDCA"]
@@ -378,11 +406,16 @@ def test_dorothy_dca_via_http(app_with_synthetic_data):
     payload = {
         "symbol": "TESTUSDT",
         "timeframe": "1h",
-        "bots": [{"name": "DorothyDCA", "params": {
-            "profit_factor": 0.05,
-            "margin_drop_factor": 0.004,
-            "max_positions": 3,
-        }}],
+        "bots": [
+            {
+                "name": "DorothyDCA",
+                "params": {
+                    "profit_factor": 0.05,
+                    "margin_drop_factor": 0.004,
+                    "max_positions": 3,
+                },
+            }
+        ],
         "initial_cash": 10000.0,
     }
     res = client.post("/api/backtest/run", json=payload)
@@ -412,14 +445,22 @@ def test_advanced_metrics_present_in_response(app_with_synthetic_data):
 
     # All new keys must exist and be finite
     for key in (
-        "sharpe_ratio", "sortino_ratio", "calmar_ratio",
-        "avg_win_pnl", "avg_loss_pnl", "expectancy",
+        "sharpe_ratio",
+        "sortino_ratio",
+        "calmar_ratio",
+        "avg_win_pnl",
+        "avg_loss_pnl",
+        "expectancy",
         "avg_trade_duration_hrs",
     ):
         assert key in summary, f"Missing metric: {key}"
         val = summary[key]
-        assert isinstance(val, (int, float)), f"{key} should be numeric, got {type(val)}"
-        assert not math.isnan(val) and not math.isinf(val), f"{key} is not finite: {val}"
+        assert isinstance(
+            val, (int, float)
+        ), f"{key} should be numeric, got {type(val)}"
+        assert not math.isnan(val) and not math.isinf(
+            val
+        ), f"{key} is not finite: {val}"
 
 
 def test_job_cancel_unknown_returns_404(app_with_synthetic_data):
@@ -430,7 +471,9 @@ def test_job_cancel_unknown_returns_404(app_with_synthetic_data):
 
 def test_health_requires_token_when_configured(app_with_synthetic_data):
     os.environ["BACKTESTER_API_TOKEN"] = "abc123"
-    app_with_synthetic_data.state.settings = type("S", (), {"auth_enabled": True, "api_token": "abc123"})()
+    app_with_synthetic_data.state.settings = type(
+        "S", (), {"auth_enabled": True, "api_token": "abc123"}
+    )()
     client = TestClient(app_with_synthetic_data)
     unauthorized = client.get("/health")
     assert unauthorized.status_code == 401
@@ -457,8 +500,16 @@ def test_export_trades_csv(app_with_synthetic_data):
     lines = res.text.strip().splitlines()
     header = lines[0].split(",")
     for col in (
-        "bot_id", "entry_time", "exit_time", "entry_price", "exit_price",
-        "qty", "pnl", "pnl_pct", "fee_usdt", "reason",
+        "bot_id",
+        "entry_time",
+        "exit_time",
+        "entry_price",
+        "exit_price",
+        "qty",
+        "pnl",
+        "pnl_pct",
+        "fee_usdt",
+        "reason",
     ):
         assert col in header, f"Missing CSV column {col}"
     # At least the header + one trade row.

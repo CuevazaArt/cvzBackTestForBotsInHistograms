@@ -36,11 +36,41 @@ class BollingerReversion(BotBase):
     @classmethod
     def param_spec(cls) -> dict[str, dict[str, Any]]:
         return {
-            "bb_period": {"type": "int", "default": 20, "min": 5, "max": 100, "step": 1},
-            "std_dev_multiplier": {"type": "float", "default": 2.0, "min": 1.0, "max": 4.0, "step": 0.1},
-            "profit_factor": {"type": "float", "default": 0.03, "min": 0.001, "max": 0.5, "step": 0.001},
-            "stop_loss_pct": {"type": "float", "default": 0.05, "min": 0.005, "max": 0.5, "step": 0.005},
-            "risk_per_trade_pct": {"type": "float", "default": 2.0, "min": 0.5, "max": 20.0, "step": 0.5},
+            "bb_period": {
+                "type": "int",
+                "default": 20,
+                "min": 5,
+                "max": 100,
+                "step": 1,
+            },
+            "std_dev_multiplier": {
+                "type": "float",
+                "default": 2.0,
+                "min": 1.0,
+                "max": 4.0,
+                "step": 0.1,
+            },
+            "profit_factor": {
+                "type": "float",
+                "default": 0.03,
+                "min": 0.001,
+                "max": 0.5,
+                "step": 0.001,
+            },
+            "stop_loss_pct": {
+                "type": "float",
+                "default": 0.05,
+                "min": 0.005,
+                "max": 0.5,
+                "step": 0.005,
+            },
+            "risk_per_trade_pct": {
+                "type": "float",
+                "default": 2.0,
+                "min": 0.5,
+                "max": 20.0,
+                "step": 0.5,
+            },
         }
 
     def on_candle(self, candle: Candle, portfolio: Portfolio) -> None:
@@ -66,9 +96,13 @@ class BollingerReversion(BotBase):
         if not self._in_position:
             # Entry condition: Price dips below lower band
             if price < lower_band:
-                qty = self.calc_qty(price, float(portfolio.cash), self.risk_per_trade_pct)
+                qty = self.calc_qty(
+                    price, float(portfolio.cash), self.risk_per_trade_pct
+                )
                 if qty > 0:
-                    portfolio.buy(self.__class__.__name__, price, qty, candle.timestamp_ms)
+                    portfolio.buy(
+                        self.__class__.__name__, price, qty, candle.timestamp_ms
+                    )
                     self._entry_price = price
                     self._in_position = True
 
@@ -80,10 +114,16 @@ class BollingerReversion(BotBase):
             gain_pct = (price - self._entry_price) / self._entry_price
 
             # Mean reversion achieved (price hits SMA), or Stop Loss, or Take Profit
-            if price >= sma or gain_pct >= self.profit_factor or gain_pct <= -self.stop_loss_pct:
+            if (
+                price >= sma
+                or gain_pct >= self.profit_factor
+                or gain_pct <= -self.stop_loss_pct
+            ):
                 pos = portfolio.positions.get(self.__class__.__name__)
                 if pos and pos > 0:
-                    portfolio.sell(self.__class__.__name__, price, pos, candle.timestamp_ms)
+                    portfolio.sell(
+                        self.__class__.__name__, price, pos, candle.timestamp_ms
+                    )
                 self._in_position = False
                 self._entry_price = None
 

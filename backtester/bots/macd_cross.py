@@ -39,7 +39,7 @@ class MACDCross(BotBase):
         # EMA multipliers
         self._k_fast = 2.0 / (fast_ema + 1)
         self._k_slow = 2.0 / (slow_ema + 1)
-        self._k_sig  = 2.0 / (signal_period + 1)
+        self._k_sig = 2.0 / (signal_period + 1)
 
         # Running state
         self._ema_fast: float | None = None
@@ -51,7 +51,7 @@ class MACDCross(BotBase):
 
         self._warmup: list[float] = []
         self._warmed_up = False
-        self._macd_history: list[float] = []   # for signal warm-up
+        self._macd_history: list[float] = []  # for signal warm-up
 
         self._in_position = False
         self._entry_price: float | None = None
@@ -59,12 +59,36 @@ class MACDCross(BotBase):
     @classmethod
     def param_spec(cls) -> dict[str, dict[str, Any]]:
         return {
-            "fast_ema":          {"type": "int",   "default": 12,  "min": 2,   "max": 50,   "step": 1},
-            "slow_ema":          {"type": "int",   "default": 26,  "min": 5,   "max": 200,  "step": 1},
-            "signal_period":     {"type": "int",   "default": 9,   "min": 2,   "max": 50,   "step": 1},
-            "profit_factor":     {"type": "float", "default": 0.04, "min": 0.005, "max": 0.5, "step": 0.005},
-            "stop_loss_pct":     {"type": "float", "default": 0.05, "min": 0.005, "max": 0.5, "step": 0.005},
-            "risk_per_trade_pct":{"type": "float", "default": 2.0,  "min": 0.5,  "max": 20.0, "step": 0.5},
+            "fast_ema": {"type": "int", "default": 12, "min": 2, "max": 50, "step": 1},
+            "slow_ema": {"type": "int", "default": 26, "min": 5, "max": 200, "step": 1},
+            "signal_period": {
+                "type": "int",
+                "default": 9,
+                "min": 2,
+                "max": 50,
+                "step": 1,
+            },
+            "profit_factor": {
+                "type": "float",
+                "default": 0.04,
+                "min": 0.005,
+                "max": 0.5,
+                "step": 0.005,
+            },
+            "stop_loss_pct": {
+                "type": "float",
+                "default": 0.05,
+                "min": 0.005,
+                "max": 0.5,
+                "step": 0.005,
+            },
+            "risk_per_trade_pct": {
+                "type": "float",
+                "default": 2.0,
+                "min": 0.5,
+                "max": 20.0,
+                "step": 0.5,
+            },
         }
 
     def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict[str, Any]]:
@@ -76,7 +100,7 @@ class MACDCross(BotBase):
             self._warmup.append(price)
             if len(self._warmup) == self.slow_ema:
                 self._ema_slow = sum(self._warmup) / len(self._warmup)
-                self._ema_fast = sum(self._warmup[-self.fast_ema:]) / self.fast_ema
+                self._ema_fast = sum(self._warmup[-self.fast_ema :]) / self.fast_ema
                 self._warmed_up = True
             return orders
 
@@ -94,9 +118,9 @@ class MACDCross(BotBase):
             return orders
 
         # ── Phase 4: update signal ────────────────────────────────────
-        self._prev_macd   = self._macd
+        self._prev_macd = self._macd
         self._prev_signal = self._signal
-        self._macd   = macd_val
+        self._macd = macd_val
         self._signal = macd_val * self._k_sig + self._signal * (1 - self._k_sig)
 
         # ── Stop-loss ─────────────────────────────────────────────────
@@ -104,7 +128,9 @@ class MACDCross(BotBase):
             if price < self._entry_price * (1 - self.stop_loss_pct):
                 qty = self.max_sell_qty(portfolio)
                 if qty > 0:
-                    orders.append({"side": "SELL", "qty": float(qty), "reason": "STOP_LOSS"})
+                    orders.append(
+                        {"side": "SELL", "qty": float(qty), "reason": "STOP_LOSS"}
+                    )
                 self._in_position = False
                 self._entry_price = None
                 return orders
@@ -114,7 +140,9 @@ class MACDCross(BotBase):
             if price >= self._entry_price * (1 + self.profit_factor):
                 qty = self.max_sell_qty(portfolio)
                 if qty > 0:
-                    orders.append({"side": "SELL", "qty": float(qty), "reason": "TAKE_PROFIT"})
+                    orders.append(
+                        {"side": "SELL", "qty": float(qty), "reason": "TAKE_PROFIT"}
+                    )
                 self._in_position = False
                 self._entry_price = None
                 return orders
@@ -129,14 +157,18 @@ class MACDCross(BotBase):
         if bull_cross and not self._in_position:
             qty = self.calc_qty(candle.close, portfolio, self.risk_per_trade_pct)
             if qty > 0:
-                orders.append({"side": "BUY", "qty": float(qty), "reason": "BULL_CROSS"})
+                orders.append(
+                    {"side": "BUY", "qty": float(qty), "reason": "BULL_CROSS"}
+                )
                 self._in_position = True
                 self._entry_price = price
 
         elif bear_cross and self._in_position:
             qty = self.max_sell_qty(portfolio)
             if qty > 0:
-                orders.append({"side": "SELL", "qty": float(qty), "reason": "BEAR_CROSS"})
+                orders.append(
+                    {"side": "SELL", "qty": float(qty), "reason": "BEAR_CROSS"}
+                )
             self._in_position = False
             self._entry_price = None
 

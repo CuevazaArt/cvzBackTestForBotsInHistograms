@@ -18,7 +18,8 @@ def credentials_exists(ctx: AppContext = Depends(get_ctx)) -> CredentialsStatus:
 
 @router.post("/credentials", response_model=CredentialsStatus)
 def save_credentials(
-    req: CredentialsRequest, ctx: AppContext = Depends(get_ctx),
+    req: CredentialsRequest,
+    ctx: AppContext = Depends(get_ctx),
 ) -> CredentialsStatus:
     if not req.api_key.strip() or not req.api_secret.strip():
         raise HTTPException(400, "api_key and api_secret cannot be empty")

@@ -14,6 +14,7 @@ _LOG = logging.getLogger("backtester.engine")
 @dataclass
 class Candle:
     """Single OHLCV candle."""
+
     timestamp_ms: int
     open: Decimal
     high: Decimal
@@ -42,6 +43,7 @@ class Position:
     so closed trades can report how far in-favor / against the trade went before
     being closed. Useful for stop placement and trade quality analysis.
     """
+
     entry_price: Decimal
     qty: Decimal
     entry_idx: int
@@ -49,7 +51,7 @@ class Position:
     bot_id: str = ""
     # Running excursion trackers (updated each candle while position is open)
     max_favorable_price: Decimal = Decimal("0")  # Highest price seen → MFE
-    max_adverse_price: Decimal = Decimal("0")    # Lowest price seen  → MAE
+    max_adverse_price: Decimal = Decimal("0")  # Lowest price seen  → MAE
 
     def update_excursion(self, high: Decimal, low: Decimal) -> None:
         """Update MFE/MAE trackers given the current candle's high/low.
@@ -75,6 +77,7 @@ class Trade:
     while the position was open. Reported in absolute Decimal and as percent
     of entry price for easy comparison across symbols.
     """
+
     entry_price: Decimal
     exit_price: Decimal
     qty: Decimal
@@ -96,6 +99,7 @@ class Trade:
 @dataclass
 class Portfolio:
     """Portfolio state."""
+
     cash: Decimal = Decimal("10000")
     positions: list[Position] = field(default_factory=list)
     closed_trades: list[Trade] = field(default_factory=list)
@@ -127,6 +131,7 @@ class BacktestBot(ABC):
 @dataclass
 class BacktestConfig:
     """Backtest parameters."""
+
     initial_cash: Decimal = Decimal("10000")
     taker_fee_pct: Decimal = Decimal("0.1")  # Binance default
     slippage_pct: Decimal = Decimal("0.05")  # Spread + impact
@@ -136,6 +141,7 @@ class BacktestConfig:
 @dataclass
 class BacktestResult:
     """Results of a backtest run."""
+
     symbol: str
     timeframe: str
     candles_processed: int
@@ -150,14 +156,18 @@ class BacktestResult:
     def summary(self) -> dict[str, Any]:
         """Compute performance metrics."""
         initial = self.equity_curve[0] if self.equity_curve else Decimal("0")
-        total_return = ((self.final_equity - initial) / initial * 100) if initial > 0 else 0
+        total_return = (
+            ((self.final_equity - initial) / initial * 100) if initial > 0 else 0
+        )
 
         closed = [t for t in self.trades if t.exit_idx is not None]
         winners = [t for t in closed if t.pnl > 0]
         losers = [t for t in closed if t.pnl < 0]
 
         win_rate = len(winners) / len(closed) * 100 if closed else 0
-        avg_win = sum(t.pnl for t in winners) / len(winners) if winners else Decimal("0")
+        avg_win = (
+            sum(t.pnl for t in winners) / len(winners) if winners else Decimal("0")
+        )
         avg_loss = sum(t.pnl for t in losers) / len(losers) if losers else Decimal("0")
 
         profit_factor = float(avg_win / abs(avg_loss)) if avg_loss != 0 else 0
@@ -206,16 +216,22 @@ def build_per_bot_breakdown(
         gross_loss = abs(sum(t.pnl for t in bot_trades if t.pnl < 0))
         final_eq = float(portfolio.total_equity(last_close))
         breakdown[bot_id] = {
-            "bot_id":           bot_id,
-            "trades":           len(bot_trades),
-            "wins":             len(wins),
-            "win_rate_pct":     float(len(wins) / len(bot_trades) * 100) if bot_trades else 0.0,
-            "total_return_pct": float((final_eq - float(capital_per_bot)) / float(capital_per_bot) * 100),
-            "total_pnl":        float(sum(t.pnl for t in bot_trades)),
-            "total_fees_usdt":  float(sum(t.fee_usdt for t in bot_trades)),
-            "profit_factor":    float(gross_profit / gross_loss) if gross_loss > 0 else 0.0,
-            "final_equity":     final_eq,
-            "initial_cash":     float(capital_per_bot),
+            "bot_id": bot_id,
+            "trades": len(bot_trades),
+            "wins": len(wins),
+            "win_rate_pct": float(len(wins) / len(bot_trades) * 100)
+            if bot_trades
+            else 0.0,
+            "total_return_pct": float(
+                (final_eq - float(capital_per_bot)) / float(capital_per_bot) * 100
+            ),
+            "total_pnl": float(sum(t.pnl for t in bot_trades)),
+            "total_fees_usdt": float(sum(t.fee_usdt for t in bot_trades)),
+            "profit_factor": float(gross_profit / gross_loss)
+            if gross_loss > 0
+            else 0.0,
+            "final_equity": final_eq,
+            "initial_cash": float(capital_per_bot),
         }
     return breakdown
 
@@ -244,6 +260,11 @@ class BacktestEngine:
             bots = [bots]
 
         n = len(bots)
+        if n == 0:
+            return BacktestResult(
+                symbol=symbol, timeframe=timeframe, candles_processed=0
+            )
+
         capital_per_bot = self.config.initial_cash / Decimal(n)
 
         # Assign names
@@ -279,9 +300,13 @@ class BacktestEngine:
                     qty = Decimal(str(order.get("qty", 0)))
                     reason = order.get("reason") or side
                     if side == "BUY":
-                        self._process_buy(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
+                        self._process_buy(
+                            candle, portfolio, qty, result, bot_id=bot_id, reason=reason
+                        )
                     elif side == "SELL":
-                        self._process_sell(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
+                        self._process_sell(
+                            candle, portfolio, qty, result, bot_id=bot_id, reason=reason
+                        )
 
             # Global equity = sum of all bot portfolios
             total_equity = sum(p.total_equity(candle.close) for p in portfolios)
@@ -289,17 +314,23 @@ class BacktestEngine:
 
         # Merge all trades into global result
         result.trades = [t for p in portfolios for t in p.closed_trades]
-        result.final_equity = sum(
-            p.total_equity(candles[-1].close) for p in portfolios
-        ) if candles else Decimal("0")
-        result.peak_equity = max(result.equity_curve) if result.equity_curve else Decimal("0")
+        result.final_equity = (
+            sum(p.total_equity(candles[-1].close) for p in portfolios)
+            if candles
+            else Decimal("0")
+        )
+        result.peak_equity = (
+            max(result.equity_curve) if result.equity_curve else Decimal("0")
+        )
 
         # True peak-to-trough max drawdown on global equity
         result.max_drawdown_pct = compute_max_drawdown_pct(result.equity_curve)
 
         # Per-bot breakdown
         last_close = candles[-1].close if candles else Decimal("0")
-        result.per_bot = build_per_bot_breakdown(names, portfolios, capital_per_bot, last_close)
+        result.per_bot = build_per_bot_breakdown(
+            names, portfolios, capital_per_bot, last_close
+        )
 
         return result
 
@@ -316,14 +347,25 @@ class BacktestEngine:
         if qty <= 0:
             return
 
-        # Apply slippage
+        # Apply slippage (buy fills at a slightly higher price)
         fill_price = candle.close * (1 + self.config.slippage_pct / 100)
         cost = qty * fill_price
         fee = cost * self.config.taker_fee_pct / 100
 
         if portfolio.cash < cost + fee:
-            _LOG.warning(f"[{bot_id}] Insufficient cash: need {cost + fee:.2f}, have {portfolio.cash:.2f}")
+            _LOG.warning(
+                f"[{bot_id}] Insufficient cash: need {cost + fee:.2f}, have {portfolio.cash:.2f}"
+            )
             return
+
+        # Enforce per-portfolio position cap when configured.
+        if self.config.max_position_qty is not None:
+            held = sum(p.qty for p in portfolio.positions if p.bot_id == bot_id)
+            remaining_cap = self.config.max_position_qty - held
+            if remaining_cap <= 0:
+                _LOG.debug("[%s] max_position_qty cap reached, buy skipped", bot_id)
+                return
+            qty = min(qty, remaining_cap)
 
         portfolio.cash -= cost + fee
         pos = Position(
@@ -368,8 +410,10 @@ class BacktestEngine:
 
             pnl = qty_to_close * (fill_price - pos.entry_price) - prorated_fee
             pnl_pct = (
-                (fill_price - pos.entry_price) / pos.entry_price * 100
-            ) if pos.entry_price > 0 else Decimal("0")
+                ((fill_price - pos.entry_price) / pos.entry_price * 100)
+                if pos.entry_price > 0
+                else Decimal("0")
+            )
 
             portfolio.cash += revenue_this - prorated_fee
 
@@ -377,8 +421,12 @@ class BacktestEngine:
             # high seen, MAE uses the lowest low. Falls back gracefully if the
             # position closed on the same candle it opened (no excursion data).
             if pos.entry_price > 0 and pos.max_favorable_price > 0:
-                mfe_pct = (pos.max_favorable_price - pos.entry_price) / pos.entry_price * 100
-                mae_pct = (pos.max_adverse_price - pos.entry_price) / pos.entry_price * 100
+                mfe_pct = (
+                    (pos.max_favorable_price - pos.entry_price) / pos.entry_price * 100
+                )
+                mae_pct = (
+                    (pos.max_adverse_price - pos.entry_price) / pos.entry_price * 100
+                )
             else:
                 mfe_pct = Decimal("0")
                 mae_pct = Decimal("0")

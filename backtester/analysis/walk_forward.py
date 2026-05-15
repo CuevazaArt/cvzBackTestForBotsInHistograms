@@ -31,15 +31,16 @@ _LOG = logging.getLogger("backtester.analysis.walk_forward")
 @dataclass
 class WalkForwardWindow:
     """One in-sample / out-of-sample pair."""
+
     window_idx: int
-    is_start: int          # candle index (inclusive)
-    is_end: int            # candle index (exclusive)
+    is_start: int  # candle index (inclusive)
+    is_end: int  # candle index (exclusive)
     oos_start: int
     oos_end: int
     best_params: dict[str, Any] = field(default_factory=dict)
     is_metrics: dict[str, Any] = field(default_factory=dict)
     oos_metrics: dict[str, Any] = field(default_factory=dict)
-    efficiency: float = 0.0   # OOS_return / IS_return (clamped)
+    efficiency: float = 0.0  # OOS_return / IS_return (clamped)
 
 
 @dataclass
@@ -49,10 +50,11 @@ class WalkForwardConfig:
     Sizes are in number of candles. Choose them based on timeframe — e.g.
     on 1h, 720 candles ≈ 30 days, 168 ≈ 1 week.
     """
-    train_size: int                   # in-sample window length (candles)
-    test_size: int                    # out-of-sample window length
-    step_size: Optional[int] = None   # how much to slide forward (default = test_size)
-    anchored: bool = False            # if True, train window grows; else rolls
+
+    train_size: int  # in-sample window length (candles)
+    test_size: int  # out-of-sample window length
+    step_size: Optional[int] = None  # how much to slide forward (default = test_size)
+    anchored: bool = False  # if True, train window grows; else rolls
     objective_metric: str = "total_return_pct"  # what to optimize on IS
 
     def __post_init__(self) -> None:
@@ -67,15 +69,16 @@ class WalkForwardConfig:
 @dataclass
 class WalkForwardResult:
     """Aggregated walk-forward result across all windows."""
+
     config: WalkForwardConfig
     windows: list[WalkForwardWindow]
     avg_oos_return_pct: float
     avg_is_return_pct: float
-    efficiency_ratio: float           # mean(OOS) / mean(IS), clamped to [-2, 2]
-    consistency: float                # 1 - CV (coefficient of variation) of OOS returns
-    profitable_windows: int           # how many OOS windows had positive return
+    efficiency_ratio: float  # mean(OOS) / mean(IS), clamped to [-2, 2]
+    consistency: float  # 1 - CV (coefficient of variation) of OOS returns
+    profitable_windows: int  # how many OOS windows had positive return
     total_windows: int
-    verdict: str                      # one of: robust, weak, overfit, inconclusive
+    verdict: str  # one of: robust, weak, overfit, inconclusive
 
     def to_dict(self) -> dict[str, Any]:
         return {

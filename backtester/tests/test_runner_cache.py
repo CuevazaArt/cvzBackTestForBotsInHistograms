@@ -5,6 +5,7 @@ Verifies:
 - ExperimentRunner attaches cache_stats to results (sequential mode).
 - Cache is actually reducing redundant add_indicators calls (hit_rate > 0).
 """
+
 from __future__ import annotations
 
 import math
@@ -26,14 +27,16 @@ def _make_candles(n: int = 200) -> list[Candle]:
     candles = []
     for i in range(n):
         price = Decimal(str(100.0 + 30 * math.sin(i / 20.0)))
-        candles.append(Candle(
-            timestamp_ms=i * 3_600_000,
-            open=price,
-            high=price + Decimal("0.5"),
-            low=price - Decimal("0.5"),
-            close=price + Decimal("0.1"),
-            volume=Decimal("10"),
-        ))
+        candles.append(
+            Candle(
+                timestamp_ms=i * 3_600_000,
+                open=price,
+                high=price + Decimal("0.5"),
+                low=price - Decimal("0.5"),
+                close=price + Decimal("0.1"),
+                volume=Decimal("10"),
+            )
+        )
     return candles
 
 
@@ -56,8 +59,13 @@ def test_streaming_engine_populates_cache_on_first_run():
     engine = StreamingEngine(cfg, total=200, cache=cache)
     candles = _make_candles(200)
 
-    engine.run(EMACross(), candles, symbol="BTC", timeframe="1h",
-               indicator_specs=_INDICATOR_SPECS)
+    engine.run(
+        EMACross(),
+        candles,
+        symbol="BTC",
+        timeframe="1h",
+        indicator_specs=_INDICATOR_SPECS,
+    )
 
     stats = cache.stats()
     # First run: all misses, entries now populated
@@ -76,16 +84,26 @@ def test_streaming_engine_hits_cache_on_second_run():
 
     # Run 1: warm the cache
     engine1 = StreamingEngine(cfg, total=200, cache=cache)
-    engine1.run(EMACross(), candles, symbol="BTC", timeframe="1h",
-                indicator_specs=_INDICATOR_SPECS)
+    engine1.run(
+        EMACross(),
+        candles,
+        symbol="BTC",
+        timeframe="1h",
+        indicator_specs=_INDICATOR_SPECS,
+    )
 
     stats_after_run1 = cache.stats()
     assert stats_after_run1["misses"] == len(_INDICATOR_SPECS)
 
     # Run 2: same candles + specs → all hits
     engine2 = StreamingEngine(cfg, total=200, cache=cache)
-    engine2.run(EMACross(fast_ema=5, slow_ema=15), candles, symbol="BTC",
-                timeframe="1h", indicator_specs=_INDICATOR_SPECS)
+    engine2.run(
+        EMACross(fast_ema=5, slow_ema=15),
+        candles,
+        symbol="BTC",
+        timeframe="1h",
+        indicator_specs=_INDICATOR_SPECS,
+    )
 
     stats_after_run2 = cache.stats()
     assert stats_after_run2["hits"] == len(_INDICATOR_SPECS)
@@ -99,8 +117,10 @@ def test_streaming_engine_no_cache_still_works():
 
     engine = StreamingEngine(BacktestConfig(), total=100)  # cache defaults to None
     result = engine.run(
-        EMACross(), _make_candles(100),
-        symbol="ETH", timeframe="4h",
+        EMACross(),
+        _make_candles(100),
+        symbol="ETH",
+        timeframe="4h",
         indicator_specs=[{"name": "ema", "period": 9}],
     )
     assert result.candles_processed == 100
@@ -119,8 +139,9 @@ def _make_downloader(tmp_path: Path) -> BinanceDownloader:
     for i in range(200):
         p = 100.0 + 30 * math.sin(i / 20.0)
         ts = i * 3_600_000
-        klines.append([ts, p - 0.2, p + 0.5, p - 0.5, p + 0.1, 100.0,
-                        ts + 3_599_999, 10000.0])
+        klines.append(
+            [ts, p - 0.2, p + 0.5, p - 0.5, p + 0.1, 100.0, ts + 3_599_999, 10000.0]
+        )
     dl._save_batch("BTCUSDT", "1h", klines)
     return dl
 

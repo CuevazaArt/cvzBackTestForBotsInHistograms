@@ -35,7 +35,9 @@ class ResultStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(
-            str(self.db_path), check_same_thread=False, isolation_level=None,
+            str(self.db_path),
+            check_same_thread=False,
+            isolation_level=None,
         )
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
@@ -75,11 +77,12 @@ class ResultStore:
 
     def get(self, run_id: str) -> Optional[dict[str, Any]]:
         """Return the stored record for run_id, or None."""
-        row = self._conn.execute(
-            "SELECT run_id, symbol, timeframe, config, result, created_at "
-            "FROM backtest_results WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT run_id, symbol, timeframe, config, result, created_at "
+                "FROM backtest_results WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
         if row is None:
             return None
         return self._row_to_dict(row)
@@ -102,12 +105,13 @@ class ResultStore:
             params.append(timeframe)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params += [limit, offset]
-        rows = self._conn.execute(
-            f"SELECT run_id, symbol, timeframe, config, result, created_at "
-            f"FROM backtest_results {where} "
-            f"ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            params,
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT run_id, symbol, timeframe, config, result, created_at "
+                f"FROM backtest_results {where} "
+                f"ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                params,
+            ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     # ── delete ─────────────────────────────────────────────────────

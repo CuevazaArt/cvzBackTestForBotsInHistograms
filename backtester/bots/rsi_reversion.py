@@ -51,12 +51,48 @@ class RSIReversion(BotBase):
     @classmethod
     def param_spec(cls) -> dict[str, dict[str, Any]]:
         return {
-            "rsi_period": {"type": "int", "default": 14, "min": 2, "max": 50, "step": 1},
-            "oversold_level": {"type": "float", "default": 30.0, "min": 10.0, "max": 50.0, "step": 1.0},
-            "overbought_level": {"type": "float", "default": 70.0, "min": 50.0, "max": 90.0, "step": 1.0},
-            "profit_factor": {"type": "float", "default": 0.03, "min": 0.001, "max": 0.5, "step": 0.001},
-            "stop_loss_pct": {"type": "float", "default": 0.05, "min": 0.005, "max": 0.5, "step": 0.005},
-            "risk_per_trade_pct": {"type": "float", "default": 2.0, "min": 0.5, "max": 20.0, "step": 0.5},
+            "rsi_period": {
+                "type": "int",
+                "default": 14,
+                "min": 2,
+                "max": 50,
+                "step": 1,
+            },
+            "oversold_level": {
+                "type": "float",
+                "default": 30.0,
+                "min": 10.0,
+                "max": 50.0,
+                "step": 1.0,
+            },
+            "overbought_level": {
+                "type": "float",
+                "default": 70.0,
+                "min": 50.0,
+                "max": 90.0,
+                "step": 1.0,
+            },
+            "profit_factor": {
+                "type": "float",
+                "default": 0.03,
+                "min": 0.001,
+                "max": 0.5,
+                "step": 0.001,
+            },
+            "stop_loss_pct": {
+                "type": "float",
+                "default": 0.05,
+                "min": 0.005,
+                "max": 0.5,
+                "step": 0.005,
+            },
+            "risk_per_trade_pct": {
+                "type": "float",
+                "default": 2.0,
+                "min": 0.5,
+                "max": 20.0,
+                "step": 0.5,
+            },
         }
 
     def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict[str, Any]]:
@@ -73,13 +109,22 @@ class RSIReversion(BotBase):
                 self._warmup_changes.append((gain, loss))
                 if len(self._warmup_changes) >= self.rsi_period:
                     # Seed with simple averages
-                    self._avg_gain = sum(g for g, _ in self._warmup_changes) / self.rsi_period
-                    self._avg_loss = sum(loss_val for _, loss_val in self._warmup_changes) / self.rsi_period
+                    self._avg_gain = (
+                        sum(g for g, _ in self._warmup_changes) / self.rsi_period
+                    )
+                    self._avg_loss = (
+                        sum(loss_val for _, loss_val in self._warmup_changes)
+                        / self.rsi_period
+                    )
                     self._warmed_up = True
             else:
                 # Wilder's smoothing
-                self._avg_gain = (self._avg_gain * (self.rsi_period - 1) + gain) / self.rsi_period
-                self._avg_loss = (self._avg_loss * (self.rsi_period - 1) + loss) / self.rsi_period
+                self._avg_gain = (
+                    self._avg_gain * (self.rsi_period - 1) + gain
+                ) / self.rsi_period
+                self._avg_loss = (
+                    self._avg_loss * (self.rsi_period - 1) + loss
+                ) / self.rsi_period
 
             if self._warmed_up and self._avg_loss and self._avg_loss > 0:
                 rs = self._avg_gain / self._avg_loss
@@ -98,7 +143,9 @@ class RSIReversion(BotBase):
             if price < stop_price:
                 qty = self.max_sell_qty(portfolio)
                 if qty > 0:
-                    orders.append({"side": "SELL", "qty": float(qty), "reason": "STOP_LOSS"})
+                    orders.append(
+                        {"side": "SELL", "qty": float(qty), "reason": "STOP_LOSS"}
+                    )
                 self._in_position = False
                 self._entry_price = None
                 return orders
@@ -109,7 +156,9 @@ class RSIReversion(BotBase):
             if price >= tp_price:
                 qty = self.max_sell_qty(portfolio)
                 if qty > 0:
-                    orders.append({"side": "SELL", "qty": float(qty), "reason": "TAKE_PROFIT"})
+                    orders.append(
+                        {"side": "SELL", "qty": float(qty), "reason": "TAKE_PROFIT"}
+                    )
                 self._in_position = False
                 self._entry_price = None
                 return orders
@@ -125,7 +174,9 @@ class RSIReversion(BotBase):
         elif self._in_position and self._rsi_value > self.overbought_level:
             qty = self.max_sell_qty(portfolio)
             if qty > 0:
-                orders.append({"side": "SELL", "qty": float(qty), "reason": "OVERBOUGHT"})
+                orders.append(
+                    {"side": "SELL", "qty": float(qty), "reason": "OVERBOUGHT"}
+                )
             self._in_position = False
             self._entry_price = None
 

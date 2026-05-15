@@ -59,7 +59,9 @@ class BacktesterCLI:
         else:
             console.print("[red][FAIL] Invalid credentials[/red]\n")
 
-    def download_candles(self, symbol: str, timeframe: str, date_from: str, date_to: str) -> None:
+    def download_candles(
+        self, symbol: str, timeframe: str, date_from: str, date_to: str
+    ) -> None:
         """Download candles from Binance."""
         api_key, _ = self.credentials.load() or (None, None)
 
@@ -88,7 +90,9 @@ class BacktesterCLI:
         candles_data = self.downloader.load_candles(symbol, timeframe)
         if not candles_data:
             console.print(f"[red][FAIL] No candles for {symbol} {timeframe}[/red]")
-            console.print(f"Download first: python main.py --download {symbol} {timeframe} 2024-01-01 2024-12-31\n")
+            console.print(
+                f"Download first: python main.py --download {symbol} {timeframe} 2024-01-01 2024-12-31\n"
+            )
             return
 
         # Select bot
@@ -104,7 +108,9 @@ class BacktesterCLI:
         params = self._edit_bot_params(bot_class)
 
         # Run backtest
-        self._run_single_backtest(symbol, timeframe, bot_name, bot_class, params, candles_data)
+        self._run_single_backtest(
+            symbol, timeframe, bot_name, bot_class, params, candles_data
+        )
 
     def _edit_bot_params(self, bot_class: type) -> dict[str, Any]:
         """Interactive parameter editor."""
@@ -174,21 +180,27 @@ class BacktesterCLI:
         for bot_cfg in config.get("bots", []):
             bot_name = bot_cfg["name"]
             for bot_params in bot_cfg.get("configs", []):
-                experiments.append(Experiment(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    bot_class=bot_name,
-                    bot_params=bot_params,
-                ))
+                experiments.append(
+                    Experiment(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        bot_class=bot_name,
+                        bot_params=bot_params,
+                    )
+                )
 
-        console.print(f"Running {len(experiments)} experiments with {workers} workers...\n")
+        console.print(
+            f"Running {len(experiments)} experiments with {workers} workers...\n"
+        )
 
         runner = ExperimentRunner(self.downloader, BOT_REGISTRY)
 
         def progress_cb(done, total):
             console.print(f"Progress: {done}/{total}", end="\r")
 
-        results = runner.run_batch(experiments, workers=workers, progress_callback=progress_cb)
+        results = runner.run_batch(
+            experiments, workers=workers, progress_callback=progress_cb
+        )
 
         # Save results
         output_file = self.results_dir / f"experiments_{symbol}_{timeframe}.json"
@@ -206,14 +218,18 @@ class BacktesterCLI:
         seed: Optional[int] = None,
     ) -> None:
         """Run hyperparameter optimization with Optuna or Nevergrad."""
-        console.print(f"\n[bold cyan]Hyperparameter Optimization ({backend})[/bold cyan]\n")
+        console.print(
+            f"\n[bold cyan]Hyperparameter Optimization ({backend})[/bold cyan]\n"
+        )
 
         cfg = OptimizationConfig.from_dict(json.loads(config_path.read_text()))
         objective = Objective(cfg, self.downloader, BOT_REGISTRY)
 
         console.print(f"Bot:       [yellow]{cfg.bot_class}[/yellow]")
         console.print(f"Symbol:    [yellow]{cfg.symbol} {cfg.timeframe}[/yellow]")
-        console.print(f"Objective: [yellow]{cfg.objective}[/yellow] ({objective.direction})")
+        console.print(
+            f"Objective: [yellow]{cfg.objective}[/yellow] ({objective.direction})"
+        )
         console.print(f"Trials:    [yellow]{trials}[/yellow]\n")
 
         best_so_far = {"score": None}
@@ -243,23 +259,46 @@ class BacktesterCLI:
 
             if backend == "optuna":
                 from backtester.optimize.optuna_runner import run_optuna
-                results = run_optuna(objective, trials=trials, sampler=sampler,
-                                     seed=seed, on_trial=on_trial)
+
+                results = run_optuna(
+                    objective,
+                    trials=trials,
+                    sampler=sampler,
+                    seed=seed,
+                    on_trial=on_trial,
+                )
             elif backend == "nevergrad":
                 from backtester.optimize.nevergrad_runner import run_nevergrad
-                results = run_nevergrad(objective, budget=trials, optimizer=sampler,
-                                        seed=seed, on_trial=on_trial)
+
+                results = run_nevergrad(
+                    objective,
+                    budget=trials,
+                    optimizer=sampler,
+                    seed=seed,
+                    on_trial=on_trial,
+                )
             else:
-                console.print(f"[red]Unknown backend '{backend}'. Use 'optuna' or 'nevergrad'.[/red]")
+                console.print(
+                    f"[red]Unknown backend '{backend}'. Use 'optuna' or 'nevergrad'.[/red]"
+                )
                 return
 
         # Save and display
-        output_file = self.results_dir / f"optimize_{cfg.bot_class}_{cfg.symbol}_{cfg.timeframe}_{backend}.json"
+        output_file = (
+            self.results_dir
+            / f"optimize_{cfg.bot_class}_{cfg.symbol}_{cfg.timeframe}_{backend}.json"
+        )
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(json.dumps([
-            {"params": r.params, "score": r.score, "metrics": r.metrics}
-            for r in results
-        ], indent=2, default=str))
+        output_file.write_text(
+            json.dumps(
+                [
+                    {"params": r.params, "score": r.score, "metrics": r.metrics}
+                    for r in results
+                ],
+                indent=2,
+                default=str,
+            )
+        )
 
         self._print_optimization_summary(results, cfg, output_file)
 
@@ -297,7 +336,9 @@ class BacktesterCLI:
             )
 
         console.print(table)
-        console.print(f"\n[green][OK] Saved {len(results)} trials to {output_file}[/green]\n")
+        console.print(
+            f"\n[green][OK] Saved {len(results)} trials to {output_file}[/green]\n"
+        )
 
     def _print_backtest_results(
         self,

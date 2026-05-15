@@ -33,7 +33,9 @@ def test_update_persists_fields():
 def test_update_result_serialises_json():
     store, _ = _make_store()
     job = store.create("download")
-    store.update(job.id, status="done", result={"candles_added": 42, "nested": {"k": 1}})
+    store.update(
+        job.id, status="done", result={"candles_added": 42, "nested": {"k": 1}}
+    )
     got = store.get(job.id)
     assert got.result == {"candles_added": 42, "nested": {"k": 1}}
 
@@ -106,6 +108,7 @@ def test_pagination():
 
 def test_in_memory_registry_fallback():
     from backtester.api.jobs import JobRegistry
+
     reg = JobRegistry()  # no path → in-memory
     job = reg.create("download")
     reg.update(job.id, status="done", result={"k": 1})

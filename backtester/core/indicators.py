@@ -30,17 +30,24 @@ OSCILLATOR_INDICATORS = {"rsi", "macd", "stoch"}
 
 # ── Individual calculators ────────────────────────────────────────────────────
 
-def calculate_ema(df: pd.DataFrame, period: int = 20, column: str = "close") -> dict[str, pd.Series]:
+
+def calculate_ema(
+    df: pd.DataFrame, period: int = 20, column: str = "close"
+) -> dict[str, pd.Series]:
     """Exponential Moving Average."""
     return {f"ema_{period}": df[column].ewm(span=period, adjust=False).mean()}
 
 
-def calculate_sma(df: pd.DataFrame, period: int = 20, column: str = "close") -> dict[str, pd.Series]:
+def calculate_sma(
+    df: pd.DataFrame, period: int = 20, column: str = "close"
+) -> dict[str, pd.Series]:
     """Simple Moving Average."""
     return {f"sma_{period}": df[column].rolling(window=period).mean()}
 
 
-def calculate_rsi(df: pd.DataFrame, period: int = 14, column: str = "close") -> dict[str, pd.Series]:
+def calculate_rsi(
+    df: pd.DataFrame, period: int = 14, column: str = "close"
+) -> dict[str, pd.Series]:
     """Relative Strength Index (Wilder's SMMA)."""
     delta = df[column].diff()
     gain = delta.clip(lower=0)
@@ -127,6 +134,7 @@ _REGISTRY: dict[str, Any] = {
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+
 def add_indicators(
     candles: list[Candle],
     specs: list[dict[str, Any]],
@@ -150,13 +158,18 @@ def add_indicators(
     if not candles or not specs:
         return {}
 
-    df = pd.DataFrame([{
-        "open":   float(c.open),
-        "high":   float(c.high),
-        "low":    float(c.low),
-        "close":  float(c.close),
-        "volume": float(c.volume),
-    } for c in candles])
+    df = pd.DataFrame(
+        [
+            {
+                "open": float(c.open),
+                "high": float(c.high),
+                "low": float(c.low),
+                "close": float(c.close),
+                "volume": float(c.volume),
+            }
+            for c in candles
+        ]
+    )
 
     results: dict[str, list[float | None]] = {}
 
@@ -174,9 +187,7 @@ def add_indicators(
             continue
 
         for series_id, series in series_dict.items():
-            results[series_id] = [
-                None if pd.isna(x) else float(x) for x in series
-            ]
+            results[series_id] = [None if pd.isna(x) else float(x) for x in series]
 
     return results
 

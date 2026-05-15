@@ -71,7 +71,9 @@ class JobStore:
         self._lock = threading.Lock()
         # check_same_thread=False because we serialize via _lock ourselves
         self._conn = sqlite3.connect(
-            str(self.db_path), check_same_thread=False, isolation_level=None,
+            str(self.db_path),
+            check_same_thread=False,
+            isolation_level=None,
         )
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
@@ -110,14 +112,24 @@ class JobStore:
             self._conn.execute(
                 "INSERT INTO jobs(id, kind, status, progress, message, result_json, created_at, updated_at) "
                 "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                (job.id, job.kind, job.status, job.progress, job.message, None, now, now),
+                (
+                    job.id,
+                    job.kind,
+                    job.status,
+                    job.progress,
+                    job.message,
+                    None,
+                    now,
+                    now,
+                ),
             )
         return job
 
     def get(self, job_id: str) -> Optional[Job]:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM jobs WHERE id = ?", (job_id,),
+                "SELECT * FROM jobs WHERE id = ?",
+                (job_id,),
             ).fetchone()
         return self._row_to_job(row) if row else None
 
@@ -146,7 +158,8 @@ class JobStore:
         values.append(job_id)
         with self._lock:
             self._conn.execute(
-                f"UPDATE jobs SET {', '.join(fields)} WHERE id = ?", values,
+                f"UPDATE jobs SET {', '.join(fields)} WHERE id = ?",
+                values,
             )
 
     def delete(self, job_id: str) -> bool:
@@ -201,7 +214,12 @@ class JobStore:
             self._conn.execute(
                 "INSERT INTO job_events (job_id, event_type, payload_json, created_at) "
                 "VALUES (?, ?, ?, ?)",
-                (run_id, "run_created", json.dumps({"kind": kind, "config": config}), now),
+                (
+                    run_id,
+                    "run_created",
+                    json.dumps({"kind": kind, "config": config}),
+                    now,
+                ),
             )
         return run_id
 

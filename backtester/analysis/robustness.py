@@ -37,11 +37,14 @@ LOWER_IS_BETTER = {"max_drawdown_pct", "ulcer_index"}
 @dataclass
 class RobustnessScore:
     """Single candidate's robustness score and component breakdown."""
-    label: str                          # human-friendly identifier (e.g. params dict)
-    score: float                        # final aggregate score [0, 1]
-    rank: int                           # 1 = best
-    components: dict[str, float] = field(default_factory=dict)  # raw metric → normalized [0,1]
-    metrics: dict[str, Any] = field(default_factory=dict)        # raw metrics for display
+
+    label: str  # human-friendly identifier (e.g. params dict)
+    score: float  # final aggregate score [0, 1]
+    rank: int  # 1 = best
+    components: dict[str, float] = field(
+        default_factory=dict
+    )  # raw metric → normalized [0,1]
+    metrics: dict[str, Any] = field(default_factory=dict)  # raw metrics for display
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -131,17 +134,29 @@ def score_runs(
         components = {m: round(norm[m][i], 4) for m in w}
         agg = sum(w[m] * norm[m][i] for m in w)
         label = label_fn(c) if label_fn else f"candidate_{i}"
-        scores.append(RobustnessScore(
-            label=label,
-            score=round(agg, 4),
-            rank=0,  # filled below
-            components=components,
-            metrics={k: c.get("metrics", {}).get(k) for k in (
-                "total_return_pct", "sharpe_ratio", "sortino_ratio", "calmar_ratio",
-                "profit_factor", "recovery_factor", "win_rate_pct",
-                "max_drawdown_pct", "ulcer_index", "trades",
-            )},
-        ))
+        scores.append(
+            RobustnessScore(
+                label=label,
+                score=round(agg, 4),
+                rank=0,  # filled below
+                components=components,
+                metrics={
+                    k: c.get("metrics", {}).get(k)
+                    for k in (
+                        "total_return_pct",
+                        "sharpe_ratio",
+                        "sortino_ratio",
+                        "calmar_ratio",
+                        "profit_factor",
+                        "recovery_factor",
+                        "win_rate_pct",
+                        "max_drawdown_pct",
+                        "ulcer_index",
+                        "trades",
+                    )
+                },
+            )
+        )
 
     # Sort descending and assign ranks
     scores.sort(key=lambda s: s.score, reverse=True)

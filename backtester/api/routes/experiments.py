@@ -21,19 +21,22 @@ router = APIRouter(tags=["experiments"])
 
 @router.post("/experiments/run", response_model=JobStatus)
 def start_experiments(
-    req: ExperimentsRequest, ctx: AppContext = Depends(get_ctx),
+    req: ExperimentsRequest,
+    ctx: AppContext = Depends(get_ctx),
 ) -> JobStatus:
     experiments: list[Experiment] = []
     for bot_cfg in req.bots:
         if bot_cfg.name not in ctx.bot_registry:
             raise HTTPException(400, f"Unknown bot '{bot_cfg.name}'")
         for params in bot_cfg.configs:
-            experiments.append(Experiment(
-                symbol=req.symbol.upper(),
-                timeframe=req.timeframe,
-                bot_class=bot_cfg.name,
-                bot_params=params,
-            ))
+            experiments.append(
+                Experiment(
+                    symbol=req.symbol.upper(),
+                    timeframe=req.timeframe,
+                    bot_class=bot_cfg.name,
+                    bot_params=params,
+                )
+            )
 
     if not experiments:
         raise HTTPException(400, "No experiment configs provided")
@@ -90,10 +93,13 @@ def start_experiments(
 
         try:
             if ctx.jobs.is_cancel_requested(job.id):
-                ctx.jobs.update(job.id, status="cancelled", message="Cancelled before start")
+                ctx.jobs.update(
+                    job.id, status="cancelled", message="Cancelled before start"
+                )
                 return
-            results = runner.run_batch(experiments, workers=req.workers,
-                                       progress_callback=_progress)
+            results = runner.run_batch(
+                experiments, workers=req.workers, progress_callback=_progress
+            )
             if ctx.jobs.is_cancel_requested(job.id):
                 ctx.jobs.update(
                     job.id,
@@ -114,7 +120,9 @@ def start_experiments(
             ]
             cache_stats = runner._cache.stats() if runner._cache is not None else None
             ctx.jobs.update(
-                job.id, status="done", progress=1.0,
+                job.id,
+                status="done",
+                progress=1.0,
                 message=f"Completed {total} experiments",
                 result={"runs": serialized, "total": total, "cache_stats": cache_stats},
             )

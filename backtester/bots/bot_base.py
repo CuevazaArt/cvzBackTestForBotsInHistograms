@@ -69,7 +69,9 @@ class BotBase(ABC):
             Quantity (Decimal) that can be purchased, or Decimal("0") if
             cash is insufficient.
         """
-        pct = Decimal(str(risk_pct if risk_pct is not None else self.risk_per_trade_pct))
+        pct = Decimal(
+            str(risk_pct if risk_pct is not None else self.risk_per_trade_pct)
+        )
         price_d = Decimal(str(price))
         if price_d <= 0:
             return Decimal("0")

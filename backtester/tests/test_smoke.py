@@ -9,8 +9,8 @@ from pathlib import Path
 import tempfile
 
 
-
 # ── DuckDB downloader ──────────────────────────────────────────
+
 
 def test_downloader_init_creates_duckdb():
     """BinanceDownloader should create a .duckdb file and candles table."""
@@ -42,6 +42,7 @@ def test_downloader_list_symbols_empty():
 
 
 # ── Engine ──────────────────────────────────────────────────────
+
 
 def test_engine_empty_candles():
     """Engine should handle an empty candle list gracefully."""
@@ -93,6 +94,7 @@ def test_engine_max_drawdown_peak_to_trough():
 
     class BuyThenHold(BacktestBot):
         """Buys 1 unit on the first candle, then holds."""
+
         def __init__(self):
             self._bought = False
 
@@ -104,16 +106,39 @@ def test_engine_max_drawdown_peak_to_trough():
 
     # Price: 100 → 50 → 100  (50% drawdown mid-run, but recovers)
     candles = [
-        Candle(1000, Decimal("100"), Decimal("100"), Decimal("100"), Decimal("100"), Decimal("10")),
-        Candle(2000, Decimal("100"), Decimal("100"), Decimal("50"),  Decimal("50"),  Decimal("10")),
-        Candle(3000, Decimal("50"),  Decimal("100"), Decimal("50"),  Decimal("100"), Decimal("10")),
+        Candle(
+            1000,
+            Decimal("100"),
+            Decimal("100"),
+            Decimal("100"),
+            Decimal("100"),
+            Decimal("10"),
+        ),
+        Candle(
+            2000,
+            Decimal("100"),
+            Decimal("100"),
+            Decimal("50"),
+            Decimal("50"),
+            Decimal("10"),
+        ),
+        Candle(
+            3000,
+            Decimal("50"),
+            Decimal("100"),
+            Decimal("50"),
+            Decimal("100"),
+            Decimal("10"),
+        ),
     ]
 
-    engine = BacktestEngine(BacktestConfig(
-        initial_cash=Decimal("10000"),
-        taker_fee_pct=Decimal("0"),
-        slippage_pct=Decimal("0"),
-    ))
+    engine = BacktestEngine(
+        BacktestConfig(
+            initial_cash=Decimal("10000"),
+            taker_fee_pct=Decimal("0"),
+            slippage_pct=Decimal("0"),
+        )
+    )
     result = engine.run(BuyThenHold(), candles, "TEST", "1h")
 
     # The mid-run drawdown when price hit 50 should be captured
@@ -123,6 +148,7 @@ def test_engine_max_drawdown_peak_to_trough():
 
 
 # ── Bot param_spec ──────────────────────────────────────────────
+
 
 def test_ema_cross_param_spec():
     """EMACross.param_spec() should expose 4 editable parameters."""
@@ -146,6 +172,7 @@ def test_rsi_reversion_param_spec():
 
 # ── Credentials ─────────────────────────────────────────────────
 
+
 def test_credential_manager_roundtrip():
     """Save and load credentials should return the same values."""
     from backtester.core import CredentialManager
@@ -166,6 +193,7 @@ def test_credential_manager_roundtrip():
 
 # ── Metrics ─────────────────────────────────────────────────────
 
+
 def test_compute_metrics_returns_dict():
     """compute_metrics should return a dict with expected keys."""
     from backtester.core import BacktestEngine, compute_metrics
@@ -176,7 +204,14 @@ def test_compute_metrics_returns_dict():
             return []
 
     candles = [
-        Candle(1000, Decimal("100"), Decimal("100"), Decimal("100"), Decimal("100"), Decimal("10")),
+        Candle(
+            1000,
+            Decimal("100"),
+            Decimal("100"),
+            Decimal("100"),
+            Decimal("100"),
+            Decimal("10"),
+        ),
     ]
     result = BacktestEngine().run(NoopBot(), candles)
     metrics = compute_metrics(result)

@@ -13,7 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from backtester.core import BacktestConfig, BacktestEngine, BinanceDownloader, compute_metrics
+from backtester.core import (
+    BacktestConfig,
+    BacktestEngine,
+    BinanceDownloader,
+    compute_metrics,
+)
 from backtester.core.engine import Candle
 
 _LOG = logging.getLogger("backtester.experiments")
@@ -22,6 +27,7 @@ _LOG = logging.getLogger("backtester.experiments")
 @dataclass
 class Experiment:
     """Single experiment configuration."""
+
     symbol: str
     timeframe: str
     bot_class: str
@@ -32,6 +38,7 @@ class Experiment:
 @dataclass
 class ExperimentResult:
     """Result of an experiment."""
+
     experiment: Experiment
     success: bool
     metrics: dict[str, Any] = None
@@ -135,10 +142,13 @@ class ExperimentRunner:
             for exp in experiments:
                 args = _build_args(exp)
                 if args is None:
-                    results.append(ExperimentResult(
-                        experiment=exp, success=False,
-                        error=f"Unknown bot: {exp.bot_class}",
-                    ))
+                    results.append(
+                        ExperimentResult(
+                            experiment=exp,
+                            success=False,
+                            error=f"Unknown bot: {exp.bot_class}",
+                        )
+                    )
                 else:
                     results.append(_run_experiment(*args))
                 completed += 1
@@ -156,10 +166,13 @@ class ExperimentRunner:
             for exp in experiments:
                 args = _build_args(exp)
                 if args is None:
-                    results.append(ExperimentResult(
-                        experiment=exp, success=False,
-                        error=f"Unknown bot: {exp.bot_class}",
-                    ))
+                    results.append(
+                        ExperimentResult(
+                            experiment=exp,
+                            success=False,
+                            error=f"Unknown bot: {exp.bot_class}",
+                        )
+                    )
                     completed += 1
                     if progress_callback:
                         progress_callback(completed, total)
@@ -172,9 +185,13 @@ class ExperimentRunner:
                     results.append(future.result())
                 except Exception as e:  # noqa: BLE001
                     _LOG.error("Experiment failed: %s: %s", exp, e)
-                    results.append(ExperimentResult(
-                        experiment=exp, success=False, error=str(e),
-                    ))
+                    results.append(
+                        ExperimentResult(
+                            experiment=exp,
+                            success=False,
+                            error=str(e),
+                        )
+                    )
                 completed += 1
                 if progress_callback:
                     progress_callback(completed, total)

@@ -60,6 +60,7 @@ class _InMemoryJobStore:
 
     def __init__(self) -> None:
         import threading
+
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._run_events: list[tuple[str, str, str, float]] = []
@@ -67,6 +68,7 @@ class _InMemoryJobStore:
     def create(self, kind: str) -> Job:
         import time
         import uuid
+
         now = time.time()
         job = Job(
             id=str(uuid.uuid4()),
@@ -86,6 +88,7 @@ class _InMemoryJobStore:
 
     def update(self, job_id: str, **kwargs: Any) -> None:
         import time
+
         allowed = {"status", "progress", "message", "result", "run_id"}
         with self._lock:
             job = self._jobs.get(job_id)
@@ -108,12 +111,14 @@ class _InMemoryJobStore:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         with self._lock:
-            items = sorted(self._jobs.values(), key=lambda j: j.updated_at, reverse=True)
+            items = sorted(
+                self._jobs.values(), key=lambda j: j.updated_at, reverse=True
+            )
         if kind is not None:
             items = [j for j in items if j.kind == kind]
         if status is not None:
             items = [j for j in items if j.status == status]
-        return [j.to_dict() for j in items[offset:offset + limit]]
+        return [j.to_dict() for j in items[offset : offset + limit]]
 
     def delete(self, job_id: str) -> bool:
         with self._lock:
@@ -121,10 +126,12 @@ class _InMemoryJobStore:
 
     def cleanup_older_than(self, seconds: float) -> int:
         import time
+
         cutoff = time.time() - seconds
         with self._lock:
             stale = [
-                jid for jid, j in self._jobs.items()
+                jid
+                for jid, j in self._jobs.items()
                 if j.updated_at < cutoff and j.status in ("done", "error", "cancelled")
             ]
             for jid in stale:
@@ -135,16 +142,23 @@ class _InMemoryJobStore:
         import json
         import time
         import uuid
+
         run_id = str(uuid.uuid4())
         now = time.time()
         with self._lock:
             self._run_events.append(
-                (run_id, "run_created", json.dumps({"kind": kind, "config": config}), now),
+                (
+                    run_id,
+                    "run_created",
+                    json.dumps({"kind": kind, "config": config}),
+                    now,
+                ),
             )
         return run_id
 
     def request_cancel(self, job_id: str) -> bool:
         import time
+
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None or job.status not in ("pending", "running"):

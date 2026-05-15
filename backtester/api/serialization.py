@@ -22,6 +22,7 @@ def unique_bot_names(bots: list) -> list[str]:
     Accepts both BotRunSpec instances and plain dicts so it works from
     both the REST route (Pydantic models) and the WS handler.
     """
+
     def _name(b) -> str:
         return b["name"] if isinstance(b, dict) else b.name
 
@@ -75,10 +76,12 @@ def equity_curve_dto(result: BacktestResult, candles: list) -> list[EquityPoint]
     out: list[EquityPoint] = []
     n = min(len(result.equity_curve), len(candles))
     for i in range(n):
-        out.append(EquityPoint(
-            time=ms_to_s(candles[i].timestamp_ms),
-            value=float(result.equity_curve[i]),
-        ))
+        out.append(
+            EquityPoint(
+                time=ms_to_s(candles[i].timestamp_ms),
+                value=float(result.equity_curve[i]),
+            )
+        )
     return out
 
 

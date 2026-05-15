@@ -3,23 +3,28 @@ from backtester.bots.macd_cross import MACDCross
 from backtester.bots.rsi_reversion import RSIReversion
 from decimal import Decimal
 
+
 def _generate_sine_candles(length=100) -> list[Candle]:
     import math
     import time
+
     base_price = 100
     klines = []
     t = int(time.time() * 1000)
     for i in range(length):
         price = base_price + math.sin(i / 5.0) * 10
-        klines.append(Candle(
-            timestamp_ms=t + i * 3600000,
-            open=Decimal(str(price)),
-            high=Decimal(str(price + 1)),
-            low=Decimal(str(price - 1)),
-            close=Decimal(str(price)),
-            volume=Decimal("1000")
-        ))
+        klines.append(
+            Candle(
+                timestamp_ms=t + i * 3600000,
+                open=Decimal(str(price)),
+                high=Decimal(str(price + 1)),
+                low=Decimal(str(price - 1)),
+                close=Decimal(str(price)),
+                volume=Decimal("1000"),
+            )
+        )
     return klines
+
 
 def test_macd_cross_integration():
     df = _generate_sine_candles(200)
@@ -31,7 +36,8 @@ def test_macd_cross_integration():
     assert "MACDCross_0" in res.per_bot
     assert res.final_equity > 0
     # Should have done some trades
-    assert len(res.trades) >= 0 
+    assert len(res.trades) >= 0
+
 
 def test_rsi_reversion_integration():
     df = _generate_sine_candles(200)

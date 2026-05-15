@@ -7,7 +7,9 @@ from backtester.core.cache import IndicatorCache, add_indicators_cached
 
 class _Candle:
     """Minimal OHLCV stand-in usable by both the fingerprint and add_indicators."""
+
     __slots__ = ("timestamp_ms", "open", "high", "low", "close", "volume")
+
     def __init__(self, ts: int, price: float = 100.0) -> None:
         self.timestamp_ms = ts
         self.open = price
@@ -73,8 +75,11 @@ def test_cache_lru_eviction():
 def test_add_indicators_cached_falls_through_without_cache():
     candles = [_Candle(1_000 * i, price=100.0 + i * 0.1) for i in range(50)]
     out = add_indicators_cached(
-        candles, [{"name": "ema", "period": 5}], cache=None,
-        symbol="BTC", timeframe="1h",
+        candles,
+        [{"name": "ema", "period": 5}],
+        cache=None,
+        symbol="BTC",
+        timeframe="1h",
     )
     assert "ema_5" in out
     assert len(out["ema_5"]) == 50
@@ -85,12 +90,18 @@ def test_add_indicators_cached_memoises_across_calls():
     cache = IndicatorCache(max_entries=8)
 
     out1 = add_indicators_cached(
-        candles, [{"name": "ema", "period": 5}, {"name": "ema", "period": 20}],
-        cache=cache, symbol="BTC", timeframe="1h",
+        candles,
+        [{"name": "ema", "period": 5}, {"name": "ema", "period": 20}],
+        cache=cache,
+        symbol="BTC",
+        timeframe="1h",
     )
     out2 = add_indicators_cached(
-        candles, [{"name": "ema", "period": 5}, {"name": "ema", "period": 20}],
-        cache=cache, symbol="BTC", timeframe="1h",
+        candles,
+        [{"name": "ema", "period": 5}, {"name": "ema", "period": 20}],
+        cache=cache,
+        symbol="BTC",
+        timeframe="1h",
     )
     assert out1 == out2
     s = cache.stats()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 from typing import Any
 
@@ -21,7 +22,10 @@ def require_api_token(
         return
     if not settings.auth_enabled:
         return
-    if x_api_key != settings.api_token:
+    # Constant-time compare to prevent timing-based token enumeration.
+    provided = (x_api_key or "").encode()
+    expected = settings.api_token.encode()
+    if not hmac.compare_digest(provided, expected):
         raise HTTPException(status_code=401, detail="Invalid API token")
 
 
@@ -31,8 +35,9 @@ def validate_ws_token(websocket: WebSocket) -> None:
         return
     if not settings.auth_enabled:
         return
-    token = websocket.headers.get("x-api-key")
-    if token != settings.api_token:
+    token = (websocket.headers.get("x-api-key") or "").encode()
+    expected = settings.api_token.encode()
+    if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Invalid API token")
 
 

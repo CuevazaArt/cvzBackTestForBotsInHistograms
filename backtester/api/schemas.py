@@ -37,6 +37,7 @@ class BotParamsResponse(BaseModel):
 
 class CandleDTO(BaseModel):
     """Lightweight Charts expects `time` in seconds (epoch)."""
+
     time: int
     open: float
     high: float
@@ -56,8 +57,8 @@ class SymbolEntry(BaseModel):
 class DownloadRequest(BaseModel):
     symbol: str
     timeframe: str
-    date_from: str    # "YYYY-MM-DD"
-    date_to: str      # "YYYY-MM-DD"
+    date_from: str  # "YYYY-MM-DD"
+    date_to: str  # "YYYY-MM-DD"
 
 
 class DownloadZipRequest(BaseModel):
@@ -69,8 +70,8 @@ class DownloadZipRequest(BaseModel):
 
 class JobStatus(BaseModel):
     id: str
-    kind: str          # "download" | "experiment"
-    status: str        # "pending" | "running" | "done" | "error" | "cancelled"
+    kind: str  # "download" | "experiment"
+    status: str  # "pending" | "running" | "done" | "error" | "cancelled"
     progress: float = 0.0
     message: Optional[str] = None
     result: Optional[dict[str, Any]] = None
@@ -87,6 +88,7 @@ class JobStatus(BaseModel):
 
 class IndicatorSpec(BaseModel):
     """Flexible indicator spec — passes all fields except 'name' as kwargs."""
+
     name: str
     # Common period-based params
     period: Optional[int] = None
@@ -103,8 +105,7 @@ class IndicatorSpec(BaseModel):
     def to_kwargs(self) -> dict[str, Any]:
         """Return all non-None non-name fields as a kwargs dict."""
         return {
-            k: v for k, v in self.model_dump().items()
-            if k != "name" and v is not None
+            k: v for k, v in self.model_dump().items() if k != "name" and v is not None
         }
 
 
@@ -166,8 +167,8 @@ class BacktestRequest(BaseModel):
 
 
 class TradeDTO(BaseModel):
-    entry_time: int     # epoch seconds
-    exit_time: int      # epoch seconds
+    entry_time: int  # epoch seconds
+    exit_time: int  # epoch seconds
     entry_price: float
     exit_price: float
     qty: float
@@ -179,7 +180,7 @@ class TradeDTO(BaseModel):
 
 
 class EquityPoint(BaseModel):
-    time: int           # epoch seconds
+    time: int  # epoch seconds
     value: float
 
 
@@ -197,8 +198,8 @@ class BacktestResponse(BaseModel):
 
 
 class ExperimentSpec(BaseModel):
-    name: str                          # bot class
-    configs: list[dict[str, Any]]      # list of param sets
+    name: str  # bot class
+    configs: list[dict[str, Any]]  # list of param sets
 
     @model_validator(mode="after")
     def _validate_configs(self) -> "ExperimentSpec":
@@ -264,28 +265,30 @@ class ExperimentsRequest(BaseModel):
 
 class SearchSpaceParam(BaseModel):
     """One dimension of the search space."""
-    type: str = "float"         # "int" | "float"
+
+    type: str = "float"  # "int" | "float"
     low: float
     high: float
     step: Optional[float] = None
     log: bool = False
-    choices: Optional[list[Any]] = None     # categorical override
+    choices: Optional[list[Any]] = None  # categorical override
 
 
 class OptimizeRequest(BaseModel):
     """Kick off a real Optuna / Nevergrad optimization run."""
+
     symbol: str
     timeframe: str
-    bot: str                                  # single bot name
+    bot: str  # single bot name
     search_space: dict[str, SearchSpaceParam]
     fixed_params: dict[str, Any] = Field(default_factory=dict)
-    objective: str = "total_return_pct"       # metric to optimize
+    objective: str = "total_return_pct"  # metric to optimize
     trials: int = 100
-    sampler: str = "tpe"                      # tpe | cmaes | random
+    sampler: str = "tpe"  # tpe | cmaes | random
     initial_cash: float = 10000.0
     taker_fee_pct: float = 0.1
     slippage_pct: float = 0.05
-    workers: int = 1                          # Optuna is single-threaded by default
+    workers: int = 1  # Optuna is single-threaded by default
     validation_split_pct: float = 0.2
     min_trades: int = 0
     max_drawdown_pct_limit: Optional[float] = None
@@ -300,8 +303,13 @@ class OptimizeRequest(BaseModel):
     @field_validator("objective")
     @classmethod
     def _valid_objective(cls, v: str) -> str:
-        valid = {"total_return_pct", "win_rate_pct", "profit_factor",
-                 "max_drawdown_pct", "trades"}
+        valid = {
+            "total_return_pct",
+            "win_rate_pct",
+            "profit_factor",
+            "max_drawdown_pct",
+            "trades",
+        }
         if v not in valid:
             raise ValueError(f"objective must be one of {valid}")
         return v
