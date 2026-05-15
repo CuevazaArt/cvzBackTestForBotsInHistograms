@@ -11,6 +11,9 @@ from fastapi import Request
 from backtester.api.jobs import JobRegistry
 from backtester.bots import BOT_REGISTRY  # re-export
 from backtester.core import BinanceDownloader, CredentialManager
+from backtester.core.cache import IndicatorCache
+from backtester.core.preset_store import PresetStore
+from backtester.core.result_store import ResultStore
 
 
 @dataclass
@@ -20,6 +23,18 @@ class AppContext:
     credentials: CredentialManager
     bot_registry: dict[str, Callable]
     jobs: JobRegistry
+    presets: PresetStore
+    indicator_cache: IndicatorCache = None  # type: ignore[assignment]
+    result_store: ResultStore = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.indicator_cache is None:
+            self.indicator_cache = IndicatorCache(max_entries=512)
+        if self.result_store is None:
+            root = Path(self.base_dir) if self.base_dir else Path(__file__).resolve().parents[1]
+            data_dir = root / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            self.result_store = ResultStore(data_dir / "results.sqlite")
 
     @classmethod
     def build(cls, base_dir: Path | None = None) -> "AppContext":
@@ -34,7 +49,10 @@ class AppContext:
             downloader=BinanceDownloader(data_dir / "candles.db"),
             credentials=CredentialManager(vault_dir),
             bot_registry=dict(BOT_REGISTRY),
-            jobs=JobRegistry(data_dir / "jobs.sqlite3"),
+            jobs=JobRegistry(data_dir / "jobs.sqlite"),
+            presets=PresetStore(data_dir / "presets.sqlite"),
+            indicator_cache=IndicatorCache(max_entries=512),
+            result_store=ResultStore(data_dir / "results.sqlite"),
         )
 
 

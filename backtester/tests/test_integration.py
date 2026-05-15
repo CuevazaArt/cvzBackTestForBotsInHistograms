@@ -71,13 +71,20 @@ def app_with_synthetic_data():
     from backtester.api.deps import BOT_REGISTRY
     from backtester.api.jobs import JobRegistry
     from backtester.core import CredentialManager
+    from backtester.core.preset_store import PresetStore
+    from backtester.core.result_store import ResultStore
+
+    from backtester.core.cache import IndicatorCache
 
     app.state.ctx = AppContext(
         base_dir=root,
         downloader=downloader,
         credentials=CredentialManager(vault_dir),
         bot_registry=dict(BOT_REGISTRY),
-        jobs=JobRegistry(data_dir / "jobs.sqlite3"),
+        jobs=JobRegistry(data_dir / "jobs.sqlite"),
+        presets=PresetStore(data_dir / "presets.sqlite"),
+        indicator_cache=IndicatorCache(max_entries=512),
+        result_store=ResultStore(data_dir / "results.sqlite"),
     )
     return app
 
@@ -430,3 +437,56 @@ def test_health_requires_token_when_configured(app_with_synthetic_data):
     authorized = client.get("/health", headers={"x-api-key": "abc123"})
     assert authorized.status_code == 200
     os.environ.pop("BACKTESTER_API_TOKEN", None)
+
+
+# ── Sprint 6: trade export ───────────────────────────────────────
+
+
+def test_export_trades_csv(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    payload = {
+        "symbol": "TESTUSDT",
+        "timeframe": "1h",
+        "bots": [{"name": "EMACross", "params": {"fast_ema": 5, "slow_ema": 15}}],
+        "initial_cash": 10000.0,
+    }
+    res = client.post("/api/backtest/export/trades?format=csv", json=payload)
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "attachment" in res.headers["content-disposition"]
+    lines = res.text.strip().splitlines()
+    header = lines[0].split(",")
+    for col in (
+        "bot_id", "entry_time", "exit_time", "entry_price", "exit_price",
+        "qty", "pnl", "pnl_pct", "fee_usdt", "reason",
+    ):
+        assert col in header, f"Missing CSV column {col}"
+    # At least the header + one trade row.
+    assert len(lines) >= 2
+
+
+def test_export_trades_json(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    payload = {
+        "symbol": "TESTUSDT",
+        "timeframe": "1h",
+        "bots": [{"name": "EMACross", "params": {"fast_ema": 5, "slow_ema": 15}}],
+        "initial_cash": 10000.0,
+    }
+    res = client.post("/api/backtest/export/trades?format=json", json=payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["symbol"] == "TESTUSDT"
+    assert isinstance(body["trades"], list)
+    assert body["summary"]["trades"] >= 1
+
+
+def test_export_trades_rejects_invalid_format(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    payload = {
+        "symbol": "TESTUSDT",
+        "timeframe": "1h",
+        "bots": [{"name": "EMACross", "params": {"fast_ema": 5, "slow_ema": 15}}],
+    }
+    res = client.post("/api/backtest/export/trades?format=xml", json=payload)
+    assert res.status_code == 422

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:backtester_shell/services/api_service.dart';
 import 'package:backtester_shell/screens/backtest_screen.dart';
@@ -26,11 +27,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // GlobalKey lets us trigger Data Manager from elsewhere if needed.
   final GlobalKey<State<BacktestScreen>> _backtestKey = GlobalKey();
+
   final AppSettingsService _settingsService = AppSettingsService();
   late AppSettings _settings;
   late ApiService _apiService;
   WsService? _wsService;
   String _chartUrl = 'http://127.0.0.1:8002/static/index.html';
+  Timer? _healthTimer;
 
   @override
   void initState() {
@@ -42,6 +45,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _healthTimer?.cancel();
     _wsService?.disconnect();
     super.dispose();
   }
@@ -73,11 +77,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _pollHealth() async {
-    while (mounted) {
-      final h = await _apiService.checkHealth();
-      if (mounted) setState(() { _backendOnline = h.ok; _checking = false; });
-      await Future.delayed(const Duration(seconds: 5));
-    }
+    if (!mounted) return;
+    final h = await _apiService.checkHealth();
+    if (!mounted) return;
+    setState(() {
+      _backendOnline = h.ok;
+      _checking = false;
+    });
+    _healthTimer = Timer(const Duration(seconds: 5), _pollHealth);
   }
 
   void _onApplyBest(OptimizationResult result) {
@@ -97,6 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final ws = _wsService!;
     return Scaffold(
       body: Row(
         children: [
@@ -112,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
               0 => BacktestScreen(
                   key: _backtestKey,
                   apiService: _apiService,
-                  wsService: _wsService!,
+                  wsService: ws,
                   chartUrl: _chartUrl,
                   defaultCash: _settings.defaultCash,
                   defaultFeePct: _settings.defaultFeePct,
@@ -122,7 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               1 => OptimizationScreen(
                   apiService: _apiService,
-                  wsService: _wsService!,
+                  wsService: ws,
                   defaultCash: _settings.defaultCash,
                   defaultFeePct: _settings.defaultFeePct,
                   defaultSlippagePct: _settings.defaultSlippagePct,

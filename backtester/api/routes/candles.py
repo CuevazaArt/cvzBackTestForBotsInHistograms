@@ -32,8 +32,19 @@ def list_symbols(ctx: AppContext = Depends(get_ctx)) -> list[SymbolEntry]:
 def start_download(
     req: DownloadRequest,
     bg: BackgroundTasks,
+    resume_job_id: str | None = Query(None, description="Resume a previous download job"),
     ctx: AppContext = Depends(get_ctx),
 ) -> JobStatus:
+    start_from_ms: int | None = None
+    if resume_job_id is not None:
+        prev = ctx.jobs.get(resume_job_id)
+        if prev is None:
+            raise HTTPException(404, f"Job '{resume_job_id}' not found")
+        if prev.status == "running":
+            raise HTTPException(409, f"Job '{resume_job_id}' is still running")
+        prev_result = prev.result or {}
+        start_from_ms = prev_result.get("last_timestamp_ms")
+
     job = ctx.jobs.create("download")
     run_id = ctx.jobs.create_run(
         "download",
@@ -44,11 +55,15 @@ def start_download(
             "date_to": req.date_to,
         },
     )
+    msg = (
+        f"Queued {req.symbol} {req.timeframe} {req.date_from}→{req.date_to}"
+        + (f" (resuming from {start_from_ms})" if start_from_ms else "")
+    )
     ctx.jobs.update(
         job.id,
         status="pending",
         run_id=run_id,
-        message=f"Queued {req.symbol} {req.timeframe} {req.date_from}→{req.date_to}",
+        message=msg,
     )
     audit_event(
         "candles.download_started",
@@ -72,8 +87,20 @@ def start_download(
                     message="Cancelled before start",
                 )
                 return
+
+            def _on_progress(candles_added: int, last_ts: int) -> None:
+                ctx.jobs.update(
+                    job.id,
+                    result={"candles_added": candles_added, "last_timestamp_ms": last_ts},
+                )
+
             count = ctx.downloader.download(
-                req.symbol.upper(), req.timeframe, req.date_from, req.date_to,
+                req.symbol.upper(),
+                req.timeframe,
+                req.date_from,
+                req.date_to,
+                start_from_ms=start_from_ms,
+                on_progress=_on_progress,
             )
             if ctx.jobs.is_cancel_requested(job.id):
                 ctx.jobs.update(
@@ -193,8 +220,17 @@ def get_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> JobStatus:
 
 
 @router.get("/jobs", response_model=list[JobStatus])
-def list_jobs(ctx: AppContext = Depends(get_ctx)) -> list[JobStatus]:
-    return [JobStatus(**d) for d in ctx.jobs.list_all()]
+def list_jobs(
+    kind: str | None = Query(None, description="Filter by job kind"),
+    status: str | None = Query(None, description="Filter by job status"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    ctx: AppContext = Depends(get_ctx),
+) -> list[JobStatus]:
+    return [
+        JobStatus(**d)
+        for d in ctx.jobs.list_filtered(kind=kind, status=status, limit=limit, offset=offset)
+    ]
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobStatus)
@@ -211,3 +247,18 @@ def cancel_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> JobStatus:
     if updated is None:
         raise HTTPException(404, f"Job '{job_id}' not found")
     return JobStatus(**updated.to_dict())
+
+
+@router.delete("/jobs/{job_id}")
+def delete_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> dict[str, bool]:
+    if not ctx.jobs.delete(job_id):
+        raise HTTPException(404, f"Job '{job_id}' not found")
+    return {"deleted": True}
+
+
+@router.post("/jobs/cleanup")
+def cleanup_jobs(
+    older_than_seconds: int = Query(7 * 86400, ge=60),
+    ctx: AppContext = Depends(get_ctx),
+) -> dict[str, int]:
+    return {"deleted": ctx.jobs.cleanup_older_than(older_than_seconds)}

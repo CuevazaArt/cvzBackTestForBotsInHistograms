@@ -76,6 +76,7 @@ def start_experiments(
                 taker_fee_pct=Decimal(str(req.taker_fee_pct)),
                 slippage_pct=Decimal(str(req.slippage_pct)),
             ),
+            cache=ctx.indicator_cache,
         )
 
         def _progress(done: int, total: int) -> None:
@@ -111,10 +112,11 @@ def start_experiments(
                 }
                 for r in results
             ]
+            cache_stats = runner._cache.stats() if runner._cache is not None else None
             ctx.jobs.update(
                 job.id, status="done", progress=1.0,
                 message=f"Completed {total} experiments",
-                result={"runs": serialized, "total": total},
+                result={"runs": serialized, "total": total, "cache_stats": cache_stats},
             )
         except Exception as exc:  # noqa: BLE001
             if "cancelled" in str(exc).lower():

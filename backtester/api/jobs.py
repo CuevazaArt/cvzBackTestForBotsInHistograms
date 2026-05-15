@@ -1,240 +1,159 @@
-"""Persistent async job registry backed by SQLite."""
+"""Async job registry (downloads, experiments, optimizations).
+
+Backed by SQLite (`backtester.core.job_store.JobStore`) so jobs survive API
+restarts. The legacy `JobRegistry` name is preserved for backwards compat.
+"""
 
 from __future__ import annotations
 
-import json
-import sqlite3
-import uuid
-from dataclasses import dataclass
 from pathlib import Path
-from threading import Lock
 from typing import Any, Optional
 
+from backtester.core.job_store import Job, JobStore
 
-@dataclass
-class Job:
-    id: str
-    kind: str                          # "download" | "experiment"
-    status: str = "pending"            # pending | running | done | error
-    progress: float = 0.0
-    message: Optional[str] = None
-    result: Optional[dict[str, Any]] = None
-    cancel_requested: bool = False
-    run_id: Optional[str] = None
-    created_at: str = ""
-    updated_at: str = ""
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id, "kind": self.kind, "status": self.status,
-            "progress": self.progress, "message": self.message, "result": self.result,
-            "cancel_requested": self.cancel_requested,
-            "run_id": self.run_id,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-        }
+__all__ = ["Job", "JobRegistry"]
 
 
 class JobRegistry:
-    """Thread-safe SQLite-backed job store."""
+    """Thread-safe persistent job store. Wraps `JobStore` for the API layer."""
 
-    def __init__(self, db_path: Path) -> None:
-        self._db_path = Path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = Lock()
-        self._init_db()
+    def __init__(self, db_path: Path | str | None = None) -> None:
+        # In-memory fallback for unit tests that pass no path.
+        path = db_path if db_path is not None else ":memory:"
+        self._store = JobStore(path) if path != ":memory:" else _InMemoryJobStore()
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_db(self) -> None:
-        with self._conn() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS jobs (
-                    id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    progress REAL NOT NULL,
-                    message TEXT,
-                    result_json TEXT,
-                    cancel_requested INTEGER NOT NULL DEFAULT 0,
-                    run_id TEXT,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    started_at TEXT,
-                    finished_at TEXT
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS job_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    payload_json TEXT,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-                )
-                """
-            )
-
-    def _row_to_job(self, row: sqlite3.Row) -> Job:
-        return Job(
-            id=row["id"],
-            kind=row["kind"],
-            status=row["status"],
-            progress=float(row["progress"] or 0.0),
-            message=row["message"],
-            result=json.loads(row["result_json"]) if row["result_json"] else None,
-            cancel_requested=bool(row["cancel_requested"]),
-            run_id=row["run_id"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            started_at=row["started_at"],
-            finished_at=row["finished_at"],
-        )
+    # ── delegation ───────────────────────────────────────────────
 
     def create(self, kind: str) -> Job:
-        job = Job(id=str(uuid.uuid4()), kind=kind)
+        return self._store.create(kind)
+
+    def get(self, job_id: str) -> Optional[Job]:
+        return self._store.get(job_id)
+
+    def update(self, job_id: str, **kwargs: Any) -> None:
+        self._store.update(job_id, **kwargs)
+
+    def list_all(self) -> list[dict[str, Any]]:
+        return self._store.list_all()
+
+    def list_filtered(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._store.list_filtered(**kwargs)
+
+    def delete(self, job_id: str) -> bool:
+        return self._store.delete(job_id)
+
+    def cleanup_older_than(self, seconds: float) -> int:
+        return self._store.cleanup_older_than(seconds)
+
+    def create_run(self, kind: str, config: dict[str, Any]) -> str:
+        return self._store.create_run(kind, config)
+
+    def request_cancel(self, job_id: str) -> bool:
+        return self._store.request_cancel(job_id)
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        return self._store.is_cancel_requested(job_id)
+
+
+class _InMemoryJobStore:
+    """Lightweight in-memory fallback (no SQLite) for unit tests."""
+
+    def __init__(self) -> None:
+        import threading
+        self._jobs: dict[str, Job] = {}
+        self._lock = threading.Lock()
+        self._run_events: list[tuple[str, str, str, float]] = []
+
+    def create(self, kind: str) -> Job:
+        import time
+        import uuid
+        now = time.time()
+        job = Job(
+            id=str(uuid.uuid4()),
+            kind=kind,
+            created_at=now,
+            updated_at=now,
+            cancel_requested=False,
+            run_id=None,
+        )
         with self._lock:
-            with self._conn() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO jobs (id, kind, status, progress)
-                    VALUES (?, ?, 'pending', 0.0)
-                    """,
-                    (job.id, kind),
-                )
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job.id,)).fetchone()
-                if row is None:
-                    raise RuntimeError(f"Failed to create job {job.id}")
-                return self._row_to_job(row)
+            self._jobs[job.id] = job
+        return job
 
     def get(self, job_id: str) -> Optional[Job]:
         with self._lock:
-            with self._conn() as conn:
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                return self._row_to_job(row) if row else None
+            return self._jobs.get(job_id)
 
     def update(self, job_id: str, **kwargs: Any) -> None:
-        if not kwargs:
-            return
+        import time
+        allowed = {"status", "progress", "message", "result", "run_id"}
         with self._lock:
-            with self._conn() as conn:
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                if row is None:
-                    return
-
-                status = kwargs.get("status", row["status"])
-                started_at = row["started_at"]
-                finished_at = row["finished_at"]
-                if status == "running" and not started_at:
-                    started_at = conn.execute(
-                        "SELECT datetime('now')",
-                    ).fetchone()[0]
-                if status in ("done", "error", "cancelled"):
-                    finished_at = conn.execute(
-                        "SELECT datetime('now')",
-                    ).fetchone()[0]
-
-                payload = {
-                    "status": status,
-                    "progress": float(kwargs.get("progress", row["progress"] or 0.0)),
-                    "message": kwargs.get("message", row["message"]),
-                    "result_json": (
-                        json.dumps(kwargs["result"]) if "result" in kwargs else row["result_json"]
-                    ),
-                    "cancel_requested": int(
-                        kwargs.get("cancel_requested", row["cancel_requested"] or 0)
-                    ),
-                    "run_id": kwargs.get("run_id", row["run_id"]),
-                    "started_at": kwargs.get("started_at", started_at),
-                    "finished_at": kwargs.get("finished_at", finished_at),
-                }
-                conn.execute(
-                    """
-                    UPDATE jobs
-                    SET status = ?,
-                        progress = ?,
-                        message = ?,
-                        result_json = ?,
-                        cancel_requested = ?,
-                        run_id = ?,
-                        started_at = ?,
-                        finished_at = ?,
-                        updated_at = datetime('now')
-                    WHERE id = ?
-                    """,
-                    (
-                        payload["status"],
-                        payload["progress"],
-                        payload["message"],
-                        payload["result_json"],
-                        payload["cancel_requested"],
-                        payload["run_id"],
-                        payload["started_at"],
-                        payload["finished_at"],
-                        job_id,
-                    ),
-                )
-
-    def append_event(self, job_id: str, event_type: str, payload: Optional[dict[str, Any]] = None) -> None:
-        with self._lock:
-            with self._conn() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO job_events (job_id, event_type, payload_json)
-                    VALUES (?, ?, ?)
-                    """,
-                    (job_id, event_type, json.dumps(payload or {})),
-                )
-
-    def request_cancel(self, job_id: str) -> bool:
-        with self._lock:
-            with self._conn() as conn:
-                cur = conn.execute(
-                    """
-                    UPDATE jobs
-                    SET cancel_requested = 1, updated_at = datetime('now')
-                    WHERE id = ? AND status IN ('pending', 'running')
-                    """,
-                    (job_id,),
-                )
-                return cur.rowcount > 0
-
-    def is_cancel_requested(self, job_id: str) -> bool:
-        with self._lock:
-            with self._conn() as conn:
-                row = conn.execute(
-                    "SELECT cancel_requested FROM jobs WHERE id = ?",
-                    (job_id,),
-                ).fetchone()
-                return bool(row and row["cancel_requested"])
-
-    def create_run(self, kind: str, config: dict[str, Any]) -> str:
-        run_id = str(uuid.uuid4())
-        with self._lock:
-            with self._conn() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO job_events (job_id, event_type, payload_json)
-                    VALUES (?, 'run_created', ?)
-                    """,
-                    (run_id, json.dumps({"kind": kind, "config": config})),
-                )
-        return run_id
+            job = self._jobs.get(job_id)
+            if job is None:
+                return
+            for k, v in kwargs.items():
+                if k in allowed:
+                    setattr(job, k, v)
+            job.updated_at = time.time()
 
     def list_all(self) -> list[dict[str, Any]]:
         with self._lock:
-            with self._conn() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM jobs ORDER BY created_at DESC"
-                ).fetchall()
-                return [self._row_to_job(r).to_dict() for r in rows]
+            return [j.to_dict() for j in self._jobs.values()]
+
+    def list_filtered(
+        self,
+        kind: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            items = sorted(self._jobs.values(), key=lambda j: j.updated_at, reverse=True)
+        if kind is not None:
+            items = [j for j in items if j.kind == kind]
+        if status is not None:
+            items = [j for j in items if j.status == status]
+        return [j.to_dict() for j in items[offset:offset + limit]]
+
+    def delete(self, job_id: str) -> bool:
+        with self._lock:
+            return self._jobs.pop(job_id, None) is not None
+
+    def cleanup_older_than(self, seconds: float) -> int:
+        import time
+        cutoff = time.time() - seconds
+        with self._lock:
+            stale = [
+                jid for jid, j in self._jobs.items()
+                if j.updated_at < cutoff and j.status in ("done", "error", "cancelled")
+            ]
+            for jid in stale:
+                del self._jobs[jid]
+            return len(stale)
+
+    def create_run(self, kind: str, config: dict[str, Any]) -> str:
+        import json
+        import time
+        import uuid
+        run_id = str(uuid.uuid4())
+        now = time.time()
+        with self._lock:
+            self._run_events.append(
+                (run_id, "run_created", json.dumps({"kind": kind, "config": config}), now),
+            )
+        return run_id
+
+    def request_cancel(self, job_id: str) -> bool:
+        import time
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status not in ("pending", "running"):
+                return False
+            job.cancel_requested = True
+            job.updated_at = time.time()
+            return True
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return bool(job and job.cancel_requested)

@@ -46,6 +46,7 @@ class OptimizationResult:
     params: dict[str, Any]
     score: float
     metrics: dict[str, Any]
+    cache_stats: dict[str, Any] | None = None
 
 
 class Objective:
@@ -56,12 +57,14 @@ class Objective:
         cfg: OptimizationConfig,
         downloader: BinanceDownloader,
         bot_registry: dict[str, Callable],
+        cache=None,
     ) -> None:
         self.cfg = cfg
         self.downloader = downloader
         self.bot_registry = bot_registry
         self._candles: Optional[list[Candle]] = None
         self._direction = SUPPORTED_METRICS.get(cfg.objective, "max")
+        self._cache = cache  # IndicatorCache | None
 
         if cfg.objective not in SUPPORTED_METRICS:
             raise ValueError(

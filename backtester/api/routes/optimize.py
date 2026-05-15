@@ -93,7 +93,7 @@ def start_optimization(
                 min_trades=req.min_trades,
                 max_drawdown_pct_limit=req.max_drawdown_pct_limit,
             )
-            objective = Objective(opt_cfg, ctx.downloader, ctx.bot_registry)
+            objective = Objective(opt_cfg, ctx.downloader, ctx.bot_registry, cache=ctx.indicator_cache)
 
             collected_trials: list[dict] = []
 
@@ -138,6 +138,7 @@ def start_optimization(
                 f"Best: {req.objective}={best.score:.4f}" if best else "No results"
             )
 
+            cache_stats = objective._cache.stats() if objective._cache is not None else None
             ctx.jobs.update(
                 job.id,
                 status="done",
@@ -153,6 +154,7 @@ def start_optimization(
                     "validation_split_pct": req.validation_split_pct,
                     "min_trades": req.min_trades,
                     "max_drawdown_pct_limit": req.max_drawdown_pct_limit,
+                    "cache_stats": cache_stats,
                 },
             )
         except ImportError as exc:

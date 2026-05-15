@@ -14,6 +14,7 @@ enum WsEventType {
   progress,
   result,
   error,
+  ping,
   pong,
   trialCompleted,
   optimizeDone,
@@ -39,6 +40,7 @@ class WsEvent {
       'progress' => WsEventType.progress,
       'result' => WsEventType.result,
       'error' => WsEventType.error,
+      'ping' => WsEventType.ping,
       'pong' => WsEventType.pong,
       'trial_completed' => WsEventType.trialCompleted,
       'optimize_done' => WsEventType.optimizeDone,
@@ -62,7 +64,21 @@ class WsService {
 
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
+  Timer? _heartbeatTimer;
+  Timer? _heartbeatTimeoutTimer;
   bool _wantConnected = false;
+
+  /// Outgoing messages buffered while the socket is down. Flushed on reconnect.
+  final List<Map<String, dynamic>> _outboundBuffer = [];
+  static const int _maxBuffer = 128;
+
+  /// If no traffic (server ping or any event) arrives within this window,
+  /// force-reconnect to recover from half-open connections.
+  static const Duration _heartbeatTimeout = Duration(seconds: 60);
+
+  /// Client-initiated ping cadence to keep the connection warm and exercise
+  /// the timeout watchdog.
+  static const Duration _clientPingInterval = Duration(seconds: 25);
 
   WsService({
     this.wsUrl = 'ws://127.0.0.1:8002/ws',
@@ -70,7 +86,10 @@ class WsService {
     this.maxReconnectAttempts = 8,
   });
 
-  Stream<WsEvent> get events => _controller!.stream;
+  Stream<WsEvent> get events {
+    _controller ??= StreamController<WsEvent>.broadcast();
+    return _controller!.stream;
+  }
   bool get isConnected => status.value == WsStatus.connected;
 
   Future<void> connect() async {
@@ -93,9 +112,15 @@ class WsService {
       );
       _channel!.stream.listen(
         (raw) {
+          _resetHeartbeatTimeout();
           try {
             final json = jsonDecode(raw as String) as Map<String, dynamic>;
-            _controller!.add(WsEvent.fromJson(json));
+            final evt = WsEvent.fromJson(json);
+            // Server-initiated ping → reply with pong so server tracks liveness.
+            if (evt.type == WsEventType.ping) {
+              _rawSend({'action': 'pong'});
+            }
+            _controller!.add(evt);
           } catch (e) {
             debugPrint('WsService: parse error: $e');
           }
@@ -114,13 +139,50 @@ class WsService {
       status.value = WsStatus.connected;
       _reconnectAttempts = 0;
       _controller!.add(const WsEvent(WsEventType.reconnected, {}));
+      _startHeartbeat();
+      _flushOutboundBuffer();
     } catch (e) {
       debugPrint('WsService connect failed: $e');
       _onDisconnect(error: e.toString());
     }
   }
 
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(_clientPingInterval, (_) {
+      if (status.value == WsStatus.connected) {
+        _rawSend({'action': 'ping'});
+      }
+    });
+    _resetHeartbeatTimeout();
+  }
+
+  void _resetHeartbeatTimeout() {
+    _heartbeatTimeoutTimer?.cancel();
+    _heartbeatTimeoutTimer = Timer(_heartbeatTimeout, () {
+      debugPrint('WsService: heartbeat timeout — forcing reconnect');
+      _onDisconnect(error: 'heartbeat timeout');
+    });
+  }
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+    _heartbeatTimeoutTimer?.cancel();
+    _heartbeatTimeoutTimer = null;
+  }
+
+  void _flushOutboundBuffer() {
+    if (_outboundBuffer.isEmpty) return;
+    final drained = List<Map<String, dynamic>>.from(_outboundBuffer);
+    _outboundBuffer.clear();
+    for (final p in drained) {
+      _rawSend(p);
+    }
+  }
+
   void _onDisconnect({String? error}) {
+    _stopHeartbeat();
     if (status.value == WsStatus.disconnected) return;
     status.value = WsStatus.disconnected;
     // ignore: use_null_aware_elements
@@ -131,11 +193,16 @@ class WsService {
     }
   }
 
+  /// Reconnect delay formula exposed for testing.
+  @visibleForTesting
+  static int reconnectDelayMs(int attempt) =>
+      (500 * (1 << (attempt - 1))).clamp(500, 15000);
+
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
     _reconnectAttempts++;
     // Exponential backoff: 500ms, 1s, 2s, 4s, 8s, max 15s
-    final delayMs = (500 * (1 << (_reconnectAttempts - 1))).clamp(500, 15000);
+    final delayMs = reconnectDelayMs(_reconnectAttempts);
     status.value = WsStatus.reconnecting;
     _controller?.add(WsEvent(
       WsEventType.reconnecting,
@@ -148,13 +215,30 @@ class WsService {
 
   void send(Map<String, dynamic> payload) {
     if (_channel == null || status.value != WsStatus.connected) {
-      debugPrint('WsService.send: not connected, dropping payload');
+      // Buffer instead of dropping, flushed on reconnect.
+      if (_outboundBuffer.length >= _maxBuffer) {
+        debugPrint('WsService.send: outbound buffer full, dropping oldest');
+        _outboundBuffer.removeAt(0);
+      }
+      _outboundBuffer.add(payload);
       return;
     }
-    _channel?.sink.add(jsonEncode(payload));
+    _rawSend(payload);
+  }
+
+  /// Send without buffering — used by heartbeat / pong responses.
+  void _rawSend(Map<String, dynamic> payload) {
+    try {
+      _channel?.sink.add(jsonEncode(payload));
+    } catch (e) {
+      debugPrint('WsService._rawSend failed: $e');
+    }
   }
 
   void ping() => send({'action': 'ping'});
+
+  /// Number of messages waiting for the connection to come back up.
+  int get pendingOutbound => _outboundBuffer.length;
 
   void runBacktest({
     required List<Map<String, dynamic>> bots,
@@ -233,6 +317,8 @@ class WsService {
     _wantConnected = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _stopHeartbeat();
+    _outboundBuffer.clear();
     await _closeChannel();
     await _controller?.close();
     _controller = null;

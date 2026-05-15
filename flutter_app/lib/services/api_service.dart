@@ -212,6 +212,7 @@ class ApiService {
         'date_to': dateTo,
       }),
     );
+    if (res.statusCode == 422) throw ApiValidationError.fromBody(res.body);
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -232,6 +233,7 @@ class ApiService {
         'month': month,
       }),
     );
+    if (res.statusCode == 422) throw ApiValidationError.fromBody(res.body);
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -343,31 +345,116 @@ class ApiService {
   }
 }
 
+/// One field-level validation issue returned by FastAPI/Pydantic.
+class ValidationIssue {
+  final List<String> fieldPath;
+  final String message;
+  final String type;
+
+  const ValidationIssue({
+    required this.fieldPath,
+    required this.message,
+    this.type = '',
+  });
+
+  /// Human-friendly field name (last segment, drops 'body' prefix).
+  String get field {
+    final filtered = fieldPath.where((s) => s != 'body').toList();
+    return filtered.isEmpty ? '' : filtered.last;
+  }
+}
+
 /// Thrown when the backend rejects a request with HTTP 422 (Pydantic validation).
 ///
-/// The Flutter UI uses [message] for a friendly banner.
+/// Holds *every* field-level issue so the UI can render a complete error list.
 class ApiValidationError implements Exception {
-  final String message;
-  final List<String> fieldPath;
-  const ApiValidationError(this.message, this.fieldPath);
+  final List<ValidationIssue> issues;
+  final String rawBody;
+
+  const ApiValidationError(this.issues, [this.rawBody = '']);
+
+  /// First issue's message (for compact banners). Falls back to "Validation error".
+  String get message =>
+      issues.isEmpty ? 'Validation error' : issues.first.message;
+
+  /// First issue's path (kept for backwards compat with existing call sites).
+  List<String> get fieldPath =>
+      issues.isEmpty ? const [] : issues.first.fieldPath;
 
   factory ApiValidationError.fromBody(String body) {
     try {
       final j = jsonDecode(body);
       final detail = j is Map ? j['detail'] : null;
-      if (detail is List && detail.isNotEmpty) {
-        final first = detail.first as Map<String, dynamic>;
-        final loc = (first['loc'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[];
-        final msg = first['msg'] as String? ?? 'Validation error';
-        return ApiValidationError(msg, loc);
+      if (detail is List) {
+        final parsed = <ValidationIssue>[];
+        for (final raw in detail) {
+          if (raw is! Map) continue;
+          final loc = (raw['loc'] as List?)
+                  ?.map((e) => e.toString())
+                  .toList() ??
+              const <String>[];
+          parsed.add(ValidationIssue(
+            fieldPath: loc,
+            message: raw['msg'] as String? ?? 'Validation error',
+            type: raw['type'] as String? ?? '',
+          ));
+        }
+        if (parsed.isNotEmpty) return ApiValidationError(parsed, body);
       }
-      if (detail is String) return ApiValidationError(detail, const []);
+      if (detail is String) {
+        return ApiValidationError(
+          [ValidationIssue(fieldPath: const [], message: detail)],
+          body,
+        );
+      }
     } catch (_) {}
-    return ApiValidationError('Validation error: $body', const []);
+    return ApiValidationError(
+      [ValidationIssue(fieldPath: const [], message: 'Validation error: $body')],
+      body,
+    );
+  }
+
+  /// Returns a helpful hint for known field/message combinations. The UI
+  /// surfaces this beside the raw API message.
+  String hintFor(ValidationIssue issue) {
+    final f = issue.field.toLowerCase();
+    final m = issue.message.toLowerCase();
+    if (f == 'fast_ema' || (m.contains('fast_ema') && m.contains('slow'))) {
+      return 'fast_ema must be strictly less than slow_ema.';
+    }
+    if (m.contains('no candles')) {
+      return 'No candles for this symbol/timeframe. Open Data Manager and download a range first.';
+    }
+    if (m.contains('unknown bot')) {
+      return 'Bot name not recognised. Use GET /api/bots to list available strategies.';
+    }
+    return '';
   }
 
   @override
-  String toString() => fieldPath.isEmpty
-      ? message
-      : '${fieldPath.join('.')}: $message';
+  String toString() {
+    if (issues.isEmpty) return 'ApiValidationError';
+    return issues
+        .map((i) => i.fieldPath.isEmpty
+            ? i.message
+            : '${i.fieldPath.join('.')}: ${i.message}')
+        .join('; ');
+  }
+}
+
+/// Wraps an arbitrary HTTP failure with a user-friendly title and the raw body.
+class ApiError implements Exception {
+  final int statusCode;
+  final String body;
+  const ApiError(this.statusCode, this.body);
+
+  String get friendlyMessage {
+    if (statusCode == 404) return 'Resource not found (404).';
+    if (statusCode == 401 || statusCode == 403) return 'Not authorized.';
+    if (statusCode >= 500) return 'Server error ($statusCode). Try again or check API logs.';
+    return 'Request failed ($statusCode).';
+  }
+
+  @override
+  String toString() => 'ApiError($statusCode): $body';
 }
