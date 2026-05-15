@@ -24,6 +24,7 @@ from backtester.core.engine import (
     build_per_bot_breakdown,
     compute_max_drawdown_pct,
 )
+from backtester.core.orders import update_trailing_anchor
 
 _LOG = logging.getLogger("backtester.engine.stream")
 
@@ -167,14 +168,25 @@ class StreamingEngine(BacktestEngine):
             for idx, candle in enumerate(candles):
 
                 # ── 1. Each bot decides on its own portfolio ──────
+                # Compute circuit-breaker flag once per candle.
+                new_entries_halted = self._circuit_breaker_tripped(portfolios, candle, result)
+
                 for bi, (bot, portfolio, bot_id) in enumerate(
                     zip(bots, portfolios, names)
                 ):
-                    # Update MFE/MAE BEFORE the bot runs so positions that
-                    # close on this candle capture its full high/low range.
+                    # 1a. Update MFE/MAE BEFORE the bot runs so positions that
+                    #     close on this candle capture its full high/low range.
                     for pos in portfolio.positions:
                         pos.update_excursion(candle.high, candle.low)
 
+                    # 1b. Check pending orders FIRST (LIMIT / STOP / TRAILING)
+                    #     so SL/TP/trail fire intra-bar with the pre-ratchet
+                    #     trailing level. Then ratchet for the NEXT bar.
+                    self._process_pending_orders(candle, portfolio, result, bot_id=bot_id)
+                    for po in portfolio.pending_orders:
+                        update_trailing_anchor(po, candle.high, candle.low)
+
+                    # 1c. Let the bot decide.
                     try:
                         orders = bot.on_candle(candle, portfolio)
                     except Exception as exc:  # noqa: BLE001
@@ -184,14 +196,11 @@ class StreamingEngine(BacktestEngine):
                             "fatal": False,
                         })
                         orders = []
-                    for order in orders:
-                        side = order.get("side", "").upper()
-                        qty  = Decimal(str(order.get("qty", 0)))
-                        reason = order.get("reason") or side
-                        if side == "BUY":
-                            self._process_buy(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
-                        elif side == "SELL":
-                            self._process_sell(candle, portfolio, qty, result, bot_id=bot_id, reason=reason)
+                    for raw in orders:
+                        self._submit_order(
+                            raw, candle, portfolio, result,
+                            bot_id=bot_id, new_entries_halted=new_entries_halted,
+                        )
 
                     # Emit newly closed trades for this bot
                     new_trades = portfolio.closed_trades[prev_closed[bi]:]

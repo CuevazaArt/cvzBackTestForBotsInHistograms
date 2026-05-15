@@ -62,6 +62,47 @@ flutter run -d windows
 - 🔐 Credenciales encriptadas con Fernet (local)
 - 🖥️ Interfaz nativa Flutter + gráficos profesionales TradingView
 
+## Phase 4 — Realistic Order Execution (2026-05-15)
+
+Cierra el gap más grande entre backtest y trading real: las órdenes ahora se ejecutan **intra-bar** con tipos que un trader profesional reconocería.
+
+### Tipos de orden soportados
+- `MARKET` (default) — fill al close del candle actual con slippage
+- `LIMIT` — fill solo si low ≤ limit_price (BUY) o high ≥ limit_price (SELL) dentro del candle
+- `STOP` — gatilla MARKET cuando price atraviesa stop_price intra-bar
+- `STOP_LIMIT` — gatilla un LIMIT cuando price toca stop_price (más conservador)
+- `TRAILING_STOP` — stop que ratchea con cada nuevo high (long) por `trail_pct`%
+
+### Bracket orders (orden compuesta atómica)
+Una sola orden BUY puede llevar SL + TP + trailing stop adjuntos:
+```python
+{"side": "BUY", "qty": 1.0,
+ "stop_loss_pct": 2.0,        # auto-creates STOP @ entry*(1 - 2%)
+ "take_profit_pct": 4.0,      # auto-creates LIMIT @ entry*(1 + 4%)
+ "trailing_stop_pct": 3.0}    # auto-creates TRAILING_STOP at 3%
+```
+Cuando uno de los hermanos dispara, los otros se **auto-cancelan** (no hay double-fire de SL después de TP).
+
+### Convención "favorable to trader" para trailing stop
+El ratchet del anchor ocurre al FINAL del bar, no al principio. Esto significa que un mismo candle que sube y baja no puede simultáneamente ratchear el stop hacia arriba Y dispararlo — el stop usa siempre el nivel del bar anterior. Es la convención estándar de MetaTrader/TradingView.
+
+### Risk-based position sizing (`BacktestBot.size_by_risk`)
+Helper estándar para sizing por riesgo: dado equity, precio, stop% y risk%, retorna qty tal que hitting el stop cuesta exactamente `risk_pct` del equity. Ejemplo: $10k equity, 1% risk, 2% stop → 50 unidades a $100 (notional $5k).
+
+### Circuit breaker (`BacktestConfig.max_drawdown_pct_halt`)
+Si el drawdown global supera el threshold, el engine rechaza nuevos BUY. Las posiciones abiertas pueden seguir cerrando vía SL/TP/manual. Útil para evitar overtrading en racha perdedora.
+
+### EMACross actualizado
+Ahora usa bracket orders con SL + TP attached y opcionalmente trailing stop. Soporta `use_risk_sizing=True` para position sizing profesional. Backward compat: bots viejos que emiten `{"side": "BUY", "qty": ...}` siguen funcionando como MARKET.
+
+### Trade.reason captura el trigger
+Los trades cerrados reportan: `STOP_LOSS`, `TAKE_PROFIT`, `TRAILING_STOP`, `LIMIT`, `MARKET` o `MANUAL` — visible como badge coloreado en la tabla de trades del Flutter shell.
+
+### Tests
++11 tests específicos en `backtester/tests/test_orders.py` (95 backend totales pasando).
+
+---
+
 ## Phase 3 — Decision-Support Tools (2026-05-15)
 
 Funcionalidades para responder las preguntas que un trader hace **antes** de poner capital en un bot:
