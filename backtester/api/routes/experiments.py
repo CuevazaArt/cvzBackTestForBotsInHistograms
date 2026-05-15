@@ -41,7 +41,7 @@ def start_experiments(
 
     def _run() -> None:
         ctx.jobs.update(job.id, status="running")
-        runner = ExperimentRunner(ctx.downloader, ctx.bot_registry)
+        runner = ExperimentRunner(ctx.downloader, ctx.bot_registry, cache=ctx.indicator_cache)
 
         def _progress(done: int, total: int) -> None:
             ctx.jobs.update(
@@ -63,10 +63,11 @@ def start_experiments(
                 }
                 for r in results
             ]
+            cache_stats = runner._cache.stats() if runner._cache is not None else None
             ctx.jobs.update(
                 job.id, status="done", progress=1.0,
                 message=f"Completed {total} experiments",
-                result={"runs": serialized, "total": total},
+                result={"runs": serialized, "total": total, "cache_stats": cache_stats},
             )
         except Exception as exc:  # noqa: BLE001
             _LOG.exception("Experiment job failed")

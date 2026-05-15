@@ -11,6 +11,7 @@ from fastapi import Request
 from backtester.api.jobs import JobRegistry
 from backtester.bots import BOT_REGISTRY  # re-export
 from backtester.core import BinanceDownloader, CredentialManager
+from backtester.core.cache import IndicatorCache
 from backtester.core.preset_store import PresetStore
 
 
@@ -22,6 +23,11 @@ class AppContext:
     bot_registry: dict[str, Callable]
     jobs: JobRegistry
     presets: PresetStore
+    indicator_cache: IndicatorCache = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.indicator_cache is None:
+            self.indicator_cache = IndicatorCache(max_entries=512)
 
     @classmethod
     def build(cls, base_dir: Path | None = None) -> "AppContext":

@@ -108,7 +108,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     slippage_pct=Decimal(str(req.slippage_pct)),
                 )
 
-                engine = StreamingEngine(cfg, on_event=_send, total=len(candles))
+                engine = StreamingEngine(cfg, on_event=_send, total=len(candles), cache=ctx.indicator_cache)
                 # Run the synchronous engine in a worker thread so the WS
                 # event loop stays responsive (and pings can fly through).
                 bot_names = unique_bot_names(req.bots)

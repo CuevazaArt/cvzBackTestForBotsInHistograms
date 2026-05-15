@@ -36,6 +36,7 @@ class ExperimentResult:
     success: bool
     metrics: dict[str, Any] = None
     error: Optional[str] = None
+    cache_stats: Optional[dict[str, Any]] = None
 
 
 # ── Worker (module-level so it can be pickled) ─────────────────
@@ -90,10 +91,12 @@ class ExperimentRunner:
         downloader: BinanceDownloader,
         bot_registry: dict[str, Callable],
         engine_config: Optional[BacktestConfig] = None,
+        cache=None,
     ) -> None:
         self.downloader = downloader
         self.bot_registry = bot_registry
         self.engine_config = engine_config or BacktestConfig()
+        self._cache = cache  # IndicatorCache | None
 
     def run_batch(
         self,
@@ -141,6 +144,11 @@ class ExperimentRunner:
                 completed += 1
                 if progress_callback:
                     progress_callback(completed, total)
+            # Attach cache stats snapshot to every result
+            if self._cache is not None:
+                stats = self._cache.stats()
+                for r in results:
+                    r.cache_stats = stats
             return results
 
         with ProcessPoolExecutor(max_workers=workers) as executor:
@@ -171,6 +179,12 @@ class ExperimentRunner:
                 if progress_callback:
                     progress_callback(completed, total)
 
+        # Cache is process-local; attach stats if available (only meaningful in
+        # sequential mode — multiprocess workers have isolated caches).
+        if self._cache is not None:
+            stats = self._cache.stats()
+            for r in results:
+                r.cache_stats = stats
         return results
 
     @staticmethod

@@ -55,8 +55,11 @@ def run_optuna(
     sampler: str = "tpe",
     seed: Optional[int] = None,
     on_trial: Optional[Callable[[int, OptimizationResult], None]] = None,
+    cache=None,
 ) -> list[OptimizationResult]:
     """Run Optuna optimization. Returns all trial results sorted best→worst."""
+    if cache is not None:
+        objective._cache = cache
     try:
         import optuna
     except ImportError as e:
@@ -86,6 +89,12 @@ def run_optuna(
         return result.score
 
     study.optimize(_wrapped, n_trials=trials, show_progress_bar=False)
+
+    # Attach final cache stats to every result (same snapshot for all trials)
+    final_cache_stats = objective._cache.stats() if objective._cache is not None else None
+    if final_cache_stats is not None:
+        for r in collected:
+            r.cache_stats = final_cache_stats
 
     # Sort: best first
     reverse = (objective.direction == "max")
