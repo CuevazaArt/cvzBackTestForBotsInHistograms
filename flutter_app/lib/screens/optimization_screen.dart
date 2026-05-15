@@ -49,6 +49,11 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
 
   int _maxWorkers = 4;
 
+  // ── Optimizer mode ────────────────────────────────────────────
+  String _mode = 'grid';          // 'grid' | 'tpe' | 'cmaes' | 'random'
+  int _optunaTrials = 100;
+  String _objective = 'total_return_pct';
+
   @override
   void initState() {
     super.initState();
@@ -90,6 +95,14 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   Future<void> _runOptimization() async {
     if (_selectedSymbol == null || _selectedBot == null) return;
 
+    if (_mode == 'grid') {
+      return _runGridSweep();
+    } else {
+      return _runOptuna();
+    }
+  }
+
+  Future<void> _runGridSweep() async {
     final grid = expandBounds(_bounds, cap: 200);
     if (grid.combos.isEmpty) {
       setState(() => _error = 'Search space is empty. Adjust the param bounds.');
@@ -116,32 +129,7 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         ],
         workers: _maxWorkers,
       );
-
-      _poll = Timer.periodic(const Duration(seconds: 1), (timer) async {
-        try {
-          final st = await widget.apiService.getJob(jobId);
-          if (!mounted) {
-            timer.cancel();
-            return;
-          }
-          setState(() {
-            _progress = st.progress;
-            _jobMessage = st.message;
-          });
-          if (st.status == 'done') {
-            timer.cancel();
-            _onJobDone(st);
-          } else if (st.status == 'error') {
-            timer.cancel();
-            setState(() {
-              _running = false;
-              _error = st.message ?? 'Optimization failed';
-            });
-          }
-        } catch (e) {
-          // Network blip — ignore one tick.
-        }
-      });
+      _startPolling(jobId);
     } on ApiValidationError catch (e) {
       setState(() {
         _running = false;
@@ -153,6 +141,90 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         _error = e.toString();
       });
     }
+  }
+
+  Future<void> _runOptuna() async {
+    // Build search_space from bounds
+    final searchSpace = <String, Map<String, dynamic>>{};
+    final fixedParams = <String, dynamic>{};
+    for (final entry in _bounds.entries) {
+      final b = entry.value;
+      if (b.optimize) {
+        searchSpace[entry.key] = {
+          'type': b.type,
+          'low': b.min,
+          'high': b.max,
+          if (b.step != null) 'step': b.step,
+        };
+      } else {
+        fixedParams[entry.key] = b.fixedValue;
+      }
+    }
+    if (searchSpace.isEmpty) {
+      setState(() => _error = 'No params to optimize. Enable at least one checkbox.');
+      return;
+    }
+
+    setState(() {
+      _running = true;
+      _error = null;
+      _info = 'Running $_optunaTrials trials via ${_mode.toUpperCase()} sampler…';
+      _progress = 0;
+      _trials = [];
+      _jobMessage = null;
+    });
+
+    try {
+      final jobId = await widget.apiService.runOptunaOptimization(
+        symbol: _selectedSymbol!,
+        timeframe: _selectedTimeframe,
+        bot: _selectedBot!,
+        searchSpace: searchSpace,
+        fixedParams: fixedParams,
+        objective: _objective,
+        trials: _optunaTrials,
+        sampler: _mode == 'cmaes' ? 'cma' : _mode,
+      );
+      _startPolling(jobId);
+    } on ApiValidationError catch (e) {
+      setState(() {
+        _running = false;
+        _error = 'Validation: $e';
+      });
+    } catch (e) {
+      setState(() {
+        _running = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  void _startPolling(String jobId) {
+    _poll = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      try {
+        final st = await widget.apiService.getJob(jobId);
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        setState(() {
+          _progress = st.progress;
+          _jobMessage = st.message;
+        });
+        if (st.status == 'done') {
+          timer.cancel();
+          _onJobDone(st);
+        } else if (st.status == 'error') {
+          timer.cancel();
+          setState(() {
+            _running = false;
+            _error = st.message ?? 'Optimization failed';
+          });
+        }
+      } catch (e) {
+        // Network blip — ignore one tick.
+      }
+    });
   }
 
   void _onJobDone(JobStatus st) {
@@ -221,6 +293,12 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
           running: _running,
           progress: _progress * 100,
           maxWorkers: _maxWorkers,
+          mode: _mode,
+          optunaTrials: _optunaTrials,
+          objective: _objective,
+          onModeChanged: (v) => setState(() => _mode = v),
+          onTrialsChanged: (v) => setState(() => _optunaTrials = v),
+          onObjectiveChanged: (v) => setState(() => _objective = v),
           onWorkersChanged: (v) => setState(() => _maxWorkers = v),
           onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
           onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
@@ -562,6 +640,12 @@ class _OptTopBar extends StatelessWidget {
   final bool running;
   final double progress;
   final int maxWorkers;
+  final String mode;
+  final int optunaTrials;
+  final String objective;
+  final ValueChanged<String> onModeChanged;
+  final ValueChanged<int> onTrialsChanged;
+  final ValueChanged<String> onObjectiveChanged;
   final ValueChanged<int> onWorkersChanged;
   final ValueChanged<String?> onSymbolChanged;
   final ValueChanged<String> onTimeframeChanged;
@@ -577,6 +661,12 @@ class _OptTopBar extends StatelessWidget {
     required this.running,
     required this.progress,
     required this.maxWorkers,
+    required this.mode,
+    required this.optunaTrials,
+    required this.objective,
+    required this.onModeChanged,
+    required this.onTrialsChanged,
+    required this.onObjectiveChanged,
     required this.onWorkersChanged,
     required this.onSymbolChanged,
     required this.onTimeframeChanged,
@@ -585,15 +675,29 @@ class _OptTopBar extends StatelessWidget {
   });
 
   static const _timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
+  static const _modes = {'grid': 'Grid Sweep', 'tpe': 'Optuna TPE', 'cmaes': 'CMA-ES', 'random': 'Random'};
+  static const _objectives = {
+    'total_return_pct': 'Return %',
+    'win_rate_pct': 'Win Rate %',
+    'profit_factor': 'Profit Factor',
+    'max_drawdown_pct': 'Min Drawdown',
+    'trades': 'Max Trades',
+  };
 
   @override
   Widget build(BuildContext context) {
     final distinctSymbols = symbols.map((s) => s.symbol).toSet().toList()..sort();
+    final isOptuna = mode != 'grid';
+    final btnLabel = isOptuna
+        ? (running ? '${progress.toStringAsFixed(0)}%' : 'Run Optuna')
+        : (running ? '${progress.toStringAsFixed(0)}%' : 'Run Sweep');
     return Container(
-      height: 48,
       color: const Color(0xFF1E222D),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           _DropdownChip<String>(
             value: selectedSymbol,
@@ -601,7 +705,6 @@ class _OptTopBar extends StatelessWidget {
             items: distinctSymbols,
             onChanged: onSymbolChanged,
           ),
-          const SizedBox(width: 8),
           _DropdownChip<String>(
             value: selectedTimeframe,
             hint: 'TF',
@@ -610,30 +713,79 @@ class _OptTopBar extends StatelessWidget {
               if (v != null) onTimeframeChanged(v);
             },
           ),
-          const SizedBox(width: 8),
           _DropdownChip<String>(
             value: selectedBot,
             hint: 'Bot',
             items: bots.map((b) => b.name).toList(),
             onChanged: onBotChanged,
           ),
-          const SizedBox(width: 16),
-          const Text('Workers:', style: TextStyle(color: Color(0xFF787B86), fontSize: 11)),
-          const SizedBox(width: 4),
-          DropdownButton<int>(
-            value: maxWorkers,
+          Container(width: 1, height: 24, color: const Color(0xFF2B2B43)),
+          // Mode selector
+          DropdownButton<String>(
+            value: mode,
             isDense: true,
             underline: const SizedBox(),
-            style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 12),
+            style: const TextStyle(color: Color(0xFFb388ff), fontSize: 12, fontWeight: FontWeight.w600),
             dropdownColor: const Color(0xFF1E222D),
-            items: const [1, 2, 4, 8]
-                .map((n) => DropdownMenuItem(value: n, child: Text('$n')))
+            items: _modes.entries
+                .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
                 .toList(),
             onChanged: (v) {
-              if (v != null) onWorkersChanged(v);
+              if (v != null) onModeChanged(v);
             },
           ),
-          const Spacer(),
+          if (isOptuna) ...[
+            // Trials
+            SizedBox(
+              width: 60,
+              height: 28,
+              child: TextFormField(
+                initialValue: '$optunaTrials',
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 12),
+                decoration: const InputDecoration(
+                  labelText: 'Trials',
+                  labelStyle: TextStyle(color: Color(0xFF787B86), fontSize: 10),
+                  isDense: true,
+                  border: InputBorder.none,
+                ),
+                onChanged: (v) {
+                  final n = int.tryParse(v);
+                  if (n != null && n > 0) onTrialsChanged(n);
+                },
+              ),
+            ),
+            // Objective
+            DropdownButton<String>(
+              value: objective,
+              isDense: true,
+              underline: const SizedBox(),
+              style: const TextStyle(color: Color(0xFF26a69a), fontSize: 11),
+              dropdownColor: const Color(0xFF1E222D),
+              items: _objectives.entries
+                  .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) onObjectiveChanged(v);
+              },
+            ),
+          ],
+          if (!isOptuna) ...[
+            const Text('Workers:', style: TextStyle(color: Color(0xFF787B86), fontSize: 11)),
+            DropdownButton<int>(
+              value: maxWorkers,
+              isDense: true,
+              underline: const SizedBox(),
+              style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 12),
+              dropdownColor: const Color(0xFF1E222D),
+              items: const [1, 2, 4, 8]
+                  .map((n) => DropdownMenuItem(value: n, child: Text('$n')))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) onWorkersChanged(v);
+              },
+            ),
+          ],
           FilledButton.icon(
             onPressed: running || selectedSymbol == null || selectedBot == null ? null : onRun,
             icon: running
@@ -642,10 +794,10 @@ class _OptTopBar extends StatelessWidget {
                     height: 14,
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
-                : const Icon(Icons.science, size: 16),
-            label: Text(running ? '${progress.toStringAsFixed(0)}%' : 'Run Sweep'),
+                : Icon(isOptuna ? Icons.auto_awesome : Icons.science, size: 16),
+            label: Text(btnLabel),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFb388ff),
+              backgroundColor: isOptuna ? const Color(0xFF7C4DFF) : const Color(0xFFb388ff),
               minimumSize: const Size(100, 32),
               textStyle: const TextStyle(fontSize: 13),
             ),

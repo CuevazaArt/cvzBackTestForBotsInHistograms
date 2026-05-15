@@ -234,6 +234,51 @@ class ExperimentsRequest(BaseModel):
         return self
 
 
+# ───────────────────────── Optimizer (Optuna / Nevergrad) ──────
+
+
+class SearchSpaceParam(BaseModel):
+    """One dimension of the search space."""
+    type: str = "float"         # "int" | "float"
+    low: float
+    high: float
+    step: Optional[float] = None
+    log: bool = False
+    choices: Optional[list[Any]] = None     # categorical override
+
+
+class OptimizeRequest(BaseModel):
+    """Kick off a real Optuna / Nevergrad optimization run."""
+    symbol: str
+    timeframe: str
+    bot: str                                  # single bot name
+    search_space: dict[str, SearchSpaceParam]
+    fixed_params: dict[str, Any] = Field(default_factory=dict)
+    objective: str = "total_return_pct"       # metric to optimize
+    trials: int = 100
+    sampler: str = "tpe"                      # tpe | cmaes | random
+    initial_cash: float = 10000.0
+    taker_fee_pct: float = 0.1
+    slippage_pct: float = 0.05
+    workers: int = 1                          # Optuna is single-threaded by default
+
+    @field_validator("trials")
+    @classmethod
+    def _trials_range(cls, v: int) -> int:
+        if v < 1 or v > 5000:
+            raise ValueError("trials must be between 1 and 5000")
+        return v
+
+    @field_validator("objective")
+    @classmethod
+    def _valid_objective(cls, v: str) -> str:
+        valid = {"total_return_pct", "win_rate_pct", "profit_factor",
+                 "max_drawdown_pct", "trades"}
+        if v not in valid:
+            raise ValueError(f"objective must be one of {valid}")
+        return v
+
+
 # ───────────────────────── Credentials ─────────────────────────
 
 

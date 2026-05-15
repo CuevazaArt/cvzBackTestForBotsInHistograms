@@ -306,3 +306,81 @@ def test_engine_isolates_bot_crash():
     assert "Crasher" in result.per_bot
     assert result.per_bot["Crasher"]["trades"] == 0
     assert isinstance(result.per_bot["Crasher"]["total_return_pct"], float)
+
+
+# ── DorothyDCA validation ────────────────────────────────────────
+
+
+def _downtrend_recovery_klines(n: int = 200) -> list[list]:
+    """Synthetic klines with a dip then recovery — ideal for DCA."""
+    klines = []
+    base = 100.0
+    for i in range(n):
+        # Drop 40% in first half, recover fully in second half
+        if i < n // 2:
+            offset = -40.0 * (i / (n // 2))
+        else:
+            offset = -40.0 + 40.0 * ((i - n // 2) / (n // 2))
+        close = base + offset + (i * 0.01)  # tiny drift
+        o = close - 0.2
+        h = max(o, close) + 0.3
+        l = min(o, close) - 0.3
+        ts_ms = i * 3_600_000
+        klines.append([ts_ms, o, h, l, close, 150.0, ts_ms + 3_599_999, 15000.0])
+    return klines
+
+
+def test_dorothy_dca_runs_end_to_end():
+    """DorothyDCA should buy on dips and take profit on recovery."""
+    from backtester.bots.dorothy_dca import DorothyDCA
+    from backtester.core import BacktestConfig, BacktestEngine
+    from backtester.core.engine import Candle
+
+    candles = [Candle.from_dict({
+        "timestamp_ms": k[0], "open": k[1], "high": k[2],
+        "low": k[3], "close": k[4], "volume": k[5],
+    }) for k in _downtrend_recovery_klines(200)]
+
+    bot = DorothyDCA(
+        profit_factor=0.05,
+        margin_drop_factor=0.004,
+        max_positions=3,
+        stop_loss_pct=0.15,
+        risk_per_trade_pct=5.0,
+    )
+    eng = BacktestEngine(BacktestConfig(initial_cash=Decimal("10000")))
+    result = eng.run([bot], candles, symbol="TESTUSDT", timeframe="1h", bot_names=["DorothyDCA"])
+
+    assert "DorothyDCA" in result.per_bot
+    metrics = result.per_bot["DorothyDCA"]
+    # Must have at least one trade (initial buy) and the metrics should be finite
+    assert metrics["trades"] >= 1
+    ret = metrics["total_return_pct"]
+    assert not math.isnan(ret) and not math.isinf(ret)
+
+
+def test_dorothy_dca_via_http(app_with_synthetic_data):
+    """DorothyDCA should work through the REST API."""
+    # First insert some data with the downtrend pattern
+    from backtester.core import BinanceDownloader
+
+    ctx = app_with_synthetic_data.state.ctx
+    ctx.downloader._save_batch("TESTUSDT", "1h", _downtrend_recovery_klines(200))
+
+    client = TestClient(app_with_synthetic_data)
+    payload = {
+        "symbol": "TESTUSDT",
+        "timeframe": "1h",
+        "bots": [{"name": "DorothyDCA", "params": {
+            "profit_factor": 0.05,
+            "margin_drop_factor": 0.004,
+            "max_positions": 3,
+        }}],
+        "initial_cash": 10000.0,
+    }
+    res = client.post("/api/backtest/run", json=payload)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["summary"]["trades"] >= 1
+    ret = body["summary"]["total_return_pct"]
+    assert not math.isnan(ret)

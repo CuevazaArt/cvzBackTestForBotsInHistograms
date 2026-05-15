@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:backtester_shell/services/api_service.dart';
 import 'package:backtester_shell/screens/backtest_screen.dart';
 import 'package:backtester_shell/screens/optimization_screen.dart';
+import 'package:backtester_shell/screens/settings_screen.dart';
 import 'package:backtester_shell/widgets/status_dot.dart';
 
 /// Main scaffold — sidebar nav + content area.
@@ -70,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   apiService: widget.apiService,
                   onApplyBest: _onApplyBest,
                 ),
-              _ => const _PlaceholderPage(label: 'Settings coming soon'),
+              _ => SettingsScreen(apiService: widget.apiService),
             },
           ),
         ],
@@ -157,14 +158,4 @@ class _Sidebar extends StatelessWidget {
       ),
     );
   }
-}
-
-class _PlaceholderPage extends StatelessWidget {
-  final String label;
-  const _PlaceholderPage({required this.label});
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Text(label, style: Theme.of(context).textTheme.bodySmall),
-      );
 }

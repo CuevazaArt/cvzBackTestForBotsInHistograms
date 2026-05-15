@@ -125,6 +125,29 @@ class ApiService {
     }
   }
 
+  // ── Credentials ──
+
+  Future<bool> credentialsExist() async {
+    final res = await http.get(Uri.parse('$baseUrl/api/credentials/exists'));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return data['exists'] as bool? ?? false;
+  }
+
+  Future<void> saveCredentials(String apiKey, String apiSecret) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/credentials'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'api_key': apiKey, 'api_secret': apiSecret}),
+    );
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+  }
+
+  Future<void> deleteCredentials() async {
+    final res = await http.delete(Uri.parse('$baseUrl/api/credentials'));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+  }
+
   Future<List<SymbolEntry>> listSymbols() async {
     final res = await http.get(Uri.parse('$baseUrl/api/candles/symbols'));
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
@@ -211,6 +234,50 @@ class ApiService {
         'timeframe': timeframe,
         'bots': bots,
         'workers': workers,
+      }),
+    );
+    if (res.statusCode == 422) {
+      throw ApiValidationError.fromBody(res.body);
+    }
+    if (res.statusCode != 200) {
+      throw Exception('HTTP ${res.statusCode}: ${res.body}');
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return body['id'] as String;
+  }
+
+  /// Launch an Optuna-backed optimization (`POST /api/optimize/run`).
+  ///
+  /// `searchSpace` shape: `{"fast_ema": {"type": "int", "low": 3, "high": 50, "step": 1}, ...}`.
+  /// Returns the job id used for polling via [getJob].
+  Future<String> runOptunaOptimization({
+    required String symbol,
+    required String timeframe,
+    required String bot,
+    required Map<String, Map<String, dynamic>> searchSpace,
+    Map<String, dynamic> fixedParams = const {},
+    String objective = 'total_return_pct',
+    int trials = 100,
+    String sampler = 'tpe',
+    double initialCash = 10000.0,
+    double takerFeePct = 0.1,
+    double slippagePct = 0.05,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/optimize/run'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'bot': bot,
+        'search_space': searchSpace,
+        'fixed_params': fixedParams,
+        'objective': objective,
+        'trials': trials,
+        'sampler': sampler,
+        'initial_cash': initialCash,
+        'taker_fee_pct': takerFeePct,
+        'slippage_pct': slippagePct,
       }),
     );
     if (res.statusCode == 422) {

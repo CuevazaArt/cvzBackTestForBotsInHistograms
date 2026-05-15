@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backtester.api.deps import AppContext
-from backtester.api.routes import backtest, bots, candles, credentials, experiments
+from backtester.api.routes import backtest, bots, candles, credentials, experiments, optimize
 from backtester.api.ws import router as ws_router
 
 _LOG = logging.getLogger("backtester.api.server")
@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
     )
 
     for r in (bots.router, candles.router, backtest.router,
-              experiments.router, credentials.router):
+              experiments.router, credentials.router, optimize.router):
         app.include_router(r, prefix="/api")
     app.include_router(ws_router)
 
