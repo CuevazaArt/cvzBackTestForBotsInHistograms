@@ -13,26 +13,89 @@
   <!-- ── Top bar ──────────────────────────────────────────────── -->
   <div id="topbar">
     <span id="topbar-symbol" class="symbol-badge">—</span>
-    <span id="topbar-tf" class="tf-badge">—</span>
-    <span id="topbar-bot" class="tf-badge" style="color:#2962ff">—</span>
+    <span id="topbar-tf"     class="tf-badge">—</span>
+    <span id="topbar-bot"    class="tf-badge" style="color:#2962ff">—</span>
     <span class="sep"></span>
     <span id="topbar-daterange" style="font-size:11px;color:#787b86">—</span>
   </div>
 
   <!-- ── Charts ───────────────────────────────────────────────── -->
   <div id="charts">
+
     <div class="chart-panel">
       <span class="chart-label">Price</span>
       <div id="main-chart" class="chart-inner"></div>
     </div>
+
+    <!-- RSI subplot — hidden until OverlayManager shows it -->
+    <div class="chart-panel rsi-panel">
+      <span class="chart-label">RSI 14</span>
+      <div id="rsi-chart" class="chart-inner"></div>
+    </div>
+
     <div class="chart-panel">
       <span class="chart-label">Equity</span>
       <div id="equity-chart" class="chart-inner"></div>
     </div>
+
     <div class="chart-panel">
       <span class="chart-label">Drawdown</span>
       <div id="drawdown-chart" class="chart-inner"></div>
     </div>
+
+  </div>
+
+  <!-- ── Replay bar ───────────────────────────────────────────── -->
+  <div id="replay-bar">
+
+    <!-- Playback controls -->
+    <div class="replay-controls">
+      <button class="replay-btn" id="btn-replay-play"  title="Play">&#9654;</button>
+      <button class="replay-btn" id="btn-replay-pause" title="Pause" disabled>&#9646;&#9646;</button>
+      <button class="replay-btn" id="btn-replay-stop"  title="Stop / rewind">&#9632;</button>
+      <input  type="range" id="replay-seekbar" min="0" max="0" value="0" title="Seek" />
+      <span id="replay-counter">0 / 0</span>
+    </div>
+
+    <div class="replay-sep"></div>
+
+    <!-- Speed -->
+    <div class="replay-speed">
+      <span style="font-size:11px;color:var(--muted)">Speed</span>
+      <input type="range" id="replay-speed-in" min="0" max="5" value="2" />
+      <span id="replay-speed-lbl">1×</span>
+    </div>
+
+    <div class="replay-sep"></div>
+
+    <!-- Overlay toggles -->
+    <div class="replay-overlays">
+      <button class="overlay-btn"
+              data-name="ema20" data-overlay="ema"
+              data-options='{"period":20,"color":"#f7cc58"}'
+              title="Exponential Moving Average (20)">EMA 20</button>
+
+      <button class="overlay-btn"
+              data-name="ema50" data-overlay="ema"
+              data-options='{"period":50,"color":"#2196f3"}'
+              title="Exponential Moving Average (50)">EMA 50</button>
+
+      <button class="overlay-btn"
+              data-name="sma20" data-overlay="sma"
+              data-options='{"period":20,"color":"#4caf50"}'
+              title="Simple Moving Average (20)">SMA 20</button>
+
+      <button class="overlay-btn"
+              data-name="bb" data-overlay="bb"
+              data-options='{"period":20,"stddevs":2,"color":"#9b59b6"}'
+              title="Bollinger Bands (20, 2σ)">BB</button>
+
+      <button class="overlay-btn"
+              data-name="rsi" data-overlay="rsi"
+              data-options='{"period":14,"color":"#e91e63"}'
+              title="Relative Strength Index (14)">RSI</button>
+    </div>
+
   </div>
 
   <!-- ── Status bar ───────────────────────────────────────────── -->
@@ -42,10 +105,10 @@
     <span style="width:1px;height:12px;background:#2a2e39;display:inline-block"></span>
 
     <span class="stat">Return <span class="val" id="stat-return">—</span></span>
-    <span class="stat">MDD <span class="val" id="stat-mdd">—</span></span>
+    <span class="stat">MDD    <span class="val" id="stat-mdd">—</span></span>
     <span class="stat">Trades <span class="val" id="stat-trades">—</span></span>
-    <span class="stat">WR <span class="val" id="stat-wr">—</span></span>
-    <span class="stat">PF <span class="val" id="stat-pf">—</span></span>
+    <span class="stat">WR     <span class="val" id="stat-wr">—</span></span>
+    <span class="stat">PF     <span class="val" id="stat-pf">—</span></span>
     <span class="sep" style="flex:1"></span>
     <span id="progress-pct" style="color:#2962ff"></span>
   </div>
@@ -60,57 +123,122 @@
 <script src="/static/assets/js/charts/equity-chart.js"></script>
 <script src="/static/assets/js/charts/drawdown-chart.js"></script>
 
+<!-- Replay + overlay system -->
+<script src="/static/assets/js/charts/replay.js"></script>
+<script src="/static/assets/js/charts/overlays.js"></script>
+
 <!-- Flutter ↔ Python bridge -->
 <script src="/static/assets/js/bridge.js"></script>
 
 <script>
 (function () {
+
   // ── Init charts ──────────────────────────────────────────────
   MainChart.init("main-chart");
   EquityChart.init("equity-chart");
   DrawdownChart.init("drawdown-chart");
+  // RSI chart is initialised lazily by OverlayManager when RSI is first activated.
 
   // ── Auto-resize on window resize ─────────────────────────────
   function _resize() {
-    document.querySelectorAll(".chart-inner").forEach((el) => {
-      const id = el.id;
-      const w  = el.offsetWidth;
-      const h  = el.offsetHeight;
-      if (id === "main-chart")      MainChart.resize(w, h);
-      if (id === "equity-chart")    EquityChart.resize(w, h);
-      if (id === "drawdown-chart")  DrawdownChart.resize(w, h);
+    document.querySelectorAll(".chart-inner").forEach(function (el) {
+      var w = el.offsetWidth, h = el.offsetHeight;
+      if (el.id === "main-chart")     MainChart.resize(w, h);
+      if (el.id === "equity-chart")   EquityChart.resize(w, h);
+      if (el.id === "drawdown-chart") DrawdownChart.resize(w, h);
+      if (el.id === "rsi-chart")      OverlayManager.resize(w, h);
     });
   }
   window.addEventListener("resize", _resize);
 
-  // ── Connect WS ───────────────────────────────────────────────
-  // Flutter will call window.initBridge(wsUrl, token?) after load,
-  // or we auto-connect in standalone browser mode.
+  // ── WS connection (standalone browser + Flutter) ─────────────
   window.initBridge = function (wsUrl, token) {
-    const url = token ? wsUrl + "?token=" + encodeURIComponent(token) : wsUrl;
+    var url = token ? wsUrl + "?token=" + encodeURIComponent(token) : wsUrl;
     Bridge.connectWS(url);
   };
-
-  // Standalone browser mode: auto-connect to same host
-  const standalone = !window.flutter_inappwebview;
-  if (standalone) {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = proto + "//" + location.host + "/ws";
-    Bridge.connectWS(wsUrl);
+  if (!window.flutter_inappwebview) {
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    Bridge.connectWS(proto + "//" + location.host + "/ws");
   }
 
-  // ── Expose topbar updater for Flutter ────────────────────────
+  // ── Topbar updater (called by Flutter evaluateJavascript) ─────
   window.setTopbar = function (symbol, tf, bot, dateRange) {
-    document.getElementById("topbar-symbol").textContent = symbol || "—";
-    document.getElementById("topbar-tf").textContent     = tf     || "—";
-    document.getElementById("topbar-bot").textContent    = bot    || "—";
+    document.getElementById("topbar-symbol").textContent    = symbol    || "—";
+    document.getElementById("topbar-tf").textContent        = tf        || "—";
+    document.getElementById("topbar-bot").textContent       = bot       || "—";
     document.getElementById("topbar-daterange").textContent = dateRange || "";
   };
 
-  // Signal Flutter that the page is ready
+  // ── Replay controls ───────────────────────────────────────────
+  var playBtn  = document.getElementById("btn-replay-play");
+  var pauseBtn = document.getElementById("btn-replay-pause");
+  var stopBtn  = document.getElementById("btn-replay-stop");
+  var seekbar  = document.getElementById("replay-seekbar");
+  var speedIn  = document.getElementById("replay-speed-in");
+  var speedLbl = document.getElementById("replay-speed-lbl");
+
+  playBtn.addEventListener("click", function () { ChartReplay.play(); });
+  pauseBtn.addEventListener("click", function () { ChartReplay.pause(); });
+
+  stopBtn.addEventListener("click", function () {
+    ChartReplay.stop();
+    // Restore full dataset after stopping
+    var candles = Bridge.getCandles();
+    if (candles.length > 0) {
+      MainChart.reset();
+      MainChart.setSeries(candles);
+      Bridge.getTrades().forEach(function (t) { MainChart.marker(t); });
+      var eq = Bridge.getEquity();
+      EquityChart.setSeries(eq);
+      DrawdownChart.setSeries(eq);
+      OverlayManager.update(candles);
+    }
+  });
+
+  // Seekbar: suppress tick sync while dragging, then seek on release
+  seekbar.addEventListener("mousedown",  function () { ChartReplay._setSeeking(true); });
+  seekbar.addEventListener("touchstart", function () { ChartReplay._setSeeking(true); }, { passive: true });
+  seekbar.addEventListener("mouseup",    function () {
+    ChartReplay._setSeeking(false);
+    ChartReplay.seek(parseInt(seekbar.value, 10));
+  });
+  seekbar.addEventListener("touchend",   function () {
+    ChartReplay._setSeeking(false);
+    ChartReplay.seek(parseInt(seekbar.value, 10));
+  });
+
+  // Speed slider
+  speedIn.addEventListener("input", function () {
+    var idx = parseInt(speedIn.value, 10);
+    ChartReplay.setSpeed(idx);
+    speedLbl.textContent = ChartReplay.SPEED_LABELS[idx] || "";
+  });
+
+  // ── Overlay toggle buttons ────────────────────────────────────
+  document.querySelectorAll(".overlay-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var name    = btn.dataset.name;
+      var factory = btn.dataset.overlay;
+      var options = JSON.parse(btn.dataset.options || "{}");
+
+      if (btn.classList.contains("active")) {
+        OverlayManager.remove(name);
+        btn.classList.remove("active");
+      } else {
+        OverlayManager.add(name, factory, options);
+        btn.classList.add("active");
+        // Apply immediately to current data
+        var candles = Bridge.getCandles();
+        if (candles.length > 0) OverlayManager.update(candles);
+      }
+    });
+  });
+
+  // ── Flutter ready signal ──────────────────────────────────────
   if (window.flutter_inappwebview) {
     window.flutter_inappwebview.callHandler("onPageReady");
   }
+
 })();
 </script>
 

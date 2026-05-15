@@ -129,5 +129,5 @@
     if (_chart) _chart.resize(w, h);
   }
 
-  window.MainChart = { init, setSeries, append, marker, reset, resize };
+  window.MainChart = { init, setSeries, append, marker, reset, resize, getChart: () => _chart };
 })();

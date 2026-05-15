@@ -16,7 +16,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font: 13px
 
 #root {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr auto auto;   /* topbar / charts / replay-bar / statusbar */
   height: 100vh;
 }
 
@@ -31,21 +31,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font: 13px
   flex-wrap: wrap;
 }
 
-#topbar .symbol-badge {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-#topbar .tf-badge {
-  font-size: 11px;
-  color: var(--muted);
-  background: var(--border);
-  padding: 2px 6px;
-  border-radius: var(--radius);
-}
-
-#topbar .sep { flex: 1; }
+#topbar .symbol-badge { font-size: 15px; font-weight: 600; color: var(--text); }
+#topbar .tf-badge     { font-size: 11px; color: var(--muted); background: var(--border); padding: 2px 6px; border-radius: var(--radius); }
+#topbar .sep          { flex: 1; }
 
 /* ── Charts area ─────────────────────────────────────────────── */
 #charts {
@@ -54,18 +42,23 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font: 13px
   overflow: hidden;
 }
 
+/* When RSI overlay is active, insert 100px row between price and equity */
+#charts.rsi-visible { grid-template-rows: 3fr 100px 1fr 1fr; }
+
 .chart-panel {
   position: relative;
   border-bottom: 1px solid var(--border);
   min-height: 0;
 }
-
 .chart-panel:last-child { border-bottom: none; }
+
+/* RSI panel is hidden by default; shown via JS + .rsi-visible class */
+.rsi-panel { display: none; }
+#charts.rsi-visible .rsi-panel { display: block; }
 
 .chart-label {
   position: absolute;
-  top: 6px;
-  left: 10px;
+  top: 6px; left: 10px;
   font-size: 11px;
   color: var(--muted);
   z-index: 10;
@@ -75,6 +68,74 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font: 13px
 }
 
 .chart-inner { width: 100%; height: 100%; }
+
+/* ── Replay bar ──────────────────────────────────────────────── */
+#replay-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+  min-height: 36px;
+}
+
+.replay-controls,
+.replay-speed,
+.replay-overlays {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.replay-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Play / Pause / Stop buttons */
+.replay-btn {
+  background: var(--border);
+  border: 1px solid transparent;
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 3px 9px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  transition: background 0.1s;
+}
+.replay-btn:hover:not(:disabled) { background: #3a3e49; }
+.replay-btn:disabled              { opacity: 0.35; cursor: not-allowed; }
+
+/* Seek / speed sliders */
+#replay-seekbar { width: 160px; cursor: pointer; accent-color: var(--accent); }
+#replay-speed-in { width: 70px; cursor: pointer; accent-color: var(--accent); }
+
+#replay-counter    { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 72px; }
+#replay-speed-lbl  { font-size: 11px; color: var(--muted); min-width: 38px; }
+
+/* Overlay toggle buttons */
+.overlay-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: var(--radius);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.overlay-btn:hover         { border-color: var(--accent); color: var(--text); }
+.overlay-btn.active        { background: var(--accent); border-color: var(--accent); color: #fff; }
+.overlay-btn[data-overlay="ema"].active  { background: #b8882b; border-color: #b8882b; }
+.overlay-btn[data-overlay="sma"].active  { background: #2e7d32; border-color: #2e7d32; }
+.overlay-btn[data-overlay="bb"].active   { background: #6a1b9a; border-color: #6a1b9a; }
+.overlay-btn[data-overlay="rsi"].active  { background: #ad1457; border-color: #ad1457; }
 
 /* ── Status bar ──────────────────────────────────────────────── */
 #statusbar {
@@ -90,17 +151,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font: 13px
   white-space: nowrap;
 }
 
-#statusbar .stat { display: flex; gap: 4px; }
-#statusbar .stat .val { color: var(--text); font-variant-numeric: tabular-nums; }
-#statusbar .stat .pos { color: var(--green); }
-#statusbar .stat .neg { color: var(--red); }
-#statusbar .ws-dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--muted);
-  display: inline-block;
-  margin-right: 4px;
-}
+#statusbar .stat          { display: flex; gap: 4px; }
+#statusbar .stat .val     { color: var(--text); font-variant-numeric: tabular-nums; }
+#statusbar .stat .pos     { color: var(--green); }
+#statusbar .stat .neg     { color: var(--red); }
+#statusbar .ws-dot        { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; margin-right: 4px; }
 #statusbar .ws-dot.connected { background: var(--green); }
-
-/* ── Trade markers (SVG injected by LW Charts) ───────────────── */
