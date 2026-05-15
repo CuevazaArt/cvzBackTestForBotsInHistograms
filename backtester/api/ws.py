@@ -38,12 +38,26 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
     _send("ready", {"version": "0.1.0"})
 
+    # Server-initiated heartbeat: emits {"type": "ping"} every 30s so clients
+    # can detect a half-open connection (no traffic, but socket still "open").
+    async def _heartbeat() -> None:
+        try:
+            while True:
+                await asyncio.sleep(30)
+                _send("ping", {"ts": int(asyncio.get_event_loop().time() * 1000)})
+        except asyncio.CancelledError:
+            raise
+
+    heartbeat_task = asyncio.create_task(_heartbeat())
+
     try:
         while True:
             msg = await websocket.receive_json()
             action = msg.get("action")
 
-            if action == "ping":
+            if action in ("ping", "pong"):
+                # Client liveness probe — reply with pong so the client can
+                # cancel its dead-connection timer.
                 _send("pong", {})
 
             elif action == "backtest":
@@ -200,4 +214,10 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         try:
             await websocket.close()
         except Exception:  # noqa: BLE001
+            pass
+    finally:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
