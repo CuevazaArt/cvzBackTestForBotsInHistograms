@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 import threading
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from backtester.api.deps import AppContext, get_ctx
+from backtester.api.security import audit_event
 from backtester.api.schemas import ExperimentsRequest, JobStatus
+from backtester.core.engine import BacktestConfig
 from backtester.experiments import Experiment, ExperimentRunner
 
 _LOG = logging.getLogger("backtester.api.experiments")
@@ -36,14 +39,49 @@ def start_experiments(
         raise HTTPException(400, "No experiment configs provided")
 
     job = ctx.jobs.create("experiment")
+    run_id = ctx.jobs.create_run(
+        "experiment",
+        {
+            "symbol": req.symbol.upper(),
+            "timeframe": req.timeframe,
+            "workers": req.workers,
+            "initial_cash": req.initial_cash,
+            "taker_fee_pct": req.taker_fee_pct,
+            "slippage_pct": req.slippage_pct,
+            "total": len(experiments),
+        },
+    )
     ctx.jobs.update(job.id, message=f"Running {len(experiments)} experiments")
+    ctx.jobs.update(job.id, run_id=run_id)
+    audit_event(
+        "experiments.started",
+        {
+            "job_id": job.id,
+            "run_id": run_id,
+            "symbol": req.symbol.upper(),
+            "timeframe": req.timeframe,
+            "workers": req.workers,
+            "total": len(experiments),
+        },
+    )
     total = len(experiments)
 
     def _run() -> None:
         ctx.jobs.update(job.id, status="running")
-        runner = ExperimentRunner(ctx.downloader, ctx.bot_registry, cache=ctx.indicator_cache)
+        runner = ExperimentRunner(
+            ctx.downloader,
+            ctx.bot_registry,
+            engine_config=BacktestConfig(
+                initial_cash=Decimal(str(req.initial_cash)),
+                taker_fee_pct=Decimal(str(req.taker_fee_pct)),
+                slippage_pct=Decimal(str(req.slippage_pct)),
+            ),
+            cache=ctx.indicator_cache,
+        )
 
         def _progress(done: int, total: int) -> None:
+            if ctx.jobs.is_cancel_requested(job.id):
+                raise RuntimeError("Job cancelled by user")
             ctx.jobs.update(
                 job.id,
                 progress=done / total if total else 1.0,
@@ -51,8 +89,19 @@ def start_experiments(
             )
 
         try:
+            if ctx.jobs.is_cancel_requested(job.id):
+                ctx.jobs.update(job.id, status="cancelled", message="Cancelled before start")
+                return
             results = runner.run_batch(experiments, workers=req.workers,
                                        progress_callback=_progress)
+            if ctx.jobs.is_cancel_requested(job.id):
+                ctx.jobs.update(
+                    job.id,
+                    status="cancelled",
+                    progress=1.0,
+                    message="Cancelled",
+                )
+                return
             serialized = [
                 {
                     "bot": r.experiment.bot_class,
@@ -70,8 +119,11 @@ def start_experiments(
                 result={"runs": serialized, "total": total, "cache_stats": cache_stats},
             )
         except Exception as exc:  # noqa: BLE001
-            _LOG.exception("Experiment job failed")
-            ctx.jobs.update(job.id, status="error", message=str(exc))
+            if "cancelled" in str(exc).lower():
+                ctx.jobs.update(job.id, status="cancelled", message="Cancelled")
+            else:
+                _LOG.exception("Experiment job failed")
+                ctx.jobs.update(job.id, status="error", message=str(exc))
 
     threading.Thread(target=_run, daemon=True).start()
     return JobStatus(**ctx.jobs.get(job.id).to_dict())

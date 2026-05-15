@@ -1,47 +1,25 @@
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:backtester_shell/services/api_service.dart';
-
-/// Persistent settings stored as JSON on disk.
-class _AppSettings {
-  String backendUrl;
-  double defaultCash;
-  double defaultFeePct;
-  double defaultSlippagePct;
-
-  _AppSettings({
-    this.backendUrl = 'http://127.0.0.1:8002',
-    this.defaultCash = 10000.0,
-    this.defaultFeePct = 0.1,
-    this.defaultSlippagePct = 0.05,
-  });
-
-  factory _AppSettings.fromJson(Map<String, dynamic> j) => _AppSettings(
-        backendUrl: j['backendUrl'] as String? ?? 'http://127.0.0.1:8002',
-        defaultCash: (j['defaultCash'] as num?)?.toDouble() ?? 10000.0,
-        defaultFeePct: (j['defaultFeePct'] as num?)?.toDouble() ?? 0.1,
-        defaultSlippagePct: (j['defaultSlippagePct'] as num?)?.toDouble() ?? 0.05,
-      );
-
-  Map<String, dynamic> toJson() => {
-        'backendUrl': backendUrl,
-        'defaultCash': defaultCash,
-        'defaultFeePct': defaultFeePct,
-        'defaultSlippagePct': defaultSlippagePct,
-      };
-}
+import 'package:backtester_shell/services/app_settings_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final ApiService apiService;
-  const SettingsScreen({super.key, required this.apiService});
+  final AppSettings initialSettings;
+  final ValueChanged<AppSettings>? onSaved;
+  const SettingsScreen({
+    super.key,
+    required this.apiService,
+    required this.initialSettings,
+    this.onSaved,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late _AppSettings _settings;
+  late AppSettings _settings;
+  final AppSettingsService _settingsService = AppSettingsService();
   bool _credsExist = false;
   bool _loading = true;
   String? _savedMsg;
@@ -63,7 +41,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadAll() async {
-    final settings = _loadFromDisk();
+    final settings = AppSettings.fromJson(widget.initialSettings.toJson());
     bool credsExist = false;
     try {
       credsExist = await widget.apiService.credentialsExist();
@@ -77,23 +55,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  static final _settingsFile = File('${Directory.current.path}/settings.json');
-
-  _AppSettings _loadFromDisk() {
-    try {
-      if (_settingsFile.existsSync()) {
-        final j = jsonDecode(_settingsFile.readAsStringSync());
-        return _AppSettings.fromJson(j as Map<String, dynamic>);
-      }
-    } catch (_) {}
-    return _AppSettings();
-  }
-
   void _saveToDisk() {
     try {
-      _settingsFile.writeAsStringSync(
-        const JsonEncoder.withIndent('  ').convert(_settings.toJson()),
-      );
+      _settingsService.save(_settings);
+      widget.onSaved?.call(AppSettings.fromJson(_settings.toJson()));
       setState(() => _savedMsg = 'Settings saved ✓');
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) setState(() => _savedMsg = null);
@@ -202,6 +167,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: _settings.backendUrl,
                     hint: 'http://127.0.0.1:8002',
                     onChanged: (v) => _settings.backendUrl = v,
+                  ),
+                  const SizedBox(height: 12),
+                  _SettingsField(
+                    label: 'API Token (optional)',
+                    value: _settings.apiToken,
+                    hint: 'Matches BACKTESTER_API_TOKEN',
+                    obscure: true,
+                    onChanged: (v) => _settings.apiToken = v,
                   ),
                 ],
               ),

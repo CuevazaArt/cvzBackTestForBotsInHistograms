@@ -17,12 +17,20 @@ import 'package:backtester_shell/widgets/validation_error_dialog.dart';
 class BacktestScreen extends StatefulWidget {
   final ApiService apiService;
   final WsService wsService;
+  final String chartUrl;
+  final double defaultCash;
+  final double defaultFeePct;
+  final double defaultSlippagePct;
   final OptimizationResult? initialApply;
   final VoidCallback? onApplyConsumed;
   const BacktestScreen({
     super.key,
     required this.apiService,
     required this.wsService,
+    required this.chartUrl,
+    required this.defaultCash,
+    required this.defaultFeePct,
+    required this.defaultSlippagePct,
     this.initialApply,
     this.onApplyConsumed,
   });
@@ -43,8 +51,12 @@ class _BacktestScreenState extends State<BacktestScreen> {
   String _selectedTimeframe = '1h';
   List<String> _selectedBots = [];
   double _initialCash = 10000.0;
+  double _takerFeePct = 0.1;
+  double _slippagePct = 0.05;
   String _selectedFormula = 'ohlc';
   double _brickSize = 10.0;
+  String? _startDateIso;
+  String? _endDateIso;
   Map<String, Map<String, dynamic>> _botsParams = {};
 
   List<Map<String, dynamic>> _selectedIndicators = [
@@ -57,6 +69,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
   Map<String, dynamic>? _lastResult;
   Map<String, dynamic>? _perBotResult;
   String? _wsError;
+  String? _catalogError;
   final List<TradeRow> _trades = [];
 
   StreamSubscription<WsEvent>? _wsSub;
@@ -64,6 +77,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
   @override
   void initState() {
     super.initState();
+    _initialCash = widget.defaultCash;
+    _takerFeePct = widget.defaultFeePct;
+    _slippagePct = widget.defaultSlippagePct;
     _loadCatalog();
     _wsSub = _ws.events.listen(_onWsEvent);
     if (widget.initialApply != null) {
@@ -74,6 +90,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
   @override
   void didUpdateWidget(BacktestScreen old) {
     super.didUpdateWidget(old);
+    if (old.defaultCash != widget.defaultCash) _initialCash = widget.defaultCash;
+    if (old.defaultFeePct != widget.defaultFeePct) _takerFeePct = widget.defaultFeePct;
+    if (old.defaultSlippagePct != widget.defaultSlippagePct) _slippagePct = widget.defaultSlippagePct;
     if (widget.initialApply != null && widget.initialApply != old.initialApply) {
       _consumeInitialApply(widget.initialApply!);
     }
@@ -110,9 +129,17 @@ class _BacktestScreenState extends State<BacktestScreen> {
         setState(() {
           _symbols = syms;
           _bots = bots;
+          _catalogError = null;
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _catalogError = 'Cannot load symbols/bots. Check backend URL and token in Settings.';
+        });
+      }
+      debugPrint('BacktestScreen _loadCatalog error: $e');
+    }
   }
 
   Future<void> _fetchBotParams(String botName) async {
@@ -236,9 +263,23 @@ class _BacktestScreenState extends State<BacktestScreen> {
       bots: bots,
       symbol: _selectedSymbol!,
       timeframe: _selectedTimeframe,
+      startMs: _parseDateToMs(_startDateIso),
+      endMs: _parseDateToMs(_endDateIso, endOfDay: true),
       initialCash: _initialCash,
+      takerFeePct: _takerFeePct,
+      slippagePct: _slippagePct,
       indicators: _selectedIndicators,
     );
+  }
+
+  int? _parseDateToMs(String? isoDate, {bool endOfDay = false}) {
+    if (isoDate == null || isoDate.trim().isEmpty) return null;
+    final dt = DateTime.tryParse(isoDate.trim());
+    if (dt == null) return null;
+    final normalized = endOfDay
+        ? DateTime(dt.year, dt.month, dt.day, 23, 59, 59, 999)
+        : DateTime(dt.year, dt.month, dt.day);
+    return normalized.millisecondsSinceEpoch;
   }
 
   // ── Exports ────────────────────────────────────────────────────
@@ -275,6 +316,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
       'symbol': _selectedSymbol,
       'timeframe': _selectedTimeframe,
       'initial_cash': _initialCash,
+      'taker_fee_pct': _takerFeePct,
+      'slippage_pct': _slippagePct,
+      if (_startDateIso != null) 'start_date': _startDateIso,
+      if (_endDateIso != null) 'end_date': _endDateIso,
       'bots': _selectedBots.map((b) => {'name': b, 'params': _botsParams[b] ?? {}}).toList(),
       'indicators': _selectedIndicators,
     };
@@ -432,6 +477,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
           selectedFormula: _selectedFormula,
           selectedBots: _selectedBots,
           initialCash: _initialCash,
+          takerFeePct: _takerFeePct,
+          slippagePct: _slippagePct,
+          startDateIso: _startDateIso,
+          endDateIso: _endDateIso,
           selectedIndicators: _selectedIndicators,
           running: _running,
           progress: _progress,
@@ -457,6 +506,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
             }
           },
           onCashChanged: (v) => setState(() => _initialCash = v),
+          onFeeChanged: (v) => setState(() => _takerFeePct = v),
+          onSlippageChanged: (v) => setState(() => _slippagePct = v),
+          onStartDateChanged: (v) => setState(() => _startDateIso = v),
+          onEndDateChanged: (v) => setState(() => _endDateIso = v),
           onIndicatorsChanged: (v) => setState(() => _selectedIndicators = v),
           botParamSpecs: _botParamSpecs,
           botsParamValues: _botsParams,
@@ -496,7 +549,25 @@ class _BacktestScreenState extends State<BacktestScreen> {
               ],
             ),
           ),
-        Expanded(flex: 3, child: ChartWebView(controller: _chartCtrl)),
+        if (_catalogError != null)
+          Container(
+            color: const Color(0xFFef5350).withValues(alpha: 0.10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFef5350)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _catalogError!,
+                    style: const TextStyle(color: Color(0xFFef5350), fontSize: 12),
+                  ),
+                ),
+                TextButton(onPressed: _loadCatalog, child: const Text('Retry')),
+              ],
+            ),
+          ),
+        Expanded(flex: 3, child: ChartWebView(controller: _chartCtrl, chartUrl: widget.chartUrl)),
         const Divider(height: 1),
         if (_lastResult != null || _trades.isNotEmpty)
           SizedBox(
@@ -542,6 +613,10 @@ class _TopBar extends StatelessWidget {
   final String selectedFormula;
   final List<String> selectedBots;
   final double initialCash;
+  final double takerFeePct;
+  final double slippagePct;
+  final String? startDateIso;
+  final String? endDateIso;
   final List<Map<String, dynamic>> selectedIndicators;
   final bool running;
   final double progress;
@@ -554,6 +629,10 @@ class _TopBar extends StatelessWidget {
   final ValueChanged<double> onBrickSizeChanged;
   final ValueChanged<List<String>> onBotsChanged;
   final ValueChanged<double> onCashChanged;
+  final ValueChanged<double> onFeeChanged;
+  final ValueChanged<double> onSlippageChanged;
+  final ValueChanged<String?> onStartDateChanged;
+  final ValueChanged<String?> onEndDateChanged;
   final ValueChanged<List<Map<String, dynamic>>> onIndicatorsChanged;
   final Map<String, BotParamsResponse> botParamSpecs;
   final Map<String, Map<String, dynamic>> botsParamValues;
@@ -573,6 +652,10 @@ class _TopBar extends StatelessWidget {
     required this.selectedFormula,
     required this.selectedBots,
     required this.initialCash,
+    required this.takerFeePct,
+    required this.slippagePct,
+    required this.startDateIso,
+    required this.endDateIso,
     required this.selectedIndicators,
     required this.running,
     required this.progress,
@@ -585,6 +668,10 @@ class _TopBar extends StatelessWidget {
     required this.onBrickSizeChanged,
     required this.onBotsChanged,
     required this.onCashChanged,
+    required this.onFeeChanged,
+    required this.onSlippageChanged,
+    required this.onStartDateChanged,
+    required this.onEndDateChanged,
     required this.onIndicatorsChanged,
     required this.botParamSpecs,
     required this.botsParamValues,
@@ -655,6 +742,36 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 96,
+            child: TextFormField(
+              initialValue: startDateIso ?? '',
+              decoration: const InputDecoration(
+                labelText: 'Start',
+                hintText: 'YYYY-MM-DD',
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              ),
+              style: const TextStyle(fontSize: 11, color: Color(0xFFD9D9D9)),
+              onChanged: (v) => onStartDateChanged(v.trim().isEmpty ? null : v.trim()),
+            ),
+          ),
+          const SizedBox(width: 6),
+          SizedBox(
+            width: 96,
+            child: TextFormField(
+              initialValue: endDateIso ?? '',
+              decoration: const InputDecoration(
+                labelText: 'End',
+                hintText: 'YYYY-MM-DD',
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              ),
+              style: const TextStyle(fontSize: 11, color: Color(0xFFD9D9D9)),
+              onChanged: (v) => onEndDateChanged(v.trim().isEmpty ? null : v.trim()),
+            ),
+          ),
           const SizedBox(width: 8),
           TextButton.icon(
             onPressed: () => _showBotsDialog(context),
@@ -782,6 +899,34 @@ class _TopBar extends StatelessWidget {
                             ],
                           );
                         }),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                initialValue: takerFeePct.toString(),
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: const InputDecoration(labelText: 'Taker Fee %'),
+                                onChanged: (v) {
+                                  final n = double.tryParse(v);
+                                  if (n != null) onFeeChanged(n);
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: TextFormField(
+                                initialValue: slippagePct.toString(),
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: const InputDecoration(labelText: 'Slippage %'),
+                                onChanged: (v) {
+                                  final n = double.tryParse(v);
+                                  if (n != null) onSlippageChanged(n);
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),

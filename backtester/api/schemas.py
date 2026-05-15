@@ -70,10 +70,16 @@ class DownloadZipRequest(BaseModel):
 class JobStatus(BaseModel):
     id: str
     kind: str          # "download" | "experiment"
-    status: str        # "pending" | "running" | "done" | "error"
+    status: str        # "pending" | "running" | "done" | "error" | "cancelled"
     progress: float = 0.0
     message: Optional[str] = None
     result: Optional[dict[str, Any]] = None
+    cancel_requested: bool = False
+    run_id: Optional[str] = None
+    created_at: str = ""
+    updated_at: str = ""
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
 
 
 # ───────────────────────── Backtest ─────────────────────────
@@ -215,12 +221,29 @@ class ExperimentsRequest(BaseModel):
     timeframe: str
     bots: list[ExperimentSpec]
     workers: int = 4
+    initial_cash: float = 10000.0
+    taker_fee_pct: float = 0.1
+    slippage_pct: float = 0.05
 
     @field_validator("workers")
     @classmethod
     def _workers_range(cls, v: int) -> int:
         if v < 1 or v > 32:
             raise ValueError("workers must be between 1 and 32")
+        return v
+
+    @field_validator("initial_cash")
+    @classmethod
+    def _experiments_cash_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("initial_cash must be > 0")
+        return v
+
+    @field_validator("taker_fee_pct", "slippage_pct")
+    @classmethod
+    def _experiments_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("must be >= 0")
         return v
 
     @model_validator(mode="after")
@@ -263,6 +286,9 @@ class OptimizeRequest(BaseModel):
     taker_fee_pct: float = 0.1
     slippage_pct: float = 0.05
     workers: int = 1                          # Optuna is single-threaded by default
+    validation_split_pct: float = 0.2
+    min_trades: int = 0
+    max_drawdown_pct_limit: Optional[float] = None
 
     @field_validator("trials")
     @classmethod
@@ -278,6 +304,20 @@ class OptimizeRequest(BaseModel):
                  "max_drawdown_pct", "trades"}
         if v not in valid:
             raise ValueError(f"objective must be one of {valid}")
+        return v
+
+    @field_validator("validation_split_pct")
+    @classmethod
+    def _validation_split_range(cls, v: float) -> float:
+        if v < 0 or v >= 0.9:
+            raise ValueError("validation_split_pct must be in [0, 0.9)")
+        return v
+
+    @field_validator("min_trades")
+    @classmethod
+    def _min_trades_non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("min_trades must be >= 0")
         return v
 
 

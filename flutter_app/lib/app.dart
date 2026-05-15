@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:backtester_shell/screens/home_screen.dart';
-import 'package:backtester_shell/services/api_service.dart';
 
 class BacktesterApp extends StatelessWidget {
   const BacktesterApp({super.key});
@@ -33,7 +32,7 @@ class BacktesterApp extends StatelessWidget {
         dividerColor: const Color(0xFF2B2B43),
         cardColor: const Color(0xFF1E222D),
       ),
-      home: HomeScreen(apiService: ApiService()),
+      home: const HomeScreen(),
     );
   }
 }

@@ -5,13 +5,13 @@ import 'package:backtester_shell/screens/analysis_screen.dart';
 import 'package:backtester_shell/screens/backtest_screen.dart';
 import 'package:backtester_shell/screens/optimization_screen.dart';
 import 'package:backtester_shell/screens/settings_screen.dart';
+import 'package:backtester_shell/services/app_settings_service.dart';
 import 'package:backtester_shell/services/ws_service.dart';
 import 'package:backtester_shell/widgets/status_dot.dart';
 
 /// Main scaffold — sidebar nav + content area.
 class HomeScreen extends StatefulWidget {
-  final ApiService apiService;
-  const HomeScreen({super.key, required this.apiService});
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -29,30 +29,63 @@ class _HomeScreenState extends State<HomeScreen> {
   // GlobalKey lets us trigger Data Manager from elsewhere if needed.
   final GlobalKey<State<BacktestScreen>> _backtestKey = GlobalKey();
 
-  late final WsService _wsService;
+  final AppSettingsService _settingsService = AppSettingsService();
+  late AppSettings _settings;
+  late ApiService _apiService;
+  WsService? _wsService;
+  String _chartUrl = 'http://127.0.0.1:8002/static/index.html';
   Timer? _healthTimer;
 
   @override
   void initState() {
     super.initState();
-    _wsService = WsService();
-    _wsService.connect();
+    _settings = _settingsService.load();
+    _initRuntimeServices();
     _pollHealth();
   }
 
   @override
   void dispose() {
     _healthTimer?.cancel();
-    _wsService.disconnect();
+    _wsService?.disconnect();
     super.dispose();
+  }
+
+  void _initRuntimeServices() {
+    _apiService = ApiService(
+      baseUrl: _settings.backendUrl,
+      apiToken: _settings.apiToken,
+    );
+    final wsUrl = _toWsUrl(_settings.backendUrl);
+    _chartUrl = '${_settings.backendUrl}/static/index.html';
+    _wsService?.disconnect();
+    _wsService = WsService(
+      wsUrl: wsUrl,
+      apiToken: _settings.apiToken,
+    );
+    _wsService!.connect();
+  }
+
+  String _toWsUrl(String backendUrl) {
+    final uri = Uri.parse(backendUrl);
+    final scheme = uri.scheme == 'https' ? 'wss' : 'ws';
+    return uri.replace(
+      scheme: scheme,
+      path: '/ws',
+      query: '',
+      fragment: '',
+    ).toString();
   }
 
   Future<void> _pollHealth() async {
     if (!mounted) return;
-    final h = await widget.apiService.checkHealth();
+    final h = await _apiService.checkHealth();
     if (!mounted) return;
-    setState(() { _backendOnline = h.ok; _checking = false; });
-    _healthTimer = Timer(const Duration(seconds: 5), () { _pollHealth(); });
+    setState(() {
+      _backendOnline = h.ok;
+      _checking = false;
+    });
+    _healthTimer = Timer(const Duration(seconds: 5), _pollHealth);
   }
 
   void _onApplyBest(OptimizationResult result) {
@@ -62,8 +95,17 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _onSettingsSaved(AppSettings settings) {
+    setState(() {
+      _settings = settings;
+      _checking = true;
+    });
+    _initRuntimeServices();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final ws = _wsService!;
     return Scaffold(
       body: Row(
         children: [
@@ -78,18 +120,29 @@ class _HomeScreenState extends State<HomeScreen> {
             child: switch (_selectedIndex) {
               0 => BacktestScreen(
                   key: _backtestKey,
-                  apiService: widget.apiService,
-                  wsService: _wsService,
+                  apiService: _apiService,
+                  wsService: ws,
+                  chartUrl: _chartUrl,
+                  defaultCash: _settings.defaultCash,
+                  defaultFeePct: _settings.defaultFeePct,
+                  defaultSlippagePct: _settings.defaultSlippagePct,
                   initialApply: _pendingApply,
                   onApplyConsumed: () => setState(() => _pendingApply = null),
                 ),
               1 => OptimizationScreen(
-                  apiService: widget.apiService,
-                  wsService: _wsService,
+                  apiService: _apiService,
+                  wsService: ws,
+                  defaultCash: _settings.defaultCash,
+                  defaultFeePct: _settings.defaultFeePct,
+                  defaultSlippagePct: _settings.defaultSlippagePct,
                   onApplyBest: _onApplyBest,
                 ),
-              2 => AnalysisScreen(apiService: widget.apiService),
-              _ => SettingsScreen(apiService: widget.apiService),
+              2 => AnalysisScreen(apiService: _apiService),
+              _ => SettingsScreen(
+                  apiService: _apiService,
+                  initialSettings: _settings,
+                  onSaved: _onSettingsSaved,
+                ),
             },
           ),
         ],

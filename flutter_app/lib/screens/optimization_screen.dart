@@ -24,8 +24,19 @@ class OptimizationResult {
 class OptimizationScreen extends StatefulWidget {
   final ApiService apiService;
   final WsService wsService;
+  final double defaultCash;
+  final double defaultFeePct;
+  final double defaultSlippagePct;
   final ValueChanged<OptimizationResult>? onApplyBest;
-  const OptimizationScreen({super.key, required this.apiService, required this.wsService, this.onApplyBest});
+  const OptimizationScreen({
+    super.key,
+    required this.apiService,
+    required this.wsService,
+    required this.defaultCash,
+    required this.defaultFeePct,
+    required this.defaultSlippagePct,
+    this.onApplyBest,
+  });
 
   @override
   State<OptimizationScreen> createState() => _OptimizationScreenState();
@@ -47,6 +58,7 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   double _progress = 0;
   String? _jobMessage;
   Timer? _poll;
+  String? _activeJobId;
 
   // Latest sweep output (sorted by total_return_pct desc).
   List<_TrialRow> _trials = [];
@@ -57,6 +69,12 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   String _mode = 'grid';          // 'grid' | 'tpe' | 'cmaes' | 'random'
   int _optunaTrials = 100;
   String _objective = 'total_return_pct';
+  late double _initialCash;
+  late double _takerFeePct;
+  late double _slippagePct;
+  double _validationSplitPct = 0.2;
+  int _minTrades = 0;
+  double? _maxDrawdownPctLimit;
 
   // ── Heatmap ───────────────────────────────────────────────────
   String? _heatParamX;
@@ -71,6 +89,9 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
   @override
   void initState() {
     super.initState();
+    _initialCash = widget.defaultCash;
+    _takerFeePct = widget.defaultFeePct;
+    _slippagePct = widget.defaultSlippagePct;
     _wsSub = _ws.events.listen(_onWsEvent);
     _loadCatalog();
   }
@@ -94,7 +115,7 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         );
         _autoPickHeatParams([newRow]);
         setState(() {
-          _progress = (ev.data['trial'] as int) / _optunaTrials * 100;
+          _progress = (ev.data['trial'] as int) / _optunaTrials;
           _info = 'Completed trial ${ev.data['trial']} / $_optunaTrials';
           _trials.add(newRow);
           _trials.sort((a, b) => b.returnPct.compareTo(a.returnPct));
@@ -103,13 +124,15 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         if (!mounted) return;
         setState(() {
           _running = false;
-          _progress = 100;
+          _activeJobId = null;
+          _progress = 1;
           _info = 'Optimization completed.';
         });
       case WsEventType.error:
         if (!mounted) return;
         setState(() {
           _running = false;
+          _activeJobId = null;
           _error = ev.data['message'] as String? ?? 'Optimization error';
         });
       case WsEventType.reconnecting:
@@ -227,6 +250,7 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
       _progress = 0;
       _trials = [];
       _jobMessage = null;
+      _activeJobId = null;
       _heatParamX = null;
       _heatParamY = null;
       _heatHighlightIndex = null;
@@ -240,7 +264,11 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
           {'name': _selectedBot, 'configs': grid.combos},
         ],
         workers: _maxWorkers,
+        initialCash: _initialCash,
+        takerFeePct: _takerFeePct,
+        slippagePct: _slippagePct,
       );
+      setState(() => _activeJobId = jobId);
       _startPolling(jobId);
     } on ApiValidationError catch (e) {
       setState(() { _running = false; });
@@ -282,6 +310,7 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
       _progress = 0;
       _trials = [];
       _jobMessage = null;
+      _activeJobId = null;
       _heatParamX = null;
       _heatParamY = null;
       _heatHighlightIndex = null;
@@ -297,6 +326,12 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         objective: _objective,
         trials: _optunaTrials,
         sampler: _mode == 'cmaes' ? 'cma' : _mode,
+        initialCash: _initialCash,
+        takerFeePct: _takerFeePct,
+        slippagePct: _slippagePct,
+        validationSplitPct: _validationSplitPct,
+        minTrades: _minTrades,
+        maxDrawdownPctLimit: _maxDrawdownPctLimit,
       );
     } on ApiValidationError catch (e) {
       setState(() { _running = false; });
@@ -323,12 +358,16 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
         });
         if (st.status == 'done') {
           timer.cancel();
+          setState(() => _activeJobId = null);
           _onJobDone(st);
-        } else if (st.status == 'error') {
+        } else if (st.status == 'error' || st.status == 'cancelled') {
           timer.cancel();
           setState(() {
             _running = false;
-            _error = st.message ?? 'Optimization failed';
+            _activeJobId = null;
+            _error = st.status == 'cancelled'
+                ? (st.message ?? 'Optimization cancelled')
+                : (st.message ?? 'Optimization failed');
           });
         }
       } catch (e) {
@@ -535,6 +574,16 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
     ));
   }
 
+  Future<void> _cancelRunning() async {
+    if (_activeJobId == null) return;
+    try {
+      await widget.apiService.cancelJob(_activeJobId!);
+      setState(() => _info = 'Cancellation requested...');
+    } catch (e) {
+      setState(() => _error = 'Failed to cancel: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -551,9 +600,21 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
           mode: _mode,
           optunaTrials: _optunaTrials,
           objective: _objective,
+          initialCash: _initialCash,
+          takerFeePct: _takerFeePct,
+          slippagePct: _slippagePct,
+          validationSplitPct: _validationSplitPct,
+          minTrades: _minTrades,
+          maxDrawdownPctLimit: _maxDrawdownPctLimit,
           onModeChanged: (v) => setState(() => _mode = v),
           onTrialsChanged: (v) => setState(() => _optunaTrials = v),
           onObjectiveChanged: (v) => setState(() => _objective = v),
+          onInitialCashChanged: (v) => setState(() => _initialCash = v),
+          onFeeChanged: (v) => setState(() => _takerFeePct = v),
+          onSlippageChanged: (v) => setState(() => _slippagePct = v),
+          onValidationSplitChanged: (v) => setState(() => _validationSplitPct = v),
+          onMinTradesChanged: (v) => setState(() => _minTrades = v),
+          onMaxDrawdownChanged: (v) => setState(() => _maxDrawdownPctLimit = v),
           onWorkersChanged: (v) => setState(() => _maxWorkers = v),
           onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
           onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
@@ -566,6 +627,7 @@ class _OptimizationScreenState extends State<OptimizationScreen> {
             if (v != null) _loadBotParams(v);
           },
           onRun: _runOptimization,
+          onCancel: _cancelRunning,
         ),
         if (_error != null)
           Container(
@@ -866,14 +928,27 @@ class _OptTopBar extends StatelessWidget {
   final String mode;
   final int optunaTrials;
   final String objective;
+  final double initialCash;
+  final double takerFeePct;
+  final double slippagePct;
+  final double validationSplitPct;
+  final int minTrades;
+  final double? maxDrawdownPctLimit;
   final ValueChanged<String> onModeChanged;
   final ValueChanged<int> onTrialsChanged;
   final ValueChanged<String> onObjectiveChanged;
+  final ValueChanged<double> onInitialCashChanged;
+  final ValueChanged<double> onFeeChanged;
+  final ValueChanged<double> onSlippageChanged;
+  final ValueChanged<double> onValidationSplitChanged;
+  final ValueChanged<int> onMinTradesChanged;
+  final ValueChanged<double?> onMaxDrawdownChanged;
   final ValueChanged<int> onWorkersChanged;
   final ValueChanged<String?> onSymbolChanged;
   final ValueChanged<String> onTimeframeChanged;
   final ValueChanged<String?> onBotChanged;
   final VoidCallback onRun;
+  final VoidCallback onCancel;
 
   const _OptTopBar({
     required this.symbols,
@@ -887,14 +962,27 @@ class _OptTopBar extends StatelessWidget {
     required this.mode,
     required this.optunaTrials,
     required this.objective,
+    required this.initialCash,
+    required this.takerFeePct,
+    required this.slippagePct,
+    required this.validationSplitPct,
+    required this.minTrades,
+    required this.maxDrawdownPctLimit,
     required this.onModeChanged,
     required this.onTrialsChanged,
     required this.onObjectiveChanged,
+    required this.onInitialCashChanged,
+    required this.onFeeChanged,
+    required this.onSlippageChanged,
+    required this.onValidationSplitChanged,
+    required this.onMinTradesChanged,
+    required this.onMaxDrawdownChanged,
     required this.onWorkersChanged,
     required this.onSymbolChanged,
     required this.onTimeframeChanged,
     required this.onBotChanged,
     required this.onRun,
+    required this.onCancel,
   });
 
   static const _timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
@@ -1025,6 +1113,96 @@ class _OptTopBar extends StatelessWidget {
               textStyle: const TextStyle(fontSize: 13),
             ),
           ),
+          if (running)
+            OutlinedButton.icon(
+              onPressed: onCancel,
+              icon: const Icon(Icons.stop_circle_outlined, size: 14),
+              label: const Text('Cancel'),
+            ),
+          SizedBox(
+            width: 64,
+            child: TextFormField(
+              initialValue: initialCash.toStringAsFixed(0),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11),
+              decoration: const InputDecoration(labelText: 'Cash', isDense: true),
+              onChanged: (v) {
+                final n = double.tryParse(v);
+                if (n != null && n > 0) onInitialCashChanged(n);
+              },
+            ),
+          ),
+          SizedBox(
+            width: 56,
+            child: TextFormField(
+              initialValue: takerFeePct.toString(),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11),
+              decoration: const InputDecoration(labelText: 'Fee%', isDense: true),
+              onChanged: (v) {
+                final n = double.tryParse(v);
+                if (n != null) onFeeChanged(n);
+              },
+            ),
+          ),
+          SizedBox(
+            width: 56,
+            child: TextFormField(
+              initialValue: slippagePct.toString(),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11),
+              decoration: const InputDecoration(labelText: 'Slip%', isDense: true),
+              onChanged: (v) {
+                final n = double.tryParse(v);
+                if (n != null) onSlippageChanged(n);
+              },
+            ),
+          ),
+          if (isOptuna) ...[
+            SizedBox(
+              width: 60,
+              child: TextFormField(
+                initialValue: validationSplitPct.toString(),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11),
+                decoration: const InputDecoration(labelText: 'Val%', isDense: true),
+                onChanged: (v) {
+                  final n = double.tryParse(v);
+                  if (n != null && n >= 0 && n < 0.9) onValidationSplitChanged(n);
+                },
+              ),
+            ),
+            SizedBox(
+              width: 70,
+              child: TextFormField(
+                initialValue: '$minTrades',
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11),
+                decoration: const InputDecoration(labelText: 'MinTrades', isDense: true),
+                onChanged: (v) {
+                  final n = int.tryParse(v);
+                  if (n != null && n >= 0) onMinTradesChanged(n);
+                },
+              ),
+            ),
+            SizedBox(
+              width: 74,
+              child: TextFormField(
+                initialValue: maxDrawdownPctLimit?.toString() ?? '',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11),
+                decoration: const InputDecoration(labelText: 'MaxDD%', isDense: true),
+                onChanged: (v) {
+                  if (v.trim().isEmpty) {
+                    onMaxDrawdownChanged(null);
+                    return;
+                  }
+                  final n = double.tryParse(v);
+                  if (n != null) onMaxDrawdownChanged(n);
+                },
+              ),
+            ),
+          ],
         ],
       ),
     );

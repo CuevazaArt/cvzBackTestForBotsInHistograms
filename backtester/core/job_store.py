@@ -41,6 +41,8 @@ class Job:
     result: Optional[dict[str, Any]] = None
     created_at: float = 0.0
     updated_at: float = 0.0
+    cancel_requested: bool = False
+    run_id: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +52,8 @@ class Job:
             "progress": self.progress,
             "message": self.message,
             "result": self.result,
+            "cancel_requested": self.cancel_requested,
+            "run_id": self.run_id,
         }
 
 
@@ -74,6 +78,28 @@ class JobStore:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            self._ensure_extended_schema()
+
+    def _ensure_extended_schema(self) -> None:
+        """Add cancel/run_id columns and job_events for API tracing (idempotent)."""
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "cancel_requested" not in cols:
+            self._conn.execute(
+                "ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
+            )
+        if "run_id" not in cols:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN run_id TEXT")
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS job_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload_json TEXT,
+                created_at REAL NOT NULL
+            )
+            """
+        )
 
     # ── core CRUD ────────────────────────────────────────────────
 
@@ -98,7 +124,7 @@ class JobStore:
     def update(self, job_id: str, **kwargs: Any) -> None:
         if not kwargs:
             return
-        allowed = {"status", "progress", "message", "result"}
+        allowed = {"status", "progress", "message", "result", "run_id"}
         fields: list[str] = []
         values: list[Any] = []
         for k, v in kwargs.items():
@@ -107,6 +133,9 @@ class JobStore:
             if k == "result":
                 fields.append("result_json = ?")
                 values.append(json.dumps(v) if v is not None else None)
+            elif k == "run_id":
+                fields.append("run_id = ?")
+                values.append(v)
             else:
                 fields.append(f"{k} = ?")
                 values.append(v)
@@ -156,7 +185,7 @@ class JobStore:
         cutoff = time.time() - seconds
         with self._lock:
             cur = self._conn.execute(
-                "DELETE FROM jobs WHERE updated_at < ? AND status IN ('done', 'error')",
+                "DELETE FROM jobs WHERE updated_at < ? AND status IN ('done', 'error', 'cancelled')",
                 (cutoff,),
             )
             return cur.rowcount
@@ -164,6 +193,35 @@ class JobStore:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    def create_run(self, kind: str, config: dict[str, Any]) -> str:
+        run_id = str(uuid.uuid4())
+        now = time.time()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO job_events (job_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (run_id, "run_created", json.dumps({"kind": kind, "config": config}), now),
+            )
+        return run_id
+
+    def request_cancel(self, job_id: str) -> bool:
+        now = time.time()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE jobs SET cancel_requested = 1, updated_at = ? "
+                "WHERE id = ? AND status IN ('pending', 'running')",
+                (now, job_id),
+            )
+            return cur.rowcount > 0
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT cancel_requested FROM jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            return bool(row and row[0])
 
     # ── internals ────────────────────────────────────────────────
 
@@ -178,6 +236,9 @@ class JobStore:
     @staticmethod
     def _row_to_job(row: sqlite3.Row) -> Job:
         result_json = row["result_json"]
+        keys = row.keys()
+        cancel = bool(row["cancel_requested"]) if "cancel_requested" in keys else False
+        run_id = row["run_id"] if "run_id" in keys else None
         return Job(
             id=row["id"],
             kind=row["kind"],
@@ -187,4 +248,6 @@ class JobStore:
             result=json.loads(result_json) if result_json else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            cancel_requested=cancel,
+            run_id=run_id,
         )

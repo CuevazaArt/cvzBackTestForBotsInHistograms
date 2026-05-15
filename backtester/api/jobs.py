@@ -45,6 +45,15 @@ class JobRegistry:
     def cleanup_older_than(self, seconds: float) -> int:
         return self._store.cleanup_older_than(seconds)
 
+    def create_run(self, kind: str, config: dict[str, Any]) -> str:
+        return self._store.create_run(kind, config)
+
+    def request_cancel(self, job_id: str) -> bool:
+        return self._store.request_cancel(job_id)
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        return self._store.is_cancel_requested(job_id)
+
 
 class _InMemoryJobStore:
     """Lightweight in-memory fallback (no SQLite) for unit tests."""
@@ -53,12 +62,20 @@ class _InMemoryJobStore:
         import threading
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self._run_events: list[tuple[str, str, str, float]] = []
 
     def create(self, kind: str) -> Job:
         import time
         import uuid
         now = time.time()
-        job = Job(id=str(uuid.uuid4()), kind=kind, created_at=now, updated_at=now)
+        job = Job(
+            id=str(uuid.uuid4()),
+            kind=kind,
+            created_at=now,
+            updated_at=now,
+            cancel_requested=False,
+            run_id=None,
+        )
         with self._lock:
             self._jobs[job.id] = job
         return job
@@ -69,7 +86,7 @@ class _InMemoryJobStore:
 
     def update(self, job_id: str, **kwargs: Any) -> None:
         import time
-        allowed = {"status", "progress", "message", "result"}
+        allowed = {"status", "progress", "message", "result", "run_id"}
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
@@ -108,8 +125,35 @@ class _InMemoryJobStore:
         with self._lock:
             stale = [
                 jid for jid, j in self._jobs.items()
-                if j.updated_at < cutoff and j.status in ("done", "error")
+                if j.updated_at < cutoff and j.status in ("done", "error", "cancelled")
             ]
             for jid in stale:
                 del self._jobs[jid]
             return len(stale)
+
+    def create_run(self, kind: str, config: dict[str, Any]) -> str:
+        import json
+        import time
+        import uuid
+        run_id = str(uuid.uuid4())
+        now = time.time()
+        with self._lock:
+            self._run_events.append(
+                (run_id, "run_created", json.dumps({"kind": kind, "config": config}), now),
+            )
+        return run_id
+
+    def request_cancel(self, job_id: str) -> bool:
+        import time
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status not in ("pending", "running"):
+                return False
+            job.cancel_requested = True
+            job.updated_at = time.time()
+            return True
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return bool(job and job.cancel_requested)
