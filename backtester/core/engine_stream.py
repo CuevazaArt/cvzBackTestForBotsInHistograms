@@ -52,6 +52,7 @@ class StreamingEngine(BacktestEngine):
         candle_every: int = 1,
         equity_every: int = 25,
         progress_every: int = 50,
+        cache=None,
     ) -> None:
         super().__init__(config)
         self._emit: EmitFn = on_event or (lambda t, d: None)
@@ -59,6 +60,7 @@ class StreamingEngine(BacktestEngine):
         self._candle_every = max(candle_every, 1)
         self._equity_every = max(equity_every, 1)
         self._progress_every = max(progress_every, 1)
+        self._cache = cache  # IndicatorCache | None
 
     # ── helpers ───────────────────────────────────────────────────
 
@@ -129,9 +131,16 @@ class StreamingEngine(BacktestEngine):
         portfolios = [Portfolio(cash=capital_per_bot) for _ in range(n)]
         prev_closed = [0] * n   # track new trades per bot
 
-        # Calculate indicators (pre-run, full series)
-        from backtester.core.indicators import add_indicators, is_oscillator
-        ind_data = add_indicators(candles, indicator_specs or [])
+        # Calculate indicators (pre-run, full series) — cached when available
+        from backtester.core.indicators import is_oscillator
+        from backtester.core.cache import add_indicators_cached
+        ind_data = add_indicators_cached(
+            candles,
+            indicator_specs or [],
+            cache=self._cache,
+            symbol=symbol,
+            timeframe=timeframe,
+        )
 
         result = BacktestResult(
             symbol=symbol, timeframe=timeframe, candles_processed=len(candles),
