@@ -132,7 +132,7 @@ class _GlobalStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final metrics = [
+    final basic = [
       _Metric('Return',   _pct(summary['total_return_pct']), _retColor(summary['total_return_pct'])),
       _Metric('Trades',   '${summary['trades'] ?? 0}',       const Color(0xFFD9D9D9)),
       _Metric('Win Rate', _pct(summary['win_rate_pct']),     const Color(0xFF26a69a)),
@@ -142,13 +142,37 @@ class _GlobalStrip extends StatelessWidget {
       _Metric('Equity',   '\$${_f2(summary['final_equity'])}',    const Color(0xFFD9D9D9)),
     ];
 
+    final advanced = [
+      _Metric('Sharpe',     _f4(summary['sharpe_ratio']),   _ratioColor(summary['sharpe_ratio'])),
+      _Metric('Sortino',    _f4(summary['sortino_ratio']),  _ratioColor(summary['sortino_ratio'])),
+      _Metric('Calmar',     _f4(summary['calmar_ratio']),   _ratioColor(summary['calmar_ratio'])),
+      _Metric('Expectancy', '\$${_f4(summary['expectancy'])}', _retColor(summary['expectancy'])),
+      _Metric('Avg Win',    '\$${_f2(summary['avg_win_pnl'])}',  const Color(0xFF26a69a)),
+      _Metric('Avg Loss',   '\$${_f2(summary['avg_loss_pnl'])}', const Color(0xFFef5350)),
+      _Metric('Avg Hold',   '${_f2(summary['avg_trade_duration_hrs'])}h', const Color(0xFF787B86)),
+    ];
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: SingleChildScrollView(
-        child: Wrap(
-          spacing: 28,
-          runSpacing: 12,
-          children: metrics.map((m) => _MetricChip(m)).toList(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 28,
+              runSpacing: 12,
+              children: basic.map((m) => _MetricChip(m)).toList(),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Divider(color: Color(0xFF2B2B43), height: 1),
+            ),
+            Wrap(
+              spacing: 28,
+              runSpacing: 12,
+              children: advanced.map((m) => _MetricChip(m)).toList(),
+            ),
+          ],
         ),
       ),
     );
@@ -156,9 +180,17 @@ class _GlobalStrip extends StatelessWidget {
 
   String _pct(dynamic v) => v == null ? '—' : '${(v as num).toStringAsFixed(2)}%';
   String _f2(dynamic v)  => v == null ? '—' : (v as num).toStringAsFixed(2);
+  String _f4(dynamic v)  => v == null ? '—' : (v as num).toStringAsFixed(4);
   Color _retColor(dynamic v) {
     if (v == null) return const Color(0xFFD9D9D9);
     return (v as num) >= 0 ? const Color(0xFF26a69a) : const Color(0xFFef5350);
+  }
+  Color _ratioColor(dynamic v) {
+    if (v == null) return const Color(0xFF787B86);
+    final n = (v as num).toDouble();
+    if (n > 1.5) return const Color(0xFF26a69a);
+    if (n > 0) return const Color(0xFFFFD740);
+    return const Color(0xFFef5350);
   }
 }
 

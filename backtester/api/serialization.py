@@ -12,6 +12,7 @@ from backtester.api.schemas import (
     TradeDTO,
 )
 from backtester.core.engine import BacktestResult, Trade
+from backtester.core.metrics import compute_metrics
 
 
 def ms_to_s(ms: int) -> int:
@@ -66,7 +67,7 @@ def result_to_response(
         symbol=result.symbol,
         timeframe=result.timeframe,
         bots=bots,
-        summary=result.summary(),
+        summary=compute_metrics(result),
         trades=[trade_to_dto(t) for t in result.trades],
         equity_curve=equity_curve_dto(result, candles),
     )

@@ -384,3 +384,32 @@ def test_dorothy_dca_via_http(app_with_synthetic_data):
     assert body["summary"]["trades"] >= 1
     ret = body["summary"]["total_return_pct"]
     assert not math.isnan(ret)
+
+
+def test_advanced_metrics_present_in_response(app_with_synthetic_data):
+    """HTTP response summary should include Sharpe, Sortino, Calmar, etc."""
+    # Insert synthetic data first
+    ctx = app_with_synthetic_data.state.ctx
+    ctx.downloader._save_batch("TESTUSDT", "1h", _downtrend_recovery_klines(200))
+
+    client = TestClient(app_with_synthetic_data)
+    payload = {
+        "symbol": "TESTUSDT",
+        "timeframe": "1h",
+        "bots": [{"name": "EMACross", "params": {"fast_ema": 5, "slow_ema": 20}}],
+        "initial_cash": 10000.0,
+    }
+    res = client.post("/api/backtest/run", json=payload)
+    assert res.status_code == 200, f"Expected 200, got {res.status_code}: {res.text}"
+    summary = res.json()["summary"]
+
+    # All new keys must exist and be finite
+    for key in (
+        "sharpe_ratio", "sortino_ratio", "calmar_ratio",
+        "avg_win_pnl", "avg_loss_pnl", "expectancy",
+        "avg_trade_duration_hrs",
+    ):
+        assert key in summary, f"Missing metric: {key}"
+        val = summary[key]
+        assert isinstance(val, (int, float)), f"{key} should be numeric, got {type(val)}"
+        assert not math.isnan(val) and not math.isinf(val), f"{key} is not finite: {val}"

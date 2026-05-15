@@ -55,3 +55,5 @@ temp_repos/
 scratch_test.py
 apply_sdk_patch.bat
 *.scratch.py
+
+scratch_pecunator/
