@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 from decimal import Decimal
+from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -89,7 +90,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                         _send("error", {"message": f"Invalid params for {b.name}: {e}"})
                         has_error = True
                         break
-                        
+
                 if has_error:
                     continue
 
@@ -108,10 +109,31 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     slippage_pct=Decimal(str(req.slippage_pct)),
                 )
 
-                engine = StreamingEngine(cfg, on_event=_send, total=len(candles), cache=ctx.indicator_cache)
+                # Assign a stable run_id so the client can retrieve stored results.
+                run_id = str(uuid4())
+                _last_result: dict | None = None
+
+                def _send_with_capture(event_type: str, data: dict | None = None) -> None:
+                    nonlocal _last_result
+                    if event_type == "result":
+                        _last_result = data
+                        # Attach run_id so the Flutter client can reference it.
+                        data = {**(data or {}), "run_id": run_id}
+                    _send(event_type, data)
+
+                engine = StreamingEngine(cfg, on_event=_send_with_capture, total=len(candles), cache=ctx.indicator_cache)
                 # Run the synchronous engine in a worker thread so the WS
                 # event loop stays responsive (and pings can fly through).
                 bot_names = unique_bot_names(req.bots)
+
+                run_config = {
+                    "symbol": req.symbol.upper(),
+                    "timeframe": req.timeframe,
+                    "bots": [{"name": b.name, "params": b.params} for b in req.bots],
+                    "initial_cash": req.initial_cash,
+                    "taker_fee_pct": req.taker_fee_pct,
+                    "slippage_pct": req.slippage_pct,
+                }
 
                 await asyncio.to_thread(
                     engine.run,
@@ -122,6 +144,15 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     indicator_specs=[{"name": i.name, **i.to_kwargs()} for i in req.indicators],
                     bot_names=bot_names,
                 )
+
+                if _last_result is not None:
+                    ctx.result_store.save(
+                        run_id,
+                        req.symbol.upper(),
+                        req.timeframe,
+                        run_config,
+                        _last_result,
+                    )
 
             elif action == "optimize":
                 try:

@@ -71,6 +71,7 @@ def app_with_synthetic_data():
     from backtester.api.jobs import JobRegistry
     from backtester.core import CredentialManager
     from backtester.core.preset_store import PresetStore
+    from backtester.core.result_store import ResultStore
 
     app.state.ctx = AppContext(
         base_dir=root,
@@ -79,6 +80,7 @@ def app_with_synthetic_data():
         bot_registry=dict(BOT_REGISTRY),
         jobs=JobRegistry(),
         presets=PresetStore(data_dir / "presets.sqlite"),
+        result_store=ResultStore(data_dir / "results.sqlite"),
     )
     return app
 
