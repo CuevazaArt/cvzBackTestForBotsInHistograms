@@ -135,12 +135,16 @@ class Portfolio:
 
     def total_equity(self, current_price: Decimal) -> Decimal:
         """Current portfolio value."""
-        position_value = sum(p.qty * current_price for p in self.positions)
+        # ``start=Decimal("0")`` keeps the return type as Decimal even with no
+        # open positions (``sum([])`` would otherwise return ``int(0)``).
+        position_value = sum(
+            (p.qty * current_price for p in self.positions), start=Decimal("0")
+        )
         return self.cash + position_value
 
     def open_position_cost(self) -> Decimal:
-        """Total cost of open positions at current price."""
-        return sum(p.qty * p.entry_price for p in self.positions)
+        """Total cost of open positions at entry price."""
+        return sum((p.qty * p.entry_price for p in self.positions), start=Decimal("0"))
 
     def cancel_orders_for_position(self, position_id: int) -> None:
         """Remove any pending child orders attached to a closed position.
@@ -244,7 +248,14 @@ class BacktestResult:
     per_bot: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
-        """Compute performance metrics."""
+        """Compute performance metrics.
+
+        ``profit_factor`` is the standard ``gross_profit / gross_loss`` (sum of
+        winners over absolute sum of losers), matching the per-bot breakdown
+        in :func:`build_per_bot_breakdown`. Previously this returned
+        ``avg_win / |avg_loss|`` which is a different (and less standard)
+        statistic.
+        """
         initial = self.equity_curve[0] if self.equity_curve else Decimal("0")
         total_return = (
             ((self.final_equity - initial) / initial * 100) if initial > 0 else 0
@@ -255,14 +266,12 @@ class BacktestResult:
         losers = [t for t in closed if t.pnl < 0]
 
         win_rate = len(winners) / len(closed) * 100 if closed else 0
-        avg_win = (
-            sum(t.pnl for t in winners) / len(winners) if winners else Decimal("0")
-        )
-        avg_loss = sum(t.pnl for t in losers) / len(losers) if losers else Decimal("0")
 
-        profit_factor = float(avg_win / abs(avg_loss)) if avg_loss != 0 else 0
+        gross_profit = sum((t.pnl for t in winners), start=Decimal("0"))
+        gross_loss = abs(sum((t.pnl for t in losers), start=Decimal("0")))
+        profit_factor = float(gross_profit / gross_loss) if gross_loss > 0 else 0.0
 
-        total_fees = sum(t.fee_usdt for t in closed)
+        total_fees = sum((t.fee_usdt for t in closed), start=Decimal("0"))
 
         return {
             "total_return_pct": float(total_return),
@@ -276,11 +285,19 @@ class BacktestResult:
 
 
 def compute_max_drawdown_pct(equity_curve: list[Decimal]) -> Decimal:
-    """Peak-to-trough max drawdown as a percentage."""
+    """Peak-to-trough max drawdown as a percentage.
+
+    The running peak is seeded with the first equity point (typically the
+    initial cash) so a curve that only drops is correctly measured against
+    the starting capital. Previously this was seeded with ``Decimal("0")``,
+    which meant any positive starting equity instantly counted as a "new
+    peak" with zero historical reference — semantically incorrect even
+    though it usually produced the same final number in practice.
+    """
     if not equity_curve:
         return Decimal("0")
     max_dd = Decimal("0")
-    running_peak = Decimal("0")
+    running_peak = equity_curve[0]
     for eq in equity_curve:
         if eq > running_peak:
             running_peak = eq
@@ -302,8 +319,11 @@ def build_per_bot_breakdown(
     for bot_id, portfolio in zip(names, portfolios):
         bot_trades = portfolio.closed_trades
         wins = [t for t in bot_trades if t.pnl > 0]
-        gross_profit = sum(t.pnl for t in wins)
-        gross_loss = abs(sum(t.pnl for t in bot_trades if t.pnl < 0))
+        # ``start=Decimal("0")`` so empty-trade bots keep Decimal arithmetic.
+        gross_profit = sum((t.pnl for t in wins), start=Decimal("0"))
+        gross_loss = abs(
+            sum((t.pnl for t in bot_trades if t.pnl < 0), start=Decimal("0"))
+        )
         final_eq = float(portfolio.total_equity(last_close))
         breakdown[bot_id] = {
             "bot_id": bot_id,
@@ -315,8 +335,10 @@ def build_per_bot_breakdown(
             "total_return_pct": float(
                 (final_eq - float(capital_per_bot)) / float(capital_per_bot) * 100
             ),
-            "total_pnl": float(sum(t.pnl for t in bot_trades)),
-            "total_fees_usdt": float(sum(t.fee_usdt for t in bot_trades)),
+            "total_pnl": float(sum((t.pnl for t in bot_trades), start=Decimal("0"))),
+            "total_fees_usdt": float(
+                sum((t.fee_usdt for t in bot_trades), start=Decimal("0"))
+            ),
             "profit_factor": float(gross_profit / gross_loss)
             if gross_loss > 0
             else 0.0,
@@ -365,6 +387,21 @@ class BacktestEngine:
         # One Portfolio per bot
         portfolios = [Portfolio(cash=capital_per_bot) for _ in range(n)]
 
+        # Optional bot hook: bots that need to see the full candle window
+        # before the run (e.g. DSL bots that precompute indicator series)
+        # can implement ``prepare_indicators(candles)`` and we'll invoke it
+        # here. Standard bots don't define it and are unaffected.
+        for bot in bots:
+            prepare = getattr(bot, "prepare_indicators", None)
+            if callable(prepare):
+                try:
+                    prepare(candles)
+                except Exception:  # noqa: BLE001
+                    _LOG.exception(
+                        "%s.prepare_indicators failed; bot may produce no signals",
+                        bot.__class__.__name__,
+                    )
+
         result = BacktestResult(
             symbol=symbol,
             timeframe=timeframe,
@@ -400,6 +437,11 @@ class BacktestEngine:
                 except Exception:  # noqa: BLE001
                     _LOG.exception("[%s] on_candle crashed; skipping candle", bot_id)
                     orders = []
+                # Bots that mutate state in-place sometimes return ``None``
+                # instead of an empty list. Be forgiving so a single
+                # misbehaving bot doesn't kill the whole run.
+                if orders is None:
+                    orders = []
                 for raw in orders:
                     self._submit_order(
                         raw,
@@ -411,13 +453,19 @@ class BacktestEngine:
                     )
 
             # Global equity = sum of all bot portfolios
-            total_equity = sum(p.total_equity(candle.close) for p in portfolios)
+            total_equity = sum(
+                (p.total_equity(candle.close) for p in portfolios),
+                start=Decimal("0"),
+            )
             result.equity_curve.append(total_equity)
 
         # Merge all trades into global result
         result.trades = [t for p in portfolios for t in p.closed_trades]
         result.final_equity = (
-            sum(p.total_equity(candles[-1].close) for p in portfolios)
+            sum(
+                (p.total_equity(candles[-1].close) for p in portfolios),
+                start=Decimal("0"),
+            )
             if candles
             else Decimal("0")
         )
@@ -452,7 +500,9 @@ class BacktestEngine:
         if self.config.max_drawdown_pct_halt is None:
             return False
         # Use the in-flight curve plus current candle equity for a real-time check
-        cur_equity = sum(p.total_equity(candle.close) for p in portfolios)
+        cur_equity = sum(
+            (p.total_equity(candle.close) for p in portfolios), start=Decimal("0")
+        )
         peak = (
             max(result.equity_curve + [cur_equity])
             if result.equity_curve
@@ -684,7 +734,10 @@ class BacktestEngine:
 
         # Enforce per-portfolio position cap when configured.
         if self.config.max_position_qty is not None:
-            held = sum(p.qty for p in portfolio.positions if p.bot_id == bot_id)
+            held = sum(
+                (p.qty for p in portfolio.positions if p.bot_id == bot_id),
+                start=Decimal("0"),
+            )
             remaining_cap = self.config.max_position_qty - held
             if remaining_cap <= 0:
                 _LOG.debug("[%s] max_position_qty cap reached, buy skipped", bot_id)

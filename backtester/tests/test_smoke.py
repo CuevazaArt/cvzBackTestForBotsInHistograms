@@ -220,3 +220,85 @@ def test_compute_metrics_returns_dict():
     assert "win_rate_pct" in metrics
     assert "max_drawdown_pct" in metrics
     assert "final_equity" in metrics
+
+
+# ── P0 bug regressions (WORKPLAN C3 / C4 / C5) ──────────────────
+
+
+def test_summary_profit_factor_uses_gross_profit_over_gross_loss():
+    """Regression for WORKPLAN C3.
+
+    ``BacktestResult.summary()`` must report ``gross_profit / gross_loss``
+    (the standard definition), not ``avg_win / |avg_loss|``. We construct
+    a result with three hand-picked trades whose averages and gross totals
+    diverge so the two formulas yield clearly different numbers.
+    """
+    from backtester.core.engine import BacktestResult, Trade
+
+    def _t(pnl: str) -> Trade:
+        return Trade(
+            entry_price=Decimal("100"),
+            exit_price=Decimal("100"),
+            qty=Decimal("1"),
+            entry_idx=0,
+            exit_idx=1,
+            entry_time=0,
+            exit_time=1,
+            pnl=Decimal(pnl),
+            pnl_pct=Decimal("0"),
+            fee_usdt=Decimal("0"),
+            reason="x",
+        )
+
+    # 2 winners totalling +30 (avg +15), 1 loser of -20.
+    # Gross profit / gross loss = 30 / 20 = 1.5
+    # Old (incorrect) avg_win / |avg_loss| = 15 / 20 = 0.75
+    trades = [_t("10"), _t("20"), _t("-20")]
+    result = BacktestResult(
+        symbol="X",
+        timeframe="1h",
+        candles_processed=1,
+        trades=trades,
+        equity_curve=[Decimal("10000")],
+        final_equity=Decimal("10010"),
+    )
+    summary = result.summary()
+    assert summary["profit_factor"] == 1.5
+
+
+def test_total_equity_with_no_positions_is_decimal_not_int():
+    """Regression for WORKPLAN C4.
+
+    Empty ``sum(...)`` on a Decimal iterable previously returned ``int(0)``
+    which silently breaks downstream Decimal arithmetic. With
+    ``start=Decimal("0")`` the result type stays Decimal.
+    """
+    from backtester.core.engine import Portfolio
+
+    p = Portfolio(cash=Decimal("123.45"))
+    eq = p.total_equity(Decimal("999"))
+    # Stays Decimal, value equals cash since no positions.
+    assert isinstance(eq, Decimal)
+    assert eq == Decimal("123.45")
+    # And open_position_cost() too.
+    cost = p.open_position_cost()
+    assert isinstance(cost, Decimal)
+    assert cost == Decimal("0")
+
+
+def test_max_drawdown_uses_first_point_as_initial_peak():
+    """Regression for WORKPLAN C5.
+
+    ``compute_max_drawdown_pct`` must seed the running peak with the first
+    equity-curve point. With the old ``Decimal("0")`` seed, a curve that
+    starts positive and dips slightly was computed correctly only by
+    accident; the semantics were ambiguous for curves that start, never
+    grow, and only decay (e.g. a strategy that loses from bar 1).
+    """
+    from backtester.core.engine import compute_max_drawdown_pct
+
+    # Curve: 1000 -> 900 -> 800. Only goes down. With the fix, the running
+    # peak starts at 1000 and max DD = (1000 - 800) / 1000 = 20 %.
+    curve = [Decimal("1000"), Decimal("900"), Decimal("800")]
+    dd = compute_max_drawdown_pct(curve)
+    assert dd == Decimal("20")

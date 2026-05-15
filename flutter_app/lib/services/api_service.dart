@@ -397,6 +397,46 @@ class ApiService {
     }
   }
 
+  /// Download the self-contained HTML report for a stored run.
+  ///
+  /// Returns the raw HTML body so the caller can write it to disk and/or
+  /// open it in the user's browser.
+  Future<String> downloadReportHtml(String runId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/api/backtest/$runId/report.html'),
+      headers: _authHeaders,
+    );
+    if (res.statusCode == 404) {
+      throw ApiError(404, 'Run $runId not found');
+    }
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode, res.body);
+    }
+    return res.body;
+  }
+
+  /// Compare up to 10 persisted runs side-by-side.
+  ///
+  /// Returns a body shaped `{runs: [...], missing: [...]}`. Each entry in
+  /// `runs` carries the key metrics plus a downsampled equity curve so the
+  /// Compare tab can render its table + overlaid chart without re-running.
+  Future<Map<String, dynamic>> compareRuns({
+    required List<String> runIds,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/backtest/compare'),
+      headers: _jsonHeaders,
+      body: jsonEncode({'run_ids': runIds}),
+    );
+    if (res.statusCode == 422) {
+      throw ApiValidationError.fromBody(res.body);
+    }
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode, res.body);
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   /// Walk-Forward Analysis — rolling train/test validation.
   Future<Map<String, dynamic>> runWalkForward({
     required String symbol,

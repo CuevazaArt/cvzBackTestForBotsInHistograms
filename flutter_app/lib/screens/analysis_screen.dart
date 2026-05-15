@@ -10,10 +10,13 @@
 // self-contained and can be opened/closed without affecting other state.
 
 import 'dart:convert' show jsonDecode;
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import 'package:backtester_shell/services/api_service.dart';
+import 'package:backtester_shell/widgets/compare_panel.dart';
 
 class AnalysisScreen extends StatefulWidget {
   final ApiService apiService;
@@ -31,7 +34,7 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 4, vsync: this);
+    _tabs = TabController(length: 5, vsync: this);
   }
 
   @override
@@ -52,6 +55,7 @@ class _AnalysisScreenState extends State<AnalysisScreen>
             Tab(icon: Icon(Icons.timeline), text: 'Walk-Forward'),
             Tab(icon: Icon(Icons.shuffle), text: 'Monte Carlo'),
             Tab(icon: Icon(Icons.score), text: 'Robustness'),
+            Tab(icon: Icon(Icons.compare), text: 'Compare'),
           ],
         ),
       ),
@@ -65,6 +69,7 @@ class _AnalysisScreenState extends State<AnalysisScreen>
           _WalkForwardTab(api: widget.apiService),
           _MonteCarloTab(api: widget.apiService, selectedRun: _selectedRun),
           _RobustnessTab(api: widget.apiService),
+          _CompareTab(api: widget.apiService),
         ],
       ),
     );
@@ -137,6 +142,38 @@ class _HistoryTabState extends State<_HistoryTab> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _exportHtml(String runId) async {
+    try {
+      final html = await widget.api.downloadReportHtml(runId);
+      final dir = Directory('${Directory.current.path}/exports');
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      final ts = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .split('.')
+          .first;
+      final subDir = Directory('${dir.path}/run_$ts');
+      subDir.createSync();
+      final outFile = File('${subDir.path}/report.html');
+      await outFile.writeAsString(html);
+      await Clipboard.setData(ClipboardData(text: outFile.path));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: const Color(0xFF26a69a),
+        content: Text(
+          'HTML report saved → ${outFile.path} (path copied)',
+          style: const TextStyle(color: Colors.black, fontSize: 12),
+        ),
+        duration: const Duration(seconds: 4),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to export HTML report: $e')),
+      );
     }
   }
 
@@ -276,13 +313,28 @@ class _HistoryTabState extends State<_HistoryTab> {
     final perBot = (payload['per_bot'] as Map?)?.cast<String, dynamic>() ?? {};
     final trades = (payload['trades'] as List?) ?? [];
 
+    final runId = _detail!['run_id']?.toString() ?? '';
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SelectableText('Run ID: ${_detail!['run_id']}',
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: SelectableText('Run ID: $runId',
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontSize: 11)),
+              ),
+              OutlinedButton.icon(
+                onPressed: runId.isEmpty ? null : () => _exportHtml(runId),
+                icon: const Icon(Icons.description_outlined, size: 16),
+                label: const Text('Export HTML report'),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8, runSpacing: 8,
@@ -1203,3 +1255,241 @@ dynamic jsonDecodeOrNull(String s) {
 }
 
 // (jsonDecode is imported at the top of this file)
+
+
+// ──────────────────────────────────────────────────────────────────────────
+// Compare tab — side-by-side run comparator
+// ──────────────────────────────────────────────────────────────────────────
+
+class _CompareTab extends StatefulWidget {
+  final ApiService api;
+  const _CompareTab({required this.api});
+
+  @override
+  State<_CompareTab> createState() => _CompareTabState();
+}
+
+class _CompareTabState extends State<_CompareTab> {
+  bool _loadingHistory = true;
+  String? _error;
+  List<Map<String, dynamic>> _history = [];
+  final Set<String> _selectedIds = <String>{};
+  List<Map<String, dynamic>> _comparedRuns = [];
+  List<String> _missingRunIds = [];
+  bool _comparing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    setState(() {
+      _loadingHistory = true;
+      _error = null;
+    });
+    try {
+      final runs = await widget.api.listResults(limit: 200);
+      setState(() {
+        _history = runs;
+        _loadingHistory = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = '$e';
+        _loadingHistory = false;
+      });
+    }
+  }
+
+  Future<void> _compare() async {
+    if (_selectedIds.isEmpty) return;
+    setState(() {
+      _comparing = true;
+      _error = null;
+    });
+    try {
+      final res = await widget.api.compareRuns(runIds: _selectedIds.toList());
+      setState(() {
+        _comparedRuns = ((res['runs'] as List?) ?? [])
+            .cast<Map<String, dynamic>>();
+        _missingRunIds = ((res['missing'] as List?) ?? [])
+            .map((e) => e.toString())
+            .toList();
+        _comparing = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = '$e';
+        _comparing = false;
+      });
+    }
+  }
+
+  void _openSelector() async {
+    final picked = await showDialog<Set<String>>(
+      context: context,
+      builder: (_) => _RunSelectorDialog(
+        history: _history,
+        initiallySelected: _selectedIds,
+      ),
+    );
+    if (picked != null) {
+      setState(() {
+        _selectedIds
+          ..clear()
+          ..addAll(picked);
+      });
+      if (_selectedIds.isNotEmpty) {
+        await _compare();
+      } else {
+        setState(() {
+          _comparedRuns = [];
+          _missingRunIds = [];
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loadingHistory) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Run Comparator',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const Text(
+            'Pick up to 10 stored runs and compare their key metrics + '
+            'equity curves side-by-side.',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          Row(children: [
+            ElevatedButton.icon(
+              onPressed: _openSelector,
+              icon: const Icon(Icons.checklist),
+              label: Text(_selectedIds.isEmpty
+                  ? 'Pick runs'
+                  : 'Pick runs (${_selectedIds.length} selected)'),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: _loadHistory,
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Reload history'),
+            ),
+            if (_comparing) const Padding(
+              padding: EdgeInsets.only(left: 12),
+              child: SizedBox(
+                width: 16, height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ]),
+          if (_error != null) Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_error!, style: const TextStyle(color: Colors.red)),
+          ),
+          if (_missingRunIds.isNotEmpty) Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Missing runs (deleted?): ${_missingRunIds.join(", ")}',
+              style: const TextStyle(color: Colors.orange, fontSize: 11),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: SingleChildScrollView(
+              child: ComparePanel(
+                runs: _comparedRuns,
+                onAddRun: _openSelector,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+class _RunSelectorDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> history;
+  final Set<String> initiallySelected;
+  const _RunSelectorDialog({
+    required this.history,
+    required this.initiallySelected,
+  });
+
+  @override
+  State<_RunSelectorDialog> createState() => _RunSelectorDialogState();
+}
+
+class _RunSelectorDialogState extends State<_RunSelectorDialog> {
+  late Set<String> _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = Set<String>.from(widget.initiallySelected);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Select runs to compare'),
+      content: SizedBox(
+        width: 460, height: 420,
+        child: ListView.builder(
+          itemCount: widget.history.length,
+          itemBuilder: (_, i) {
+            final r = widget.history[i];
+            final runId = r['run_id'] as String? ?? '';
+            final payload = (r['payload'] as Map?) ?? (r['result'] as Map?) ?? r;
+            final summary = (payload['summary'] as Map?) ?? {};
+            final ret = (summary['total_return_pct'] as num?)?.toDouble() ?? 0;
+            return CheckboxListTile(
+              dense: true,
+              value: _selected.contains(runId),
+              onChanged: (v) => setState(() {
+                if (v == true && _selected.length < 10) {
+                  _selected.add(runId);
+                } else {
+                  _selected.remove(runId);
+                }
+              }),
+              title: Text('${r['symbol']} ${r['timeframe']}',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                'Return ${ret.toStringAsFixed(2)}%  •  id ${runId.substring(0, runId.length.clamp(0, 8))}…',
+                style: const TextStyle(fontSize: 11),
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => setState(_selected.clear),
+          child: const Text('Clear'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, _selected),
+          child: Text('Compare (${_selected.length})'),
+        ),
+      ],
+    );
+  }
+}

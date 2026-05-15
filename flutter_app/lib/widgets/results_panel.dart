@@ -7,6 +7,7 @@ class ResultsPanel extends StatefulWidget {
   final Map<String, dynamic>? perBot; // {bot_id: {metric: value}}
   final List<TradeRow> trades;
   final VoidCallback? onExportAll;
+  final VoidCallback? onExportHtml;
   final VoidCallback? onSavePreset;
 
   const ResultsPanel({
@@ -15,6 +16,7 @@ class ResultsPanel extends StatefulWidget {
     this.perBot,
     this.trades = const [],
     this.onExportAll,
+    this.onExportHtml,
     this.onSavePreset,
   });
 
@@ -102,6 +104,13 @@ class _ResultsPanelState extends State<ResultsPanel> with SingleTickerProviderSt
                     tooltip: 'Export all (CSV bundle)',
                     icon: const Icon(Icons.archive_outlined, color: Color(0xFF787B86)),
                     onPressed: widget.onExportAll,
+                  ),
+                if (widget.onExportHtml != null)
+                  IconButton(
+                    iconSize: 16,
+                    tooltip: 'Export HTML report',
+                    icon: const Icon(Icons.description_outlined, color: Color(0xFF787B86)),
+                    onPressed: widget.onExportHtml,
                   ),
                 const SizedBox(width: 4),
               ],

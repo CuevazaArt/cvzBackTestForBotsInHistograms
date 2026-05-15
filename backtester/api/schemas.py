@@ -339,3 +339,68 @@ class CredentialsRequest(BaseModel):
 
 class CredentialsStatus(BaseModel):
     exists: bool
+
+
+# ───────────────────────── Run comparator ─────────────────────────
+
+
+class CompareRunsRequest(BaseModel):
+    """Payload for ``POST /api/backtest/compare``."""
+
+    run_ids: list[str]
+
+    @field_validator("run_ids")
+    @classmethod
+    def _at_least_two(cls, v: list[str]) -> list[str]:
+        if len(v) < 1:
+            raise ValueError("compare requires at least one run_id")
+        if len(v) > 10:
+            raise ValueError("compare supports up to 10 runs at a time")
+        return v
+
+
+class ComparedRun(BaseModel):
+    """One run's worth of comparison data."""
+
+    run_id: str
+    symbol: str
+    timeframe: str
+    label: str
+    created_at: float
+    summary: dict[str, Any]
+    equity_curve_downsampled: list[dict[str, float]] = Field(default_factory=list)
+
+
+class CompareRunsResponse(BaseModel):
+    runs: list[ComparedRun]
+    missing: list[str] = Field(default_factory=list)
+
+
+# ───────────────────────── Strategy DSL ─────────────────────────
+
+
+class DSLValidateRequest(BaseModel):
+    """Payload for ``POST /api/bots/dsl/validate``."""
+
+    dsl_text: str
+
+
+class DSLValidateError(BaseModel):
+    """Structured error so the Flutter editor can highlight the issue."""
+
+    message: str
+    line: Optional[int] = None
+    column: Optional[int] = None
+    context: Optional[str] = None
+
+
+class DSLValidateResponse(BaseModel):
+    ok: bool
+    name: Optional[str] = None
+    indicators_used: list[str] = Field(default_factory=list)
+    has_entry_long: bool = False
+    has_exit_long: bool = False
+    stop_loss_pct: Optional[float] = None
+    take_profit_pct: Optional[float] = None
+    size_pct: Optional[float] = None
+    error: Optional[DSLValidateError] = None

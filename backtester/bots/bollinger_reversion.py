@@ -1,4 +1,9 @@
-"""Bollinger Bands Mean-Reversion trading bot."""
+"""Bollinger Bands Mean-Reversion trading bot.
+
+Modernised to the bracket-order API used by the other bots in this package
+(legacy implementation called ``portfolio.buy/.sell`` and indexed positions
+as a dict — neither exists on :class:`backtester.core.engine.Portfolio`).
+"""
 
 import math
 from typing import Any
@@ -10,9 +15,10 @@ from backtester.core.engine import Candle, Portfolio
 class BollingerReversion(BotBase):
     """Bollinger Bands mean-reversion strategy.
 
-    BUY when price drops below the lower band (oversold).
-    SELL when price reverts to the mean (SMA) or upper band,
-    or via take-profit/stop-loss.
+    BUY when price drops below the lower band (oversold). The protective
+    stop-loss / take-profit are attached as bracket children at the same
+    moment so the engine fires them intra-bar.
+    SELL when price reverts to the SMA (signal-driven exit).
     """
 
     def __init__(
@@ -30,7 +36,6 @@ class BollingerReversion(BotBase):
         self.risk_per_trade_pct = risk_per_trade_pct
 
         self._history: list[float] = []
-        self._entry_price: float | None = None
         self._in_position: bool = False
 
     @classmethod
@@ -73,64 +78,53 @@ class BollingerReversion(BotBase):
             },
         }
 
-    def on_candle(self, candle: Candle, portfolio: Portfolio) -> None:
-        price = candle.close
+    def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict[str, Any]]:
+        price = float(candle.close)
+        orders: list[dict[str, Any]] = []
 
-        # Update rolling history
+        # Rolling window of floats so std calculations stay in float math.
         self._history.append(price)
         if len(self._history) > self.bb_period:
             self._history.pop(0)
-
         if len(self._history) < self.bb_period:
-            return  # Not enough data for BB calculation
+            return orders
 
-        # Calculate SMA
         sma = sum(self._history) / self.bb_period
-
-        # Calculate Standard Deviation
         variance = sum((x - sma) ** 2 for x in self._history) / self.bb_period
-        std_dev = math.sqrt(variance)
+        std = math.sqrt(variance)
+        lower_band = sma - self.std_dev_multiplier * std
 
-        lower_band = sma - (self.std_dev_multiplier * std_dev)
+        # Keep in-memory flag in sync with the engine in case a bracket
+        # SL/TP closed the position.
+        if self._in_position and not portfolio.positions:
+            self._in_position = False
 
         if not self._in_position:
-            # Entry condition: Price dips below lower band
             if price < lower_band:
-                qty = self.calc_qty(
-                    price, float(portfolio.cash), self.risk_per_trade_pct
-                )
+                qty = self.calc_qty(candle.close, portfolio, self.risk_per_trade_pct)
                 if qty > 0:
-                    portfolio.buy(
-                        self.__class__.__name__, price, qty, candle.timestamp_ms
+                    orders.append(
+                        {
+                            "side": "BUY",
+                            "qty": float(qty),
+                            "reason": "BB_OVERSOLD",
+                            "stop_loss_pct": self.stop_loss_pct * 100,
+                            "take_profit_pct": self.profit_factor * 100,
+                        }
                     )
-                    self._entry_price = price
                     self._in_position = True
+            return orders
 
-        else:
-            # Exit conditions
-            if self._entry_price is None:
-                return
-
-            gain_pct = (price - self._entry_price) / self._entry_price
-
-            # Mean reversion achieved (price hits SMA), or Stop Loss, or Take Profit
-            if (
-                price >= sma
-                or gain_pct >= self.profit_factor
-                or gain_pct <= -self.stop_loss_pct
-            ):
-                pos = portfolio.positions.get(self.__class__.__name__)
-                if pos and pos > 0:
-                    portfolio.sell(
-                        self.__class__.__name__, price, pos, candle.timestamp_ms
-                    )
+        # Mean-reversion exit: price recovers to the SMA.
+        if price >= sma:
+            qty = self.max_sell_qty(portfolio)
+            if qty > 0:
+                orders.append(
+                    {
+                        "side": "SELL",
+                        "qty": float(qty),
+                        "reason": "BB_MEAN_REVERT",
+                    }
+                )
                 self._in_position = False
-                self._entry_price = None
-
-    def get_state(self) -> dict[str, Any]:
-        return {
-            "bb_period": self.bb_period,
-            "std_dev_multiplier": self.std_dev_multiplier,
-            "in_position": self._in_position,
-            "history_len": len(self._history),
-        }
+        return orders

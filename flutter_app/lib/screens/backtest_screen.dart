@@ -284,6 +284,46 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   // ── Exports ────────────────────────────────────────────────────
 
+  Future<void> _exportHtmlReport() async {
+    final runId = _lastResult?['run_id'] as String?;
+    if (runId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No run_id on the current result; rerun the backtest.'),
+      ));
+      return;
+    }
+    try {
+      final html = await widget.apiService.downloadReportHtml(runId);
+      final dir = Directory('${Directory.current.path}/exports');
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      final ts = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .split('.')
+          .first;
+      final subDir = Directory('${dir.path}/run_$ts');
+      subDir.createSync();
+      final outFile = File('${subDir.path}/report.html');
+      await outFile.writeAsString(html);
+      await Clipboard.setData(ClipboardData(text: outFile.path));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: const Color(0xFF26a69a),
+        content: Text(
+          'HTML report saved → ${outFile.path} (path copied)',
+          style: const TextStyle(color: Colors.black, fontSize: 12),
+        ),
+        duration: const Duration(seconds: 4),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to export HTML report: $e')),
+      );
+    }
+  }
+
   Future<void> _exportBundle() async {
     if (_lastResult == null) return;
     final dir = Directory('${Directory.current.path}/exports');
@@ -577,6 +617,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
               perBot: _perBotResult,
               trades: _trades,
               onExportAll: _lastResult != null ? _exportBundle : null,
+              onExportHtml: (_lastResult != null && _lastResult!['run_id'] != null)
+                  ? _exportHtmlReport
+                  : null,
               onSavePreset: _selectedSymbol != null && _selectedBots.isNotEmpty ? _savePresetDialog : null,
             ),
           ),

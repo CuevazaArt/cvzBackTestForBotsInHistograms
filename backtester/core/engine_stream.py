@@ -290,6 +290,31 @@ class StreamingEngine(BacktestEngine):
                         bot_id=bot_id,
                     )
 
+            # Downsample equity curve to <=500 points for the comparator UI
+            # and to keep the persisted result small. We pair the equity
+            # value with the candle timestamp so a chart client can plot
+            # without extra bookkeeping. Older callers that don't need this
+            # can simply ignore the new field.
+            equity_downsampled: list[dict[str, float]] = []
+            if result.equity_curve and candles:
+                n = len(result.equity_curve)
+                cap = 500
+                step = max(1, n // cap)
+                for i in range(0, n, step):
+                    equity_downsampled.append(
+                        {
+                            "time": candles[i].timestamp_ms // 1000,
+                            "value": float(result.equity_curve[i]),
+                        }
+                    )
+                # Always include the last point so the final equity is exact.
+                last_pt = {
+                    "time": candles[-1].timestamp_ms // 1000,
+                    "value": float(result.equity_curve[-1]),
+                }
+                if not equity_downsampled or equity_downsampled[-1] != last_pt:
+                    equity_downsampled.append(last_pt)
+
             self._emit(
                 "result",
                 {
@@ -300,7 +325,8 @@ class StreamingEngine(BacktestEngine):
                     "final_equity": float(result.final_equity),
                     "peak_equity": float(result.peak_equity),
                     "max_drawdown_pct": float(result.max_drawdown_pct),
-                    "per_bot": result.per_bot,  # ← new
+                    "per_bot": result.per_bot,
+                    "equity_curve_downsampled": equity_downsampled,
                 },
             )
 

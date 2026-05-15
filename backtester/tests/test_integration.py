@@ -455,12 +455,12 @@ def test_advanced_metrics_present_in_response(app_with_synthetic_data):
     ):
         assert key in summary, f"Missing metric: {key}"
         val = summary[key]
-        assert isinstance(
-            val, (int, float)
-        ), f"{key} should be numeric, got {type(val)}"
-        assert not math.isnan(val) and not math.isinf(
-            val
-        ), f"{key} is not finite: {val}"
+        assert isinstance(val, (int, float)), (
+            f"{key} should be numeric, got {type(val)}"
+        )
+        assert not math.isnan(val) and not math.isinf(val), (
+            f"{key} is not finite: {val}"
+        )
 
 
 def test_job_cancel_unknown_returns_404(app_with_synthetic_data):
@@ -541,3 +541,118 @@ def test_export_trades_rejects_invalid_format(app_with_synthetic_data):
     }
     res = client.post("/api/backtest/export/trades?format=xml", json=payload)
     assert res.status_code == 422
+
+
+# ── Run comparator ────────────────────────────────────────────────
+
+
+def _seed_compare_run(app, run_id: str, *, label: str, final_eq: float) -> None:
+    """Insert a synthetic backtest result into the store for compare tests."""
+    ctx = app.state.ctx
+    equity_curve = [
+        {"time": 1_000 + i, "value": 10_000 + (final_eq - 10_000) * (i / 9)}
+        for i in range(10)
+    ]
+    ctx.result_store.save(
+        run_id,
+        "TESTUSDT",
+        "1h",
+        {"bots": [{"name": label, "params": {}}]},
+        {
+            "symbol": "TESTUSDT",
+            "timeframe": "1h",
+            "summary": {
+                "total_return_pct": (final_eq - 10000) / 100,
+                "win_rate_pct": 55.0,
+                "profit_factor": 1.4,
+                "max_drawdown_pct": 8.2,
+                "final_equity": final_eq,
+                "trades": 7,
+            },
+            "final_equity": final_eq,
+            "peak_equity": final_eq * 1.05,
+            "max_drawdown_pct": 8.2,
+            "equity_curve_downsampled": equity_curve,
+        },
+    )
+
+
+def test_compare_runs_returns_structure_for_known_ids(app_with_synthetic_data):
+    """POST /api/backtest/compare aggregates stored runs."""
+    app = app_with_synthetic_data
+    _seed_compare_run(app, "run-a", label="EMACross", final_eq=11000)
+    _seed_compare_run(app, "run-b", label="RSIReversion", final_eq=10300)
+    _seed_compare_run(app, "run-c", label="MACDCross", final_eq=9500)
+
+    client = TestClient(app)
+    res = client.post(
+        "/api/backtest/compare",
+        json={"run_ids": ["run-a", "run-b", "run-c"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["missing"] == []
+    assert len(body["runs"]) == 3
+    labels = {r["label"] for r in body["runs"]}
+    assert labels == {"EMACross", "RSIReversion", "MACDCross"}
+    for run in body["runs"]:
+        assert run["symbol"] == "TESTUSDT"
+        assert run["timeframe"] == "1h"
+        assert "summary" in run
+        assert "final_equity" in run["summary"]
+        assert isinstance(run["equity_curve_downsampled"], list)
+        assert len(run["equity_curve_downsampled"]) > 0
+        for pt in run["equity_curve_downsampled"]:
+            assert "time" in pt and "value" in pt
+
+
+def test_compare_runs_reports_missing_ids(app_with_synthetic_data):
+    """Unknown run_ids end up in `missing` but the rest is returned."""
+    app = app_with_synthetic_data
+    _seed_compare_run(app, "run-exists", label="EMACross", final_eq=10500)
+
+    client = TestClient(app)
+    res = client.post(
+        "/api/backtest/compare",
+        json={"run_ids": ["run-exists", "run-ghost"]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert [r["run_id"] for r in body["runs"]] == ["run-exists"]
+    assert body["missing"] == ["run-ghost"]
+
+
+def test_compare_runs_rejects_too_many(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    res = client.post(
+        "/api/backtest/compare",
+        json={"run_ids": [f"r{i}" for i in range(11)]},
+    )
+    assert res.status_code == 422
+
+
+# ── HTML report ────────────────────────────────────────────────────
+
+
+def test_html_report_endpoint_returns_self_contained_html(app_with_synthetic_data):
+    """GET /api/backtest/{run_id}/report.html returns a renderable HTML page."""
+    app = app_with_synthetic_data
+    _seed_compare_run(app, "run-html", label="EMACross", final_eq=10500)
+    client = TestClient(app)
+
+    res = client.get("/api/backtest/run-html/report.html")
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"].startswith("text/html")
+    body = res.text
+    # Run ID + symbol appear so the user can identify the report.
+    assert "run-html" in body
+    assert "TESTUSDT" in body
+    # Chart wiring and trades pagination scripts are present.
+    assert "equity-chart" in body
+    assert "trades-body" in body
+
+
+def test_html_report_endpoint_returns_404_for_unknown_run(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    res = client.get("/api/backtest/does-not-exist/report.html")
+    assert res.status_code == 404

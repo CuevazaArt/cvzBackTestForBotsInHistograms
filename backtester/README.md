@@ -120,6 +120,59 @@ class MyBot(BotBase):
         return orders
 ```
 
+## 🪄 Strategy DSL (sin Python)
+
+¿Querés probar una estrategia sin escribir Python? El backtester incluye un
+DSL declarativo en YAML. Definí indicadores, condiciones de entrada/salida y
+parámetros de riesgo en un único bloque y corré el bot con `BOT_REGISTRY["DSL"]`.
+
+```yaml
+name: "EMA cross + RSI filter"
+indicators:
+  - ema(close, 12) as fast
+  - ema(close, 26) as slow
+  - rsi(close, 14) as rsi14
+entry:
+  long: "fast > slow AND rsi14 < 70"
+exit:
+  long: "fast < slow OR rsi14 > 80"
+risk:
+  stop_loss_pct: 0.05      # 5 % bajo el entry
+  take_profit_pct: 0.10    # 10 % sobre el entry
+  size_pct: 2.0            # 2 % de cash por entrada
+```
+
+Uso desde Python:
+
+```python
+from backtester.bots import DSLBot
+
+dsl = open("strategy.yml").read()
+bot = DSLBot(dsl_text=dsl)
+result = engine.run(bot, candles, bot_names=["My DSL"])
+```
+
+Uso desde el backend (validación previa, sin correr backtest):
+
+```bash
+curl -X POST http://localhost:8002/api/bots/dsl/validate \
+  -H 'Content-Type: application/json' \
+  -d '{"dsl_text": "indicators: [\"ema(close, 12) as fast\"]\nentry:\n  long: fast > 0\nexit:\n  long: fast < 0"}'
+```
+
+**Indicadores soportados**: `ema`, `sma`, `rsi`, `macd`, `bb`, `vwap`.
+
+**Operadores en condiciones**: `>`, `<`, `>=`, `<=`, `==`, `!=`, `AND`, `OR`,
+`NOT`, paréntesis, aritmética básica con literales (`fast * 0.99`).
+
+**Limitaciones intencionales**:
+
+- Stateless por barra (sólo valores actuales). Si necesitás "3 cierres seguidos
+  sobre la EMA" o secuencias, escribilo en Python como bot custom.
+- Long-only por ahora; short selling y hedging quedan para una iteración futura.
+
+Ver `backtester/tests/test_dsl.py` para más ejemplos de YAMLs aceptados.
+
 ## 🎮 Editor interactivo de parámetros
 
 Cuando corres `--backtest`, la CLI te permite:
