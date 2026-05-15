@@ -185,11 +185,16 @@ class WsService {
     }
   }
 
+  /// Reconnect delay formula exposed for testing.
+  @visibleForTesting
+  static int reconnectDelayMs(int attempt) =>
+      (500 * (1 << (attempt - 1))).clamp(500, 15000);
+
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
     _reconnectAttempts++;
     // Exponential backoff: 500ms, 1s, 2s, 4s, 8s, max 15s
-    final delayMs = (500 * (1 << (_reconnectAttempts - 1))).clamp(500, 15000);
+    final delayMs = reconnectDelayMs(_reconnectAttempts);
     status.value = WsStatus.reconnecting;
     _controller?.add(WsEvent(
       WsEventType.reconnecting,
