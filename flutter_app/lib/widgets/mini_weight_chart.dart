@@ -202,7 +202,7 @@ class SparklinePainter extends CustomPainter {
         ..color = const Color(0x66FF1744)
         ..strokeWidth = 1.0;
       canvas.drawLine(Offset(0, fullY), Offset(size.width, fullY), ceilPaint);
-      
+
       final tp100 = TextPainter(
         text: const TextSpan(
           text: '100%',
@@ -223,7 +223,7 @@ class SparklinePainter extends CustomPainter {
           ..color = tColor
           ..strokeWidth = 0.5;
         canvas.drawLine(Offset(0, ty), Offset(size.width, ty), tp);
-        
+
         final tpLabel = TextPainter(
           text: TextSpan(
             text: label,

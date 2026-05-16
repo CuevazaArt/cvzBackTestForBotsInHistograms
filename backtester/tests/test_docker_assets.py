@@ -67,9 +67,9 @@ def test_dockerfile_is_multi_stage_with_venv() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "AS builder" in dockerfile, "Dockerfile must declare a builder stage"
     assert "AS runtime" in dockerfile, "Dockerfile must declare a runtime stage"
-    assert "COPY --from=builder /opt/venv /opt/venv" in dockerfile, (
-        "Runtime stage must copy the prebuilt venv from the builder stage"
-    )
+    assert (
+        "COPY --from=builder /opt/venv /opt/venv" in dockerfile
+    ), "Runtime stage must copy the prebuilt venv from the builder stage"
 
 
 def test_compose_defines_backend_service_with_volume_and_ports() -> None:
@@ -77,12 +77,12 @@ def test_compose_defines_backend_service_with_volume_and_ports() -> None:
     compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "backend:" in compose, "compose must define a `backend` service"
     assert '"8000:8000"' in compose, "compose must publish port 8000:8000"
-    assert "./backtester/data:/app/backtester/data" in compose, (
-        "compose must mount ./backtester/data as a persistent volume"
-    )
-    assert "restart: unless-stopped" in compose, (
-        "compose must use restart: unless-stopped"
-    )
+    assert (
+        "./backtester/data:/app/backtester/data" in compose
+    ), "compose must mount ./backtester/data as a persistent volume"
+    assert (
+        "restart: unless-stopped" in compose
+    ), "compose must use restart: unless-stopped"
     assert "env_file" in compose, "compose must reference an env_file (.env, optional)"
 
 
@@ -118,9 +118,9 @@ def test_dockerignore_excludes_build_noise() -> None:
 def test_precommit_config_has_required_hooks_and_python_312() -> None:
     """.pre-commit-config.yaml must pin python3.12 and include the spec'd hooks."""
     cfg = (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
-    assert "python: python3.12" in cfg, (
-        "pre-commit must pin default_language_version to python3.12"
-    )
+    assert (
+        "python: python3.12" in cfg
+    ), "pre-commit must pin default_language_version to python3.12"
     for hook_id in (
         "check-yaml",
         "check-toml",
@@ -146,25 +146,25 @@ def test_ci_docker_smoke_proposal_mentions_required_jobs() -> None:
     proposal = (REPO_ROOT / ".github" / "CI_DOCKER_SMOKE_PROPOSAL.md").read_text(
         encoding="utf-8"
     )
-    assert "docker-smoke:" in proposal, (
-        "Proposal must contain a `docker-smoke:` YAML job"
-    )
+    assert (
+        "docker-smoke:" in proposal
+    ), "Proposal must contain a `docker-smoke:` YAML job"
     assert "pre-commit:" in proposal, "Proposal must contain a `pre-commit:` YAML job"
-    assert "ci-gate" in proposal, (
-        "Proposal must explain how to update the ci-gate aggregate"
-    )
+    assert (
+        "ci-gate" in proposal
+    ), "Proposal must explain how to update the ci-gate aggregate"
 
 
 def test_readme_documents_docker_and_precommit() -> None:
     """backtester/README.md must surface the new Docker + pre-commit workflow."""
     readme = (REPO_ROOT / "backtester" / "README.md").read_text(encoding="utf-8")
-    assert "docker-compose up --build" in readme, (
-        "README must show `docker-compose up --build`"
-    )
-    assert "docker exec backend python -m pytest" in readme, (
-        "README must show how to run pytest inside the container"
-    )
+    assert (
+        "docker-compose up --build" in readme
+    ), "README must show `docker-compose up --build`"
+    assert (
+        "docker exec backend python -m pytest" in readme
+    ), "README must show how to run pytest inside the container"
     assert "pre-commit install" in readme, "README must show `pre-commit install`"
-    assert "pre-commit run --all-files" in readme, (
-        "README must show `pre-commit run --all-files`"
-    )
+    assert (
+        "pre-commit run --all-files" in readme
+    ), "README must show `pre-commit run --all-files`"

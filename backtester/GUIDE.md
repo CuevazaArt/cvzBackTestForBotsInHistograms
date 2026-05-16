@@ -34,19 +34,19 @@ from backtester.core.engine import Candle, Portfolio
 
 class MyAwesomeBot(BotBase):
     """Tu descripción aquí."""
-    
+
     def __init__(self, param1=10, param2=0.05):
         self.param1 = param1
         self.param2 = param2
-    
+
     def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict]:
         """Lógica de trading aquí."""
         orders = []
-        
+
         # Tu código
         # if [condición]:
         #     orders.append({"side": "BUY", "qty": 1.0})
-        
+
         return orders
 ```
 
@@ -80,13 +80,13 @@ def param_spec(cls) -> dict[str, dict]:
 def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict]:
     # candle.open, candle.high, candle.low, candle.close, candle.volume
     # candle.timestamp_ms
-    
+
     # portfolio.cash (saldo en USDT)
     # portfolio.positions (lista de posiciones abiertas)
     # portfolio.closed_trades (lista de operaciones cerradas)
-    
+
     orders = []
-    
+
     # Ejemplo: buy si close > open
     if candle.close > candle.open:
         orders.append({
@@ -94,7 +94,7 @@ def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict]:
             "qty": 1.0,         # cantidad
             "reason": "MY_SIGNAL" # opcional, para logging
         })
-    
+
     return orders
 ```
 
@@ -128,14 +128,14 @@ python backtester/main.py --backtest
 class MyBot(BotBase):
     def __init__(self):
         self._prices = []
-    
+
     def on_candle(self, candle, portfolio):
         self._prices.append(float(candle.close))
-        
+
         # Mantener solo últimas N velas para memoria
         if len(self._prices) > 1000:
             self._prices.pop(0)
-        
+
         return []
 ```
 
@@ -152,7 +152,7 @@ def _ema(self, prices, period):
     """Exponential Moving Average."""
     if len(prices) < period:
         return sum(prices) / len(prices)
-    
+
     k = 2 / (period + 1)
     ema = sum(prices[:period]) / period
     for p in prices[period:]:
@@ -163,14 +163,14 @@ def _rsi(self, prices, period):
     """Relative Strength Index."""
     if len(prices) < period + 1:
         return 50
-    
+
     deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
     ups = [d for d in deltas[-period:] if d > 0]
     downs = [-d for d in deltas[-period:] if d < 0]
-    
+
     avg_up = sum(ups) / period if ups else 0
     avg_down = sum(downs) / period if downs else 0
-    
+
     rs = avg_up / avg_down if avg_down > 0 else 0
     return 100 - (100 / (1 + rs)) if rs > 0 else 50
 ```
@@ -182,14 +182,14 @@ def on_candle(self, candle, portfolio):
     # Ver posiciones abiertas
     for pos in portfolio.positions:
         print(f"Entrada: ${pos.entry_price}, Qty: {pos.qty}")
-    
+
     # Ver trades cerrados
     for trade in portfolio.closed_trades:
         print(f"P&L: ${trade.pnl}, ROI: {trade.pnl_pct}%")
-    
+
     # Efectivo disponible
     print(f"Cash: ${portfolio.cash}")
-    
+
     return []
 ```
 
@@ -198,21 +198,21 @@ def on_candle(self, candle, portfolio):
 ```python
 def on_candle(self, candle, portfolio):
     orders = []
-    
+
     # No entrar si ya tengo posición
     if portfolio.positions:
         return orders
-    
+
     # No entrar si el saldo es bajo
     if portfolio.cash < 100:
         return orders
-    
+
     # Buy si condición
     if candle.close > self.threshold:
         # Invertir % del efectivo
         qty = (portfolio.cash * 0.5) / float(candle.close)
         orders.append({"side": "BUY", "qty": qty})
-    
+
     return orders
 ```
 
@@ -255,12 +255,12 @@ _LOG = logging.getLogger("mybot")
 class MyBot(BotBase):
     def on_candle(self, candle, portfolio):
         _LOG.info(f"Price: {candle.close}, Cash: {portfolio.cash}")
-        
+
         orders = []
         # ...
         if orders:
             _LOG.debug(f"Orders: {orders}")
-        
+
         return orders
 ```
 

@@ -143,12 +143,12 @@ def test_mfe_mae_includes_exit_candle_range():
     # Entry was at candle[0].close = 100. MFE should reach at least the third
     # candle's high (130) → +30%. MAE should reach the third candle's low
     # (70) → -30%. Allow small tolerance for slippage rounding.
-    assert float(t.mfe_pct) >= 29.0, (
-        f"MFE must include exit candle high, got {t.mfe_pct}"
-    )
-    assert float(t.mae_pct) <= -29.0, (
-        f"MAE must include exit candle low, got {t.mae_pct}"
-    )
+    assert (
+        float(t.mfe_pct) >= 29.0
+    ), f"MFE must include exit candle high, got {t.mfe_pct}"
+    assert (
+        float(t.mae_pct) <= -29.0
+    ), f"MAE must include exit candle low, got {t.mae_pct}"
 
 
 def test_metrics_include_advanced_fields():

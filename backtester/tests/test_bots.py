@@ -154,9 +154,9 @@ def test_donchian_trailing_stop_exits_below_band():
 
     result = engine.run(bot, candles)
     sell_trades = [t for t in result.trades if t.reason == "ATR_TRAIL_STOP"]
-    assert sell_trades, (
-        f"expected ATR_TRAIL_STOP exit, got {[t.reason for t in result.trades]}"
-    )
+    assert (
+        sell_trades
+    ), f"expected ATR_TRAIL_STOP exit, got {[t.reason for t in result.trades]}"
 
 
 # ───────────────────────── GridTrading ───────────────────────────────

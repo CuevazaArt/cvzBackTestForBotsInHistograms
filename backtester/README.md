@@ -176,7 +176,7 @@ class MyBot(BotBase):
     def __init__(self, param1=10, param2=20):
         self.param1 = param1
         self.param2 = param2
-    
+
     def on_candle(self, candle, portfolio):
         orders = []
         # Tu lógica aquí

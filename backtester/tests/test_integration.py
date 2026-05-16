@@ -455,12 +455,12 @@ def test_advanced_metrics_present_in_response(app_with_synthetic_data):
     ):
         assert key in summary, f"Missing metric: {key}"
         val = summary[key]
-        assert isinstance(val, (int, float)), (
-            f"{key} should be numeric, got {type(val)}"
-        )
-        assert not math.isnan(val) and not math.isinf(val), (
-            f"{key} is not finite: {val}"
-        )
+        assert isinstance(
+            val, (int, float)
+        ), f"{key} should be numeric, got {type(val)}"
+        assert not math.isnan(val) and not math.isinf(
+            val
+        ), f"{key} is not finite: {val}"
 
 
 def test_job_cancel_unknown_returns_404(app_with_synthetic_data):

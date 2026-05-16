@@ -293,9 +293,9 @@ def test_invariant_fees_non_negative(candles: list[Candle]) -> None:
     result = engine.run(bot, candles, symbol="HYPO", timeframe="1m")
 
     total_fees = sum((t.fee_usdt for t in result.trades), start=Decimal("0"))
-    assert total_fees >= Decimal("0"), (
-        f"Aggregate fees went negative: {total_fees} across {len(result.trades)} trades"
-    )
+    assert total_fees >= Decimal(
+        "0"
+    ), f"Aggregate fees went negative: {total_fees} across {len(result.trades)} trades"
     # And per-trade fees should also be non-negative individually — a
     # negative trade fee would average out in the sum but indicates an
     # accounting bug just the same.
