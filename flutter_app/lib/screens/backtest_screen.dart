@@ -15,7 +15,7 @@ import 'package:backtester_shell/widgets/mini_weight_chart.dart';
 import 'package:backtester_shell/widgets/validation_error_dialog.dart';
 
 /// Playback transport state for a backtest run.
-enum _RunState { idle, running, paused, cancelled, done }
+enum _RunState { idle, running, paused, done }
 
 /// Speed presets: label → speed_ms value.
 const _speedPresets = <String, int>{

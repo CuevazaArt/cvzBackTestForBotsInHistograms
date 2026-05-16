@@ -193,7 +193,6 @@ class WsService {
     _stopHeartbeat();
     if (status.value == WsStatus.disconnected) return;
     status.value = WsStatus.disconnected;
-    // ignore: use_null_aware_elements
     _controller?.add(WsEvent(WsEventType.disconnected, {'message': ?error}));
 
     if (_wantConnected && _reconnectAttempts < maxReconnectAttempts) {
@@ -270,10 +269,8 @@ class WsService {
         'bots': bots,
         'symbol': symbol,
         'timeframe': timeframe,
-        // ignore: use_null_aware_elements
-        if (startMs != null) 'start_ms': startMs,
-        // ignore: use_null_aware_elements
-        if (endMs != null) 'end_ms': endMs,
+        'start_ms': ?startMs,
+        'end_ms': ?endMs,
         'initial_cash': initialCash,
         'taker_fee_pct': takerFeePct,
         'slippage_pct': slippagePct,
