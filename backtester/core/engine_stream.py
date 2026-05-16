@@ -11,6 +11,7 @@ Events include `bot_id` so the frontend can color-code by strategy.
 from __future__ import annotations
 
 import logging
+import time
 from decimal import Decimal
 from typing import Callable, Optional
 
@@ -25,6 +26,7 @@ from backtester.core.engine import (
     compute_max_drawdown_pct,
 )
 from backtester.core.orders import update_trailing_anchor
+from backtester.core.run_control import RunController
 
 _LOG = logging.getLogger("backtester.engine.stream")
 
@@ -54,6 +56,7 @@ class StreamingEngine(BacktestEngine):
         equity_every: int = 25,
         progress_every: int = 50,
         cache=None,
+        controller: Optional[RunController] = None,
     ) -> None:
         super().__init__(config)
         self._emit: EmitFn = on_event or (lambda t, d: None)
@@ -62,6 +65,7 @@ class StreamingEngine(BacktestEngine):
         self._equity_every = max(equity_every, 1)
         self._progress_every = max(progress_every, 1)
         self._cache = cache  # IndicatorCache | None
+        self._controller: Optional[RunController] = controller
 
     # ── helpers ───────────────────────────────────────────────────
 
@@ -180,7 +184,23 @@ class StreamingEngine(BacktestEngine):
         )
 
         try:
+            _was_cancelled = False
             for idx, candle in enumerate(candles):
+                # ── Transport controls ────────────────────────────────
+                if self._controller is not None:
+                    if self._controller.is_cancelled:
+                        self._emit("cancelled", {"candles_done": idx})
+                        _was_cancelled = True
+                        break
+                    should_stop = self._controller.wait_if_paused()
+                    if should_stop:
+                        self._emit("cancelled", {"candles_done": idx})
+                        _was_cancelled = True
+                        break
+                    speed = self._controller.speed_ms
+                    if speed > 0:
+                        time.sleep(speed / 1000.0)
+
                 # ── 1. Each bot decides on its own portfolio ──────
                 # Compute circuit-breaker flag once per candle.
                 new_entries_halted = self._circuit_breaker_tripped(
@@ -258,6 +278,9 @@ class StreamingEngine(BacktestEngine):
                     self._emit_progress(idx)
 
             # ── finalize ─────────────────────────────────────────
+            if _was_cancelled:
+                return result
+
             result.trades = [t for p in portfolios for t in p.closed_trades]
             result.final_equity = (
                 sum(p.total_equity(candles[-1].close) for p in portfolios)

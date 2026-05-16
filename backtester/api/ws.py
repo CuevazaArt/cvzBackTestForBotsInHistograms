@@ -19,6 +19,7 @@ from backtester.api.schemas import BacktestRequest, OptimizeRequest
 from backtester.api.security import validate_ws_token
 from backtester.api.serialization import json_default, unique_bot_names
 from backtester.core.engine import BacktestConfig, Candle
+from backtester.core.run_control import RunController
 
 _LOG = logging.getLogger("backtester.api.ws")
 
@@ -58,6 +59,11 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
     heartbeat_task = asyncio.create_task(_heartbeat())
 
+    # Active RunController for the current backtest run (None when idle).
+    active_controller: RunController | None = None
+    # asyncio.Task wrapping the engine thread — kept so we can await it.
+    _run_task: asyncio.Task | None = None  # type: ignore[type-arg]
+
     try:
         while True:
             msg = await websocket.receive_json()
@@ -69,6 +75,19 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 _send("pong", {})
 
             elif action == "backtest":
+                # Reject concurrent runs on the same socket.
+                if active_controller is not None and not active_controller.is_cancelled:
+                    _send(
+                        "error",
+                        {
+                            "message": (
+                                "A backtest is already running on this connection. "
+                                "Send 'cancel' first or wait for it to finish."
+                            )
+                        },
+                    )
+                    continue
+
                 try:
                     req = BacktestRequest(**msg["config"])
                 except Exception as exc:  # noqa: BLE001
@@ -119,6 +138,12 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     fill_on_next_open=req.fill_on_next_open,
                 )
 
+                # Build controller — initial speed from payload or default 100 ms.
+                speed_ms: int = int(msg.get("speed_ms", RunController.DEFAULT_SPEED_MS))
+                controller = RunController()
+                controller.set_speed(speed_ms)
+                active_controller = controller
+
                 # Assign a stable run_id so the client can retrieve stored results.
                 run_id = str(uuid4())
                 _last_result: dict | None = None
@@ -138,9 +163,8 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     on_event=_send_with_capture,
                     total=len(candles),
                     cache=ctx.indicator_cache,
+                    controller=controller,
                 )
-                # Run the synchronous engine in a worker thread so the WS
-                # event loop stays responsive (and pings can fly through).
                 bot_names = unique_bot_names(req.bots)
 
                 run_config = {
@@ -153,26 +177,76 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     "fill_on_next_open": req.fill_on_next_open,
                 }
 
-                await asyncio.to_thread(
-                    engine.run,
-                    bots=bots_instances,
-                    candles=candles,
-                    symbol=req.symbol.upper(),
-                    timeframe=req.timeframe,
-                    indicator_specs=[
-                        {"name": i.name, **i.to_kwargs()} for i in req.indicators
-                    ],
-                    bot_names=bot_names,
-                )
+                async def _do_run() -> None:
+                    nonlocal active_controller, _last_result
+                    try:
+                        await asyncio.to_thread(
+                            engine.run,
+                            bots=bots_instances,
+                            candles=candles,
+                            symbol=req.symbol.upper(),
+                            timeframe=req.timeframe,
+                            indicator_specs=[
+                                {"name": i.name, **i.to_kwargs()} for i in req.indicators
+                            ],
+                            bot_names=bot_names,
+                        )
+                        if _last_result is not None:
+                            ctx.result_store.save(
+                                run_id,
+                                req.symbol.upper(),
+                                req.timeframe,
+                                run_config,
+                                _last_result,
+                            )
+                    finally:
+                        # Clear controller so a new run can start.
+                        active_controller = None
 
-                if _last_result is not None:
-                    ctx.result_store.save(
-                        run_id,
-                        req.symbol.upper(),
-                        req.timeframe,
-                        run_config,
-                        _last_result,
-                    )
+                _run_task = asyncio.create_task(_do_run())
+
+            # ── Transport controls ────────────────────────────────────────────
+
+            elif action == "pause":
+                if active_controller is None:
+                    _send("error", {"message": "No active run to pause"})
+                else:
+                    active_controller.pause()
+                    _send("paused", {})
+
+            elif action == "resume":
+                if active_controller is None:
+                    _send("error", {"message": "No active run to resume"})
+                else:
+                    active_controller.resume()
+                    _send("resumed", {})
+
+            elif action == "step":
+                if active_controller is None:
+                    _send("error", {"message": "No active run to step"})
+                else:
+                    active_controller.step()
+                    _send("paused", {})
+
+            elif action == "set_speed":
+                if active_controller is None:
+                    _send("error", {"message": "No active run to set speed on"})
+                else:
+                    try:
+                        speed_ms_val = int(msg["speed_ms"])
+                    except (KeyError, ValueError, TypeError):
+                        _send("error", {"message": "set_speed requires integer field 'speed_ms'"})
+                        continue
+                    active_controller.set_speed(speed_ms_val)
+                    _send("speed_changed", {"speed_ms": speed_ms_val})
+
+            elif action == "cancel":
+                if active_controller is None:
+                    _send("error", {"message": "No active run to cancel"})
+                else:
+                    active_controller.cancel()
+                    # 'cancelled' event is emitted by the engine loop itself;
+                    # no echo needed here to avoid duplicate events.
 
             elif action == "optimize":
                 try:
@@ -276,6 +350,15 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         except Exception:  # noqa: BLE001
             pass
     finally:
+        # Cancel any in-flight run so the thread doesn't linger.
+        if active_controller is not None:
+            active_controller.cancel()
+        if _run_task is not None and not _run_task.done():
+            _run_task.cancel()
+            try:
+                await _run_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
         heartbeat_task.cancel()
         try:
             await heartbeat_task
