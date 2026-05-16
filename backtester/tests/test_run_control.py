@@ -117,15 +117,15 @@ def test_step_unblocks_once_then_re_pauses():
     time.sleep(0.05)  # let thread block
     assert len(released) == 0
 
-    ctrl.step()          # allow exactly 1 candle
+    ctrl.step()  # allow exactly 1 candle
     time.sleep(0.15)
     assert len(released) == 1  # only one candle passed
 
-    ctrl.step()          # allow one more
+    ctrl.step()  # allow one more
     time.sleep(0.15)
     assert len(released) == 2
 
-    ctrl.resume()        # let the rest through
+    ctrl.resume()  # let the rest through
     t.join(timeout=1.0)
     assert len(released) == 3
 

@@ -35,9 +35,7 @@ class JobRegistry:
     def __init__(self, db_path: Path | str | None = None) -> None:
         # In-memory fallback for unit tests that pass no path.
         path = db_path if db_path is not None else ":memory:"
-        store: object = (
-            JobStore(path) if path != ":memory:" else _InMemoryJobStore()
-        )
+        store: object = JobStore(path) if path != ":memory:" else _InMemoryJobStore()
         # ``JobStore`` and ``_InMemoryJobStore`` both satisfy ``_JobStoreLike``
         # structurally; mypy can't unify them through the conditional expression
         # because ``_InMemoryJobStore`` is forward-referenced (defined below),

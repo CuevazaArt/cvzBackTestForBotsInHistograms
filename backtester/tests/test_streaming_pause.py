@@ -78,7 +78,9 @@ def test_engine_without_controller_completes():
     events: list[str] = []
     candles = _make_candles(5)
     cfg = BacktestConfig(initial_cash=Decimal("10000"))
-    engine = StreamingEngine(config=cfg, on_event=lambda t, d: events.append(t), total=5)
+    engine = StreamingEngine(
+        config=cfg, on_event=lambda t, d: events.append(t), total=5
+    )
     engine.run(bots=[_NoOpBot()], candles=candles, symbol="TEST", timeframe="1m")
 
     assert "start" in events
