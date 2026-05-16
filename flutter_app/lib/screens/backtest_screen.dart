@@ -2598,95 +2598,96 @@ class _DownloadDialogState extends State<_DownloadDialog> {
           children: [
             Expanded(
               flex: 1,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'Download History',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Download History',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _symbolCtrl,
-                    decoration: const InputDecoration(labelText: 'Symbol'),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: _tf,
-                    items: _timeframes
-                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) setState(() => _tf = v);
-                    },
-                    decoration: const InputDecoration(labelText: 'Timeframe'),
-                  ),
-                  const SizedBox(height: 12),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: true, label: Text('Bulk ZIP')),
-                      ButtonSegment(value: false, label: Text('REST API')),
-                    ],
-                    selected: {_useZip},
-                    onSelectionChanged: (Set<bool> newSelection) {
-                      setState(() => _useZip = newSelection.first);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  if (!_useZip)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _fromCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'From (YYYY-MM-DD)',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _toCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'To (YYYY-MM-DD)',
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  else
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _yearCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Year (YYYY)',
-                            ),
-                            keyboardType: TextInputType.number,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _monthCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Month (e.g. 1, 1-12, all)',
-                            ),
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _symbolCtrl,
+                      decoration: const InputDecoration(labelText: 'Symbol'),
                     ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: _download,
-                    icon: const Icon(Icons.download, size: 16),
-                    label: const Text('Start Download'),
-                  ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: _tf,
+                      items: _timeframes
+                          .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null) setState(() => _tf = v);
+                      },
+                      decoration: const InputDecoration(labelText: 'Timeframe'),
+                    ),
+                    const SizedBox(height: 12),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(value: true, label: Text('Bulk ZIP')),
+                        ButtonSegment(value: false, label: Text('REST API')),
+                      ],
+                      selected: {_useZip},
+                      onSelectionChanged: (Set<bool> newSelection) {
+                        setState(() => _useZip = newSelection.first);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    if (!_useZip)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _fromCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'From (YYYY-MM-DD)',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _toCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'To (YYYY-MM-DD)',
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _yearCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Year (YYYY)',
+                              ),
+                              keyboardType: TextInputType.number,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _monthCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Month (e.g. 1, 1-12, all)',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: _download,
+                      icon: const Icon(Icons.download, size: 16),
+                      label: const Text('Start Download'),
+                    ),
                   if (_loading && _downloadProgress > 0) ...[
                     const SizedBox(height: 16),
                     LinearProgressIndicator(
@@ -2714,6 +2715,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                     _buildQualityBadge(_qualityReport!),
                   ],
                 ],
+                ),
               ),
             ),
             const VerticalDivider(width: 24),
