@@ -82,4 +82,31 @@ class BotBase(ABC):
 
     def max_sell_qty(self, portfolio: Portfolio) -> Decimal:
         """Total quantity held across all open positions."""
-        return sum(p.qty for p in portfolio.positions)
+        return sum((p.qty for p in portfolio.positions), start=Decimal("0"))
+
+    @staticmethod
+    def size_by_risk(
+        portfolio: Portfolio,
+        current_price: Decimal | float,
+        stop_pct: Decimal | float,
+        risk_pct: Decimal | float = Decimal("1.0"),
+    ) -> Decimal:
+        """Compute position size such that hitting the stop loses ``risk_pct`` of equity.
+
+        Mirrors :meth:`backtester.core.engine.BacktestBot.size_by_risk` so that
+        bots extending :class:`BotBase` (which is the public bot SDK base) can
+        size positions by risk without having to import ``BacktestBot`` directly.
+
+        Returns ``Decimal(0)`` if any input is non-positive.
+        """
+        eq = portfolio.total_equity(Decimal(str(current_price)))
+        price = Decimal(str(current_price))
+        sp = Decimal(str(stop_pct))
+        rp = Decimal(str(risk_pct))
+        if eq <= 0 or price <= 0 or sp <= 0 or rp <= 0:
+            return Decimal(0)
+        risk_amount = eq * rp / Decimal(100)
+        loss_per_unit = price * sp / Decimal(100)
+        if loss_per_unit <= 0:
+            return Decimal(0)
+        return (risk_amount / loss_per_unit).quantize(Decimal("0.00000001"))

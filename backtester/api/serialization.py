@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections import Counter
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from backtester.api.schemas import (
     BacktestResponse,
+    BotRunSpec,
     CandleDTO,
     EquityPoint,
     TradeDTO,
@@ -91,10 +92,13 @@ def result_to_response(
     result: BacktestResult,
     candles: list,
 ) -> BacktestResponse:
+    # Pydantic accepts plain dicts and coerces them into BotRunSpec instances
+    # (see ``BacktestResponse.bots``). The cast keeps mypy quiet without
+    # forcing every caller to instantiate ``BotRunSpec`` up-front.
     return BacktestResponse(
         symbol=result.symbol,
         timeframe=result.timeframe,
-        bots=bots,
+        bots=cast("list[BotRunSpec]", bots),
         summary=compute_metrics(result),
         trades=[trade_to_dto(t) for t in result.trades],
         equity_curve=equity_curve_dto(result, candles),

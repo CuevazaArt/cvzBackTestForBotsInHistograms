@@ -201,9 +201,11 @@ class BinanceDownloader:
             headers["X-MBX-APIKEY"] = self.api_key
 
         try:
+            # ``requests`` accepts ``Mapping[str, str | int]`` at runtime even
+            # though the type stub here narrows to ``str | bytes | None``.
             resp = requests.get(
                 f"{self.BASE_URL}/klines",
-                params=params,
+                params=params,  # type: ignore[arg-type]
                 headers=headers,
                 timeout=10,
             )

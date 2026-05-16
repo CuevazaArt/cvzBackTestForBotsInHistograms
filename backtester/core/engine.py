@@ -278,15 +278,17 @@ class BacktestResult:
         statistic.
         """
         initial = self.equity_curve[0] if self.equity_curve else Decimal("0")
-        total_return = (
-            ((self.final_equity - initial) / initial * 100) if initial > 0 else 0
+        total_return: Decimal = (
+            ((self.final_equity - initial) / initial * 100)
+            if initial > 0
+            else Decimal("0")
         )
 
         closed = [t for t in self.trades if t.exit_idx is not None]
         winners = [t for t in closed if t.pnl > 0]
         losers = [t for t in closed if t.pnl < 0]
 
-        win_rate = len(winners) / len(closed) * 100 if closed else 0
+        win_rate: float = len(winners) / len(closed) * 100 if closed else 0.0
 
         gross_profit = sum((t.pnl for t in winners), start=Decimal("0"))
         gross_loss = abs(sum((t.pnl for t in losers), start=Decimal("0")))

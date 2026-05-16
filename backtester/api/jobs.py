@@ -7,11 +7,26 @@ restarts. The legacy `JobRegistry` name is preserved for backwards compat.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 from backtester.core.job_store import Job, JobStore
 
 __all__ = ["Job", "JobRegistry"]
+
+
+class _JobStoreLike(Protocol):
+    """Structural type shared by ``JobStore`` and the in-memory fallback."""
+
+    def create(self, kind: str) -> Job: ...
+    def get(self, job_id: str) -> Optional[Job]: ...
+    def update(self, job_id: str, **kwargs: Any) -> None: ...
+    def list_all(self) -> list[dict[str, Any]]: ...
+    def list_filtered(self, **kwargs: Any) -> list[dict[str, Any]]: ...
+    def delete(self, job_id: str) -> bool: ...
+    def cleanup_older_than(self, seconds: float) -> int: ...
+    def create_run(self, kind: str, config: dict[str, Any]) -> str: ...
+    def request_cancel(self, job_id: str) -> bool: ...
+    def is_cancel_requested(self, job_id: str) -> bool: ...
 
 
 class JobRegistry:
@@ -20,7 +35,9 @@ class JobRegistry:
     def __init__(self, db_path: Path | str | None = None) -> None:
         # In-memory fallback for unit tests that pass no path.
         path = db_path if db_path is not None else ":memory:"
-        self._store = JobStore(path) if path != ":memory:" else _InMemoryJobStore()
+        self._store: _JobStoreLike = (
+            JobStore(path) if path != ":memory:" else _InMemoryJobStore()
+        )
 
     # ── delegation ───────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional, cast
 
 from rich.console import Console
 from rich.prompt import Prompt, Confirm
@@ -114,8 +114,8 @@ class BacktesterCLI:
 
     def _edit_bot_params(self, bot_class: type) -> dict[str, Any]:
         """Interactive parameter editor."""
-        spec = bot_class.param_spec()
-        params = {}
+        spec = bot_class.param_spec()  # type: ignore[attr-defined]
+        params: dict[str, Any] = {}
 
         console.print("\n[bold]Configure parameters:[/bold]")
 
@@ -193,7 +193,13 @@ class BacktesterCLI:
             f"Running {len(experiments)} experiments with {workers} workers...\n"
         )
 
-        runner = ExperimentRunner(self.downloader, BOT_REGISTRY)
+        # ``BOT_REGISTRY`` is ``dict[str, type[BotBase]]`` and the runner
+        # accepts the looser ``dict[str, Callable[..., Any]]``; ``type`` is a
+        # ``Callable`` at runtime, but ``Dict`` is invariant for mypy.
+        runner = ExperimentRunner(
+            self.downloader,
+            cast("dict[str, Callable[..., Any]]", BOT_REGISTRY),
+        )
 
         def progress_cb(done, total):
             console.print(f"Progress: {done}/{total}", end="\r")
@@ -223,7 +229,11 @@ class BacktesterCLI:
         )
 
         cfg = OptimizationConfig.from_dict(json.loads(config_path.read_text()))
-        objective = Objective(cfg, self.downloader, BOT_REGISTRY)
+        objective = Objective(
+            cfg,
+            self.downloader,
+            cast("dict[str, Callable[..., Any]]", BOT_REGISTRY),
+        )
 
         console.print(f"Bot:       [yellow]{cfg.bot_class}[/yellow]")
         console.print(f"Symbol:    [yellow]{cfg.symbol} {cfg.timeframe}[/yellow]")
@@ -232,7 +242,7 @@ class BacktesterCLI:
         )
         console.print(f"Trials:    [yellow]{trials}[/yellow]\n")
 
-        best_so_far = {"score": None}
+        best_so_far: dict[str, float | None] = {"score": None}
 
         with Progress(
             SpinnerColumn(),
