@@ -10,7 +10,7 @@ from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
 
-from backtester.bots import BOT_REGISTRY, BotBase
+from backtester.bots import BOT_REGISTRY
 from backtester.core import (
     BinanceDownloader,
     BacktestEngine,
