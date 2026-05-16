@@ -2524,20 +2524,27 @@ class _DownloadDialogState extends State<_DownloadDialog> {
             children: [
               Icon(iconData, color: badgeColor, size: 16),
               const SizedBox(width: 6),
-              Text(
-                isOk ? 'Data Quality: Clean' : 'Data Quality: Warnings',
-                style: TextStyle(
-                  color: badgeColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
+              Flexible(
+                child: Text(
+                  isOk ? 'Data Quality: Clean' : 'Data Quality: Warnings',
+                  style: TextStyle(
+                    color: badgeColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
-              Text(
-                '$total candles · $completeness%',
-                style: const TextStyle(
-                  color: Color(0xFF787B86),
-                  fontSize: 10,
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  '$total · $completeness%',
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(
+                    color: Color(0xFF787B86),
+                    fontSize: 10,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
