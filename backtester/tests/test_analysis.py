@@ -63,7 +63,9 @@ class _AlwaysBuyAndSell:
 
 def test_engine_records_mfe_mae_on_closed_trades():
     """Closed trades should carry mfe_pct and mae_pct snapshot from Position."""
-    engine = BacktestEngine(BacktestConfig(initial_cash=Decimal("10000")))
+    engine = BacktestEngine(
+        BacktestConfig(initial_cash=Decimal("10000"), fill_on_next_open=False)
+    )
     result = engine.run([_AlwaysBuyAndSell()], _candles(100))
     assert len(result.trades) > 0
     for t in result.trades:
@@ -132,6 +134,7 @@ def test_mfe_mae_includes_exit_candle_range():
             initial_cash=Decimal("10000"),
             taker_fee_pct=Decimal("0"),
             slippage_pct=Decimal("0"),
+            fill_on_next_open=False,
         )
     )
     result = engine.run([_BuyHoldSell()], candles)
@@ -140,12 +143,12 @@ def test_mfe_mae_includes_exit_candle_range():
     # Entry was at candle[0].close = 100. MFE should reach at least the third
     # candle's high (130) → +30%. MAE should reach the third candle's low
     # (70) → -30%. Allow small tolerance for slippage rounding.
-    assert (
-        float(t.mfe_pct) >= 29.0
-    ), f"MFE must include exit candle high, got {t.mfe_pct}"
-    assert (
-        float(t.mae_pct) <= -29.0
-    ), f"MAE must include exit candle low, got {t.mae_pct}"
+    assert float(t.mfe_pct) >= 29.0, (
+        f"MFE must include exit candle high, got {t.mfe_pct}"
+    )
+    assert float(t.mae_pct) <= -29.0, (
+        f"MAE must include exit candle low, got {t.mae_pct}"
+    )
 
 
 def test_metrics_include_advanced_fields():

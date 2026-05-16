@@ -64,6 +64,7 @@ class Position:
     qty: Decimal
     entry_idx: int
     entry_time: int
+    side: str = "long"
     bot_id: str = ""
     # Running excursion trackers (updated each candle while position is open)
     max_favorable_price: Decimal = Decimal("0")  # Highest price seen → MFE
@@ -80,6 +81,13 @@ class Position:
         if self.max_favorable_price == 0:
             self.max_favorable_price = self.entry_price
             self.max_adverse_price = self.entry_price
+        if self.side == "short":
+            # For shorts, lower prices are favorable and higher prices adverse.
+            if low < self.max_favorable_price:
+                self.max_favorable_price = low
+            if high > self.max_adverse_price or self.max_adverse_price == 0:
+                self.max_adverse_price = high
+            return
         if high > self.max_favorable_price:
             self.max_favorable_price = high
         if low < self.max_adverse_price or self.max_adverse_price == 0:
@@ -111,6 +119,7 @@ class Trade:
     pnl_pct: Decimal
     fee_usdt: Decimal
     reason: str
+    side: str = "long"
     bot_id: str = ""
     # Excursion stats (snapshot from Position at close time)
     mfe_pct: Decimal = Decimal("0")  # Max favorable excursion %
@@ -135,16 +144,27 @@ class Portfolio:
 
     def total_equity(self, current_price: Decimal) -> Decimal:
         """Current portfolio value."""
-        # ``start=Decimal("0")`` keeps the return type as Decimal even with no
-        # open positions (``sum([])`` would otherwise return ``int(0)``).
-        position_value = sum(
-            (p.qty * current_price for p in self.positions), start=Decimal("0")
+        long_value = sum(
+            (p.qty * current_price for p in self.positions if p.side == "long"),
+            start=Decimal("0"),
         )
-        return self.cash + position_value
+        short_liability = sum(
+            (p.qty * current_price for p in self.positions if p.side == "short"),
+            start=Decimal("0"),
+        )
+        return self.cash + long_value - short_liability
 
     def open_position_cost(self) -> Decimal:
         """Total cost of open positions at entry price."""
-        return sum((p.qty * p.entry_price for p in self.positions), start=Decimal("0"))
+        long_cost = sum(
+            (p.qty * p.entry_price for p in self.positions if p.side == "long"),
+            start=Decimal("0"),
+        )
+        short_notional = sum(
+            (p.qty * p.entry_price for p in self.positions if p.side == "short"),
+            start=Decimal("0"),
+        )
+        return long_cost - short_notional
 
     def cancel_orders_for_position(self, position_id: int) -> None:
         """Remove any pending child orders attached to a closed position.
@@ -228,6 +248,7 @@ class BacktestConfig:
     initial_cash: Decimal = Decimal("10000")
     taker_fee_pct: Decimal = Decimal("0.1")  # Binance default
     slippage_pct: Decimal = Decimal("0.05")  # Spread + impact
+    fill_on_next_open: bool = True
     max_position_qty: Optional[Decimal] = None  # None = unlimited
     max_drawdown_pct_halt: Optional[Decimal] = None  # circuit breaker
 
@@ -531,34 +552,40 @@ class BacktestEngine:
             _LOG.warning("[%s] Bad order dict %r: %s", bot_id, raw, exc)
             return
 
-        side, qty, otype = o["side"], o["qty"], o["type"]
+        side, qty, otype, action = o["side"], o["qty"], o["type"], o["action"]
         if qty <= 0:
             return
 
-        # Block new BUY entries when circuit breaker tripped (exits ok).
-        if new_entries_halted and side == OrderSide.BUY:
-            _LOG.info("[%s] BUY blocked: max DD halt active", bot_id)
+        # Block new entries when circuit breaker tripped (exits still allowed).
+        if new_entries_halted and action in {"open_long", "open_short"}:
+            _LOG.info("[%s] Entry blocked: max DD halt active", bot_id)
             return
 
         if otype == OrderType.MARKET:
-            if side == OrderSide.BUY:
-                self._process_buy(
-                    candle,
-                    portfolio,
-                    qty,
-                    result,
+            if self.config.fill_on_next_open:
+                portfolio.pending_orders.append(
+                    PendingOrder(
+                        side=side,
+                        qty=qty,
+                        type=OrderType.MARKET,
+                        reason=o["reason"],
+                        fill_reason=o["reason"],
+                        bot_id=bot_id,
+                        order_action=action,
+                        bracket=o if action in {"open_long", "open_short"} else None,
+                    )
+                )
+            else:
+                self._fill_market_action(
+                    action=action,
+                    ref_price=candle.close,
+                    candle=candle,
+                    portfolio=portfolio,
+                    qty=qty,
+                    result=result,
                     bot_id=bot_id,
                     reason=o["reason"],
                     bracket=o,
-                )
-            else:
-                self._process_sell(
-                    candle,
-                    portfolio,
-                    qty,
-                    result,
-                    bot_id=bot_id,
-                    reason=o["reason"],
                 )
             return
 
@@ -583,6 +610,7 @@ class BacktestEngine:
             reason=fill_reason,
             fill_reason=fill_reason,
             bot_id=bot_id,
+            order_action=action,
         )
         portfolio.pending_orders.append(po)
 
@@ -610,7 +638,10 @@ class BacktestEngine:
                 continue
 
             fired = False
-            if po.type == OrderType.LIMIT:
+            if po.type == OrderType.MARKET:
+                self._fill_pending(po, candle.open, candle, portfolio, result, bot_id)
+                fired = True
+            elif po.type == OrderType.LIMIT:
                 if limit_triggers(po, candle.high, candle.low):
                     # Conservative fill: at the limit price (better than market)
                     fill_price = po.limit_price
@@ -655,27 +686,75 @@ class BacktestEngine:
             if hasattr(po.fill_reason, "value")
             else str(po.fill_reason)
         )
-        if po.side == OrderSide.BUY:
-            # Synthesize a candle with ref_price as close so slippage applies
-            self._process_buy_at(
+        self._fill_market_action(
+            action=po.order_action,
+            ref_price=ref_price,
+            candle=candle,
+            portfolio=portfolio,
+            qty=po.qty,
+            result=result,
+            bot_id=bot_id,
+            reason=reason,
+            bracket=po.bracket,
+            parent_position_id=po.parent_position_id,
+        )
+
+    def _fill_market_action(
+        self,
+        action: str,
+        ref_price: Decimal,
+        candle: Candle,
+        portfolio: Portfolio,
+        qty: Decimal,
+        result: BacktestResult,
+        bot_id: str,
+        reason: str,
+        bracket: dict[str, Any] | None = None,
+        parent_position_id: Optional[int] = None,
+    ) -> None:
+        if action == "open_short":
+            self._process_short_at(
                 ref_price,
                 candle,
                 portfolio,
-                po.qty,
+                qty,
                 result,
                 bot_id=bot_id,
                 reason=reason,
+                bracket=bracket,
             )
-        else:
+        elif action == "close_short":
+            self._process_cover_at(
+                ref_price,
+                candle,
+                portfolio,
+                qty,
+                result,
+                bot_id=bot_id,
+                reason=reason,
+                parent_position_id=parent_position_id,
+            )
+        elif action == "close_long":
             self._process_sell_at(
                 ref_price,
                 candle,
                 portfolio,
-                po.qty,
+                qty,
                 result,
                 bot_id=bot_id,
                 reason=reason,
-                parent_position_id=po.parent_position_id,
+                parent_position_id=parent_position_id,
+            )
+        else:
+            self._process_buy_at(
+                ref_price,
+                candle,
+                portfolio,
+                qty,
+                result,
+                bot_id=bot_id,
+                reason=reason,
+                bracket=bracket,
             )
 
     # ── MARKET buy/sell ───────────────────────────────────────────
@@ -735,7 +814,11 @@ class BacktestEngine:
         # Enforce per-portfolio position cap when configured.
         if self.config.max_position_qty is not None:
             held = sum(
-                (p.qty for p in portfolio.positions if p.bot_id == bot_id),
+                (
+                    p.qty
+                    for p in portfolio.positions
+                    if p.bot_id == bot_id and p.side == "long"
+                ),
                 start=Decimal("0"),
             )
             remaining_cap = self.config.max_position_qty - held
@@ -750,6 +833,7 @@ class BacktestEngine:
             qty=qty,
             entry_idx=len(result.equity_curve),
             entry_time=candle.timestamp_ms,
+            side="long",
             bot_id=bot_id,
         )
         # Seed MFE/MAE with the entry candle's range so a same-candle exit
@@ -769,15 +853,22 @@ class BacktestEngine:
         portfolio: Portfolio,
     ) -> None:
         """Create protective SL / TP / trailing-stop orders against a new position."""
+        is_short = pos.side == "short"
+        exit_side = OrderSide.BUY if is_short else OrderSide.SELL
+
         # Stop loss
         sl_price = bracket.get("stop_loss_price")
         sl_pct = bracket.get("stop_loss_pct")
         if sl_price is None and sl_pct is not None:
-            sl_price = pos.entry_price * (Decimal(1) - sl_pct / Decimal(100))
+            sl_price = pos.entry_price * (
+                Decimal(1) + sl_pct / Decimal(100)
+                if is_short
+                else Decimal(1) - sl_pct / Decimal(100)
+            )
         if sl_price is not None:
             portfolio.pending_orders.append(
                 PendingOrder(
-                    side=OrderSide.SELL,
+                    side=exit_side,
                     qty=pos.qty,
                     type=OrderType.STOP,
                     stop_price=sl_price,
@@ -785,6 +876,7 @@ class BacktestEngine:
                     fill_reason=TriggerReason.STOP_LOSS,
                     bot_id=bot_id,
                     parent_position_id=pos.position_id,
+                    order_action="close_short" if is_short else "close_long",
                 )
             )
 
@@ -792,11 +884,15 @@ class BacktestEngine:
         tp_price = bracket.get("take_profit_price")
         tp_pct = bracket.get("take_profit_pct")
         if tp_price is None and tp_pct is not None:
-            tp_price = pos.entry_price * (Decimal(1) + tp_pct / Decimal(100))
+            tp_price = pos.entry_price * (
+                Decimal(1) - tp_pct / Decimal(100)
+                if is_short
+                else Decimal(1) + tp_pct / Decimal(100)
+            )
         if tp_price is not None:
             portfolio.pending_orders.append(
                 PendingOrder(
-                    side=OrderSide.SELL,
+                    side=exit_side,
                     qty=pos.qty,
                     type=OrderType.LIMIT,
                     limit_price=tp_price,
@@ -804,6 +900,7 @@ class BacktestEngine:
                     fill_reason=TriggerReason.TAKE_PROFIT,
                     bot_id=bot_id,
                     parent_position_id=pos.position_id,
+                    order_action="close_short" if is_short else "close_long",
                 )
             )
 
@@ -811,10 +908,14 @@ class BacktestEngine:
         trail = bracket.get("trailing_stop_pct")
         if trail is not None and trail > 0:
             anchor = pos.entry_price
-            stop = anchor * (Decimal(1) - trail / Decimal(100))
+            stop = anchor * (
+                Decimal(1) + trail / Decimal(100)
+                if is_short
+                else Decimal(1) - trail / Decimal(100)
+            )
             portfolio.pending_orders.append(
                 PendingOrder(
-                    side=OrderSide.SELL,
+                    side=exit_side,
                     qty=pos.qty,
                     type=OrderType.TRAILING_STOP,
                     stop_price=stop,
@@ -824,8 +925,87 @@ class BacktestEngine:
                     fill_reason=TriggerReason.TRAILING_STOP,
                     bot_id=bot_id,
                     parent_position_id=pos.position_id,
+                    order_action="close_short" if is_short else "close_long",
                 )
             )
+
+    def _process_short(
+        self,
+        candle: Candle,
+        portfolio: Portfolio,
+        qty: Decimal,
+        result: BacktestResult,
+        bot_id: str = "",
+        reason: str = "SHORT",
+        bracket: dict[str, Any] | None = None,
+    ) -> None:
+        self._process_short_at(
+            candle.close,
+            candle,
+            portfolio,
+            qty,
+            result,
+            bot_id=bot_id,
+            reason=reason,
+            bracket=bracket,
+        )
+
+    def _process_short_at(
+        self,
+        ref_price: Decimal,
+        candle: Candle,
+        portfolio: Portfolio,
+        qty: Decimal,
+        result: BacktestResult,
+        bot_id: str = "",
+        reason: str = "SHORT",
+        bracket: dict[str, Any] | None = None,
+    ) -> None:
+        if qty <= 0:
+            return
+        if self.config.max_position_qty is not None:
+            held = sum(
+                (
+                    p.qty
+                    for p in portfolio.positions
+                    if p.bot_id == bot_id and p.side == "short"
+                ),
+                start=Decimal("0"),
+            )
+            remaining_cap = self.config.max_position_qty - held
+            if remaining_cap <= 0:
+                _LOG.debug("[%s] max_position_qty cap reached, short skipped", bot_id)
+                return
+            qty = min(qty, remaining_cap)
+        fill_price = ref_price * (1 - self.config.slippage_pct / 100)
+        proceeds = qty * fill_price
+        fee = proceeds * self.config.taker_fee_pct / 100
+        portfolio.cash += proceeds - fee
+        pos = Position(
+            entry_price=fill_price,
+            qty=qty,
+            entry_idx=len(result.equity_curve),
+            entry_time=candle.timestamp_ms,
+            side="short",
+            bot_id=bot_id,
+        )
+        pos.update_excursion(candle.high, candle.low)
+        portfolio.positions.append(pos)
+        if bracket:
+            self._attach_bracket_orders(pos, bracket, bot_id, portfolio)
+
+    def _process_cover(
+        self,
+        candle: Candle,
+        portfolio: Portfolio,
+        qty: Decimal,
+        result: BacktestResult,
+        bot_id: str = "",
+        reason: str = "COVER",
+    ) -> None:
+        self._process_cover_at(
+            candle.close, candle, portfolio, qty, result, bot_id=bot_id, reason=reason
+        )
 
     def _process_sell(
         self,
@@ -870,10 +1050,12 @@ class BacktestEngine:
         # close FIFO (oldest position first) — Binance convention.
         if parent_position_id is not None:
             targets = [
-                p for p in portfolio.positions if p.position_id == parent_position_id
+                p
+                for p in portfolio.positions
+                if p.position_id == parent_position_id and p.side == "long"
             ]
         else:
-            targets = list(portfolio.positions)
+            targets = [p for p in portfolio.positions if p.side == "long"]
 
         qty_remaining = qty
         closed_position_ids: list[int] = []
@@ -921,6 +1103,7 @@ class BacktestEngine:
                 pnl_pct=pnl_pct,
                 fee_usdt=prorated_fee,
                 reason=reason,
+                side="long",
                 bot_id=bot_id,
                 mfe_pct=mfe_pct,
                 mae_pct=mae_pct,
@@ -939,4 +1122,92 @@ class BacktestEngine:
             portfolio.cancel_orders_for_position(pid)
 
         # Remove empty positions
+        portfolio.positions = [p for p in portfolio.positions if p.qty > 0]
+
+    def _process_cover_at(
+        self,
+        ref_price: Decimal,
+        candle: Candle,
+        portfolio: Portfolio,
+        qty: Decimal,
+        result: BacktestResult,
+        bot_id: str = "",
+        reason: str = "COVER",
+        parent_position_id: Optional[int] = None,
+    ) -> None:
+        if qty <= 0 or not portfolio.positions:
+            return
+
+        fill_price = ref_price * (1 + self.config.slippage_pct / 100)
+        total_cost = qty * fill_price
+        total_fee = total_cost * self.config.taker_fee_pct / 100
+
+        if parent_position_id is not None:
+            targets = [
+                p
+                for p in portfolio.positions
+                if p.position_id == parent_position_id and p.side == "short"
+            ]
+        else:
+            targets = [p for p in portfolio.positions if p.side == "short"]
+
+        qty_remaining = qty
+        closed_position_ids: list[int] = []
+        for pos in targets:
+            if qty_remaining <= 0:
+                break
+
+            qty_to_close = min(qty_remaining, pos.qty)
+            prorated_fee = total_fee * (qty_to_close / qty) if qty > 0 else Decimal("0")
+            cost_this = qty_to_close * fill_price
+
+            pnl = qty_to_close * (pos.entry_price - fill_price) - prorated_fee
+            pnl_pct = (
+                ((pos.entry_price - fill_price) / pos.entry_price * 100)
+                if pos.entry_price > 0
+                else Decimal("0")
+            )
+
+            portfolio.cash -= cost_this + prorated_fee
+
+            if pos.entry_price > 0 and pos.max_favorable_price > 0:
+                mfe_pct = (
+                    (pos.entry_price - pos.max_favorable_price) / pos.entry_price * 100
+                )
+                mae_pct = (
+                    (pos.entry_price - pos.max_adverse_price) / pos.entry_price * 100
+                )
+            else:
+                mfe_pct = Decimal("0")
+                mae_pct = Decimal("0")
+            duration_bars = max(0, len(result.equity_curve) - pos.entry_idx)
+
+            trade = Trade(
+                entry_price=pos.entry_price,
+                exit_price=fill_price,
+                qty=qty_to_close,
+                entry_idx=pos.entry_idx,
+                exit_idx=len(result.equity_curve),
+                entry_time=pos.entry_time,
+                exit_time=candle.timestamp_ms,
+                pnl=pnl,
+                pnl_pct=pnl_pct,
+                fee_usdt=prorated_fee,
+                reason=reason,
+                side="short",
+                bot_id=bot_id,
+                mfe_pct=mfe_pct,
+                mae_pct=mae_pct,
+                duration_bars=duration_bars,
+            )
+            portfolio.closed_trades.append(trade)
+
+            pos.qty -= qty_to_close
+            qty_remaining -= qty_to_close
+            if pos.qty <= 0:
+                closed_position_ids.append(pos.position_id)
+
+        for pid in closed_position_ids:
+            portfolio.cancel_orders_for_position(pid)
+
         portfolio.positions = [p for p in portfolio.positions if p.qty > 0]

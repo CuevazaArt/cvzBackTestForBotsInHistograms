@@ -3,6 +3,12 @@
 > Generado: 2026-05-15 | Referencia: `v0.5.0` (commit `3b06252`)
 > Contexto: auditoría profunda del proyecto + crítica externa + verificación contra código actual.
 
+> Actualización `v0.6.0`:
+> - Resueltos en esta jornada: A1 (MARKET en open N+1 configurable), A2 (SHORT),
+>   D2/D4 (PSR/DSR + stress battery), C1 (Donchian/Grid), B3/B5 (data quality +
+>   weight thread-safe), G1/G3 (docker + pre-commit), F4 (command palette),
+>   A8/A9 (property + benchmarks).
+
 ---
 
 ## 1. Estado de las críticas (qué ya se resolvió vs qué sigue vigente)

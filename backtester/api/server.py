@@ -24,6 +24,7 @@ from backtester.api.routes import (
     bots,
     candles,
     credentials,
+    data,
     experiments,
     optimize,
     presets,
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
         backtest.router,
         experiments.router,
         credentials.router,
+        data.router,
         optimize.router,
         presets.router,
         results.router,
@@ -75,9 +77,9 @@ def create_app() -> FastAPI:
 
     @app.get("/health", dependencies=[Depends(require_api_token)])
     def health() -> dict[str, str | int]:
-        from backtester.core.downloader import BINANCE_USED_WEIGHT_1M
+        from backtester.core.downloader import get_binance_used_weight_1m
 
-        return {"status": "ok", "binance_weight_1m": BINANCE_USED_WEIGHT_1M}
+        return {"status": "ok", "binance_weight_1m": get_binance_used_weight_1m()}
 
     # Static web (Lightweight Charts module). Created in Phase 3.
     web_dir = Path(__file__).resolve().parents[1] / "web"

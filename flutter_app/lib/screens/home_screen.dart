@@ -7,6 +7,7 @@ import 'package:backtester_shell/screens/optimization_screen.dart';
 import 'package:backtester_shell/screens/settings_screen.dart';
 import 'package:backtester_shell/services/app_settings_service.dart';
 import 'package:backtester_shell/services/ws_service.dart';
+import 'package:backtester_shell/widgets/command_palette.dart';
 import 'package:backtester_shell/widgets/status_dot.dart';
 
 /// Main scaffold — sidebar nav + content area.
@@ -36,6 +37,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String _chartUrl = 'http://127.0.0.1:8002/static/index.html';
   Timer? _healthTimer;
 
+  /// Last seen [ShortcutHooks] instance — kept so we can deregister our
+  /// [navigateTo] callback in [dispose] even if the inherited widget is gone.
+  ShortcutHooks? _hooksRef;
+
   @override
   void initState() {
     super.initState();
@@ -45,7 +50,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final hooks = ShortcutHooksProvider.maybeOf(context);
+    if (hooks != null && !identical(hooks, _hooksRef)) {
+      _hooksRef?.navigateTo = null;
+      _hooksRef = hooks;
+      hooks.navigateTo = (i) {
+        if (!mounted) return;
+        if (i < 0 || i > 3) return;
+        setState(() => _selectedIndex = i);
+      };
+    }
+  }
+
+  @override
   void dispose() {
+    if (_hooksRef?.navigateTo != null) _hooksRef?.navigateTo = null;
     _healthTimer?.cancel();
     _wsService?.disconnect();
     super.dispose();
@@ -59,22 +80,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final wsUrl = _toWsUrl(_settings.backendUrl);
     _chartUrl = '${_settings.backendUrl}/static/index.html';
     _wsService?.disconnect();
-    _wsService = WsService(
-      wsUrl: wsUrl,
-      apiToken: _settings.apiToken,
-    );
+    _wsService = WsService(wsUrl: wsUrl, apiToken: _settings.apiToken);
     _wsService!.connect();
   }
 
   String _toWsUrl(String backendUrl) {
     final uri = Uri.parse(backendUrl);
     final scheme = uri.scheme == 'https' ? 'wss' : 'ws';
-    return uri.replace(
-      scheme: scheme,
-      path: '/ws',
-      query: '',
-      fragment: '',
-    ).toString();
+    return uri
+        .replace(scheme: scheme, path: '/ws', query: '', fragment: '')
+        .toString();
   }
 
   Future<void> _pollHealth() async {
@@ -114,35 +129,37 @@ class _HomeScreenState extends State<HomeScreen> {
             onSelect: (i) => setState(() => _selectedIndex = i),
             backendOnline: _backendOnline,
             checking: _checking,
+            onOpenPalette: () => _hooksRef?.openPalette?.call(),
+            onToggleTheme: () => _hooksRef?.toggleTheme?.call(),
           ),
           const VerticalDivider(width: 1),
           Expanded(
             child: switch (_selectedIndex) {
               0 => BacktestScreen(
-                  key: _backtestKey,
-                  apiService: _apiService,
-                  wsService: ws,
-                  chartUrl: _chartUrl,
-                  defaultCash: _settings.defaultCash,
-                  defaultFeePct: _settings.defaultFeePct,
-                  defaultSlippagePct: _settings.defaultSlippagePct,
-                  initialApply: _pendingApply,
-                  onApplyConsumed: () => setState(() => _pendingApply = null),
-                ),
+                key: _backtestKey,
+                apiService: _apiService,
+                wsService: ws,
+                chartUrl: _chartUrl,
+                defaultCash: _settings.defaultCash,
+                defaultFeePct: _settings.defaultFeePct,
+                defaultSlippagePct: _settings.defaultSlippagePct,
+                initialApply: _pendingApply,
+                onApplyConsumed: () => setState(() => _pendingApply = null),
+              ),
               1 => OptimizationScreen(
-                  apiService: _apiService,
-                  wsService: ws,
-                  defaultCash: _settings.defaultCash,
-                  defaultFeePct: _settings.defaultFeePct,
-                  defaultSlippagePct: _settings.defaultSlippagePct,
-                  onApplyBest: _onApplyBest,
-                ),
+                apiService: _apiService,
+                wsService: ws,
+                defaultCash: _settings.defaultCash,
+                defaultFeePct: _settings.defaultFeePct,
+                defaultSlippagePct: _settings.defaultSlippagePct,
+                onApplyBest: _onApplyBest,
+              ),
               2 => AnalysisScreen(apiService: _apiService),
               _ => SettingsScreen(
-                  apiService: _apiService,
-                  initialSettings: _settings,
-                  onSaved: _onSettingsSaved,
-                ),
+                apiService: _apiService,
+                initialSettings: _settings,
+                onSaved: _onSettingsSaved,
+              ),
             },
           ),
         ],
@@ -158,12 +175,16 @@ class _Sidebar extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final bool backendOnline;
   final bool checking;
+  final VoidCallback? onOpenPalette;
+  final VoidCallback? onToggleTheme;
 
   const _Sidebar({
     required this.selectedIndex,
     required this.onSelect,
     required this.backendOnline,
     required this.checking,
+    this.onOpenPalette,
+    this.onToggleTheme,
   });
 
   @override
@@ -190,7 +211,21 @@ class _Sidebar extends StatelessWidget {
             ),
             child: const Icon(Icons.bar_chart, color: Colors.white, size: 20),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 12),
+          if (onOpenPalette != null)
+            Tooltip(
+              message: 'Command Palette (Ctrl+K)',
+              preferBelow: false,
+              child: IconButton(
+                key: const Key('sidebar-open-palette'),
+                iconSize: 18,
+                splashRadius: 18,
+                tooltip: 'Command Palette (Ctrl+K)',
+                icon: const Icon(Icons.search, color: Color(0xFF787B86)),
+                onPressed: onOpenPalette,
+              ),
+            ),
+          const SizedBox(height: 12),
           const Divider(height: 1),
           ...items.indexed.map((e) {
             final (idx, item) = e;
@@ -204,14 +239,23 @@ class _Sidebar extends StatelessWidget {
                   width: double.infinity,
                   height: 52,
                   decoration: BoxDecoration(
-                    color: selected ? const Color(0xFF26a69a).withValues(alpha: 0.15) : Colors.transparent,
+                    color: selected
+                        ? const Color(0xFF26a69a).withValues(alpha: 0.15)
+                        : Colors.transparent,
                     border: selected
-                        ? const Border(left: BorderSide(color: Color(0xFF26a69a), width: 3))
+                        ? const Border(
+                            left: BorderSide(
+                              color: Color(0xFF26a69a),
+                              width: 3,
+                            ),
+                          )
                         : null,
                   ),
                   child: Icon(
                     item.$1,
-                    color: selected ? const Color(0xFF26a69a) : const Color(0xFF787B86),
+                    color: selected
+                        ? const Color(0xFF26a69a)
+                        : const Color(0xFF787B86),
                     size: 22,
                   ),
                 ),
@@ -219,10 +263,28 @@ class _Sidebar extends StatelessWidget {
             );
           }),
           const Spacer(),
+          if (onToggleTheme != null)
+            Tooltip(
+              message: 'Toggle theme',
+              preferBelow: false,
+              child: IconButton(
+                key: const Key('sidebar-toggle-theme'),
+                iconSize: 18,
+                splashRadius: 18,
+                tooltip: 'Toggle theme',
+                icon: const Icon(
+                  Icons.brightness_6_outlined,
+                  color: Color(0xFF787B86),
+                ),
+                onPressed: onToggleTheme,
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Tooltip(
-              message: checking ? 'Checking...' : (backendOnline ? 'Backend online' : 'Backend offline'),
+              message: checking
+                  ? 'Checking...'
+                  : (backendOnline ? 'Backend online' : 'Backend offline'),
               child: StatusDot(online: backendOnline, checking: checking),
             ),
           ),

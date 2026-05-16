@@ -136,6 +136,7 @@ class BacktestRequest(BaseModel):
     initial_cash: float = 10000.0
     taker_fee_pct: float = 0.1
     slippage_pct: float = 0.05
+    fill_on_next_open: bool = True
 
     @field_validator("initial_cash")
     @classmethod
@@ -176,6 +177,7 @@ class TradeDTO(BaseModel):
     pnl_pct: float
     fee_usdt: float
     reason: str
+    side: str = "long"
     bot_id: str = ""
 
 
@@ -341,6 +343,35 @@ class CredentialsStatus(BaseModel):
     exists: bool
 
 
+# ───────────────────────── Data quality ─────────────────────────
+
+
+class DataValidateRequest(BaseModel):
+    symbol: str
+    timeframe: str
+    start_ms: Optional[int] = None
+    end_ms: Optional[int] = None
+
+
+class DataQualityGap(BaseModel):
+    from_ts: int
+    to_ts: int
+    missing_count: int
+
+
+class DataQualityReportDTO(BaseModel):
+    total_candles: int
+    expected_candles: int
+    completeness_pct: float
+    gaps: list[DataQualityGap] = Field(default_factory=list)
+    duplicates: list[int] = Field(default_factory=list)
+    monotonic_ok: bool
+    ohlc_consistency_violations: list[int] = Field(default_factory=list)
+    outliers_iqr: list[int] = Field(default_factory=list)
+    summary_ok: bool
+    timeframe_seconds: Optional[int] = None
+
+
 # ───────────────────────── Run comparator ─────────────────────────
 
 
@@ -374,6 +405,30 @@ class ComparedRun(BaseModel):
 class CompareRunsResponse(BaseModel):
     runs: list[ComparedRun]
     missing: list[str] = Field(default_factory=list)
+
+
+# ───────────────────────── Stress battery ─────────────────────────
+
+
+class StressRequest(BaseModel):
+    fees_mult: list[float] = Field(default_factory=lambda: [1.0, 2.0, 3.0])
+    slippage_mult: list[float] = Field(default_factory=lambda: [1.0, 2.0, 3.0])
+    drop_best_pct: list[float] = Field(default_factory=lambda: [0.0, 5.0, 10.0])
+
+
+class StressScenarioDTO(BaseModel):
+    fees_mult: float
+    slippage_mult: float
+    drop_best_pct: float
+
+
+class StressResponse(BaseModel):
+    run_id: str
+    scenarios: list[StressScenarioDTO] = Field(default_factory=list)
+    sharpe: dict[str, float] = Field(default_factory=dict)
+    returns_pct: dict[str, float] = Field(default_factory=dict)
+    max_dd_pct: dict[str, float] = Field(default_factory=dict)
+    n_trades: dict[str, int] = Field(default_factory=dict)
 
 
 # ───────────────────────── Strategy DSL ─────────────────────────

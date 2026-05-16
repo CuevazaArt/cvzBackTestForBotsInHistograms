@@ -254,7 +254,7 @@ class BacktesterCLI:
                 progress.update(
                     task,
                     advance=1,
-                    description=f"trial {i+1} | best {best_so_far['score']:.3f}",
+                    description=f"trial {i + 1} | best {best_so_far['score']:.3f}",
                 )
 
             if backend == "optuna":

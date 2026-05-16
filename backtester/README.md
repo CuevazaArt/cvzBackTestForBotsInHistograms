@@ -82,6 +82,71 @@ python backtester/main.py --experiments config.json --workers 4
 
 Donde `config.json` contiene múltiples seteos a probar en paralelo.
 
+## 🐳 Docker
+
+El repo trae un `Dockerfile` multi-stage (builder + runtime slim) y un
+`docker-compose.yml` listos para levantar el backend FastAPI sin tener que
+instalar Python local.
+
+### Levantar el stack
+
+```bash
+# Build + run (la primera vez tarda ~1–2 min; las siguientes usan cache).
+docker-compose up --build
+
+# La API queda en http://localhost:8000 — pega el WebSocket /ws/runs/{id}
+# desde la app de Flutter apuntando a esa URL.
+```
+
+El servicio se llama `backend` y monta `./backtester/data` y
+`./backtester/results` como volúmenes, así los datos persisten entre
+reinicios. La política `restart: unless-stopped` lo levanta de nuevo si el
+contenedor cae solo.
+
+### Tests dentro del contenedor
+
+```bash
+# Mismo set de tests que CI corre en host, pero ejecutados sobre la imagen
+# empaquetada — útil para detectar drift de dependencias / wheels.
+docker exec backend python -m pytest -q
+```
+
+> Si el contenedor todavía no está corriendo, `docker compose run --rm
+> backend python -m pytest -q` también funciona y se limpia solo al salir.
+
+### Variables de entorno (opcional)
+
+El compose intenta cargar `.env` si existe; el archivo no se commitea (es
+`.gitignored`). Plantilla mínima:
+
+```env
+BINANCE_API_KEY=...
+BINANCE_API_SECRET=...
+BACKTESTER_LOG_LEVEL=INFO
+```
+
+### pre-commit
+
+Para formateo / lint / mypy automático antes de cada commit:
+
+```bash
+# Una sola vez por clone (instala el hook .git/hooks/pre-commit).
+pre-commit install
+
+# Forzar el set completo sobre todo el repo (típicamente al sumar un hook).
+pre-commit run --all-files
+```
+
+Hooks configurados (ver `.pre-commit-config.yaml`):
+
+- `pre-commit-hooks` (check-yaml, check-toml, end-of-file-fixer,
+  trailing-whitespace, check-merge-conflict, check-added-large-files).
+- `ruff` lint con `--fix` + `ruff format` sobre `backtester/`.
+- `mypy` sobre `backtester/` (mismas flags que CI).
+
+`default_language_version.python: python3.12` — si tu venv local usa 3.11,
+ajustá esa línea o instalá Python 3.12 con `pyenv` / `uv python install`.
+
 ## 📚 Ejemplo: EMA Crossover Bot
 
 ```python

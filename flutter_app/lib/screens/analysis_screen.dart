@@ -76,7 +76,6 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   }
 }
 
-
 // ──────────────────────────────────────────────────────────────────────────
 // History tab — browse persisted backtest results
 // ──────────────────────────────────────────────────────────────────────────
@@ -118,8 +117,12 @@ class _HistoryTabState extends State<_HistoryTab> {
     });
     try {
       final runs = await widget.api.listResults(
-        symbol: _symbolFilter.text.trim().isEmpty ? null : _symbolFilter.text.trim(),
-        timeframe: _timeframeFilter.text.trim().isEmpty ? null : _timeframeFilter.text.trim(),
+        symbol: _symbolFilter.text.trim().isEmpty
+            ? null
+            : _symbolFilter.text.trim(),
+        timeframe: _timeframeFilter.text.trim().isEmpty
+            ? null
+            : _timeframeFilter.text.trim(),
         limit: 100,
       );
       setState(() {
@@ -161,14 +164,16 @@ class _HistoryTabState extends State<_HistoryTab> {
       await outFile.writeAsString(html);
       await Clipboard.setData(ClipboardData(text: outFile.path));
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        backgroundColor: const Color(0xFF26a69a),
-        content: Text(
-          'HTML report saved → ${outFile.path} (path copied)',
-          style: const TextStyle(color: Colors.black, fontSize: 12),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF26a69a),
+          content: Text(
+            'HTML report saved → ${outFile.path} (path copied)',
+            style: const TextStyle(color: Colors.black, fontSize: 12),
+          ),
+          duration: const Duration(seconds: 4),
         ),
-        duration: const Duration(seconds: 4),
-      ));
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -184,7 +189,10 @@ class _HistoryTabState extends State<_HistoryTab> {
         title: const Text('Delete run?'),
         content: Text('Permanently remove $runId from history?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
@@ -198,7 +206,9 @@ class _HistoryTabState extends State<_HistoryTab> {
         await _reload();
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
       }
     }
   }
@@ -209,48 +219,62 @@ class _HistoryTabState extends State<_HistoryTab> {
       padding: const EdgeInsets.all(12),
       child: Column(
         children: [
-          Row(children: [
-            SizedBox(
-              width: 140,
-              child: TextField(
-                controller: _symbolFilter,
-                decoration: const InputDecoration(labelText: 'Symbol filter', isDense: true),
-                onSubmitted: (_) => _reload(),
+          Row(
+            children: [
+              SizedBox(
+                width: 140,
+                child: TextField(
+                  controller: _symbolFilter,
+                  decoration: const InputDecoration(
+                    labelText: 'Symbol filter',
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _reload(),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: 120,
-              child: TextField(
-                controller: _timeframeFilter,
-                decoration: const InputDecoration(labelText: 'Timeframe', isDense: true),
-                onSubmitted: (_) => _reload(),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 120,
+                child: TextField(
+                  controller: _timeframeFilter,
+                  decoration: const InputDecoration(
+                    labelText: 'Timeframe',
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _reload(),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            ElevatedButton.icon(
-              onPressed: _reload,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Reload'),
-            ),
-            const Spacer(),
-            Text('${_runs.length} runs', style: const TextStyle(color: Colors.grey)),
-          ]),
-          const SizedBox(height: 8),
-          if (_error != null) Padding(
-            padding: const EdgeInsets.all(8),
-            child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                onPressed: _reload,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Reload'),
+              ),
+              const Spacer(),
+              Text(
+                '${_runs.length} runs',
+                style: const TextStyle(color: Colors.grey),
+              ),
+            ],
           ),
+          const SizedBox(height: 8),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : Row(children: [
-                    // Left: run list
-                    Expanded(flex: 2, child: _buildRunList()),
-                    const VerticalDivider(),
-                    // Right: detail
-                    Expanded(flex: 3, child: _buildDetail()),
-                  ]),
+                : Row(
+                    children: [
+                      // Left: run list
+                      Expanded(flex: 2, child: _buildRunList()),
+                      const VerticalDivider(),
+                      // Right: detail
+                      Expanded(flex: 3, child: _buildDetail()),
+                    ],
+                  ),
           ),
         ],
       ),
@@ -286,8 +310,10 @@ class _HistoryTabState extends State<_HistoryTab> {
           margin: const EdgeInsets.symmetric(vertical: 3),
           child: ListTile(
             dense: true,
-            title: Text('${r['symbol']} ${r['timeframe']}',
-                style: const TextStyle(fontWeight: FontWeight.w600)),
+            title: Text(
+              '${r['symbol']} ${r['timeframe']}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
             subtitle: Text(
               'Return: ${ret.toStringAsFixed(2)}%  •  Trades: $trades  •  DD: ${dd.toStringAsFixed(2)}%',
             ),
@@ -305,7 +331,10 @@ class _HistoryTabState extends State<_HistoryTab> {
   Widget _buildDetail() {
     if (_detail == null) {
       return const Center(
-        child: Text('Select a run to see details', style: TextStyle(color: Colors.grey)),
+        child: Text(
+          'Select a run to see details',
+          style: TextStyle(color: Colors.grey),
+        ),
       );
     }
     final payload = (_detail!['payload'] as Map?) ?? _detail!;
@@ -324,9 +353,10 @@ class _HistoryTabState extends State<_HistoryTab> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
-                child: SelectableText('Run ID: $runId',
-                    style: const TextStyle(
-                        fontFamily: 'monospace', fontSize: 11)),
+                child: SelectableText(
+                  'Run ID: $runId',
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                ),
               ),
               OutlinedButton.icon(
                 onPressed: runId.isEmpty ? null : () => _exportHtml(runId),
@@ -337,31 +367,49 @@ class _HistoryTabState extends State<_HistoryTab> {
           ),
           const SizedBox(height: 8),
           Wrap(
-            spacing: 8, runSpacing: 8,
-            children: summary.entries.map((e) =>
-                _MetricChip(label: e.key, value: e.value)).toList(),
+            spacing: 8,
+            runSpacing: 8,
+            children: summary.entries
+                .map((e) => _MetricChip(label: e.key, value: e.value))
+                .toList(),
           ),
           const SizedBox(height: 16),
           if (perBot.isNotEmpty) ...[
-            const Text('Per-bot metrics', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              'Per-bot metrics',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 4),
-            ...perBot.entries.map((e) => Card(
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    Text('${e.value}', style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
-                  ],
+            ...perBot.entries.map(
+              (e) => Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        e.key,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        '${e.value}',
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            )),
+            ),
           ],
           const SizedBox(height: 8),
           if (trades.isNotEmpty) ...[
-            Text('Trades (${trades.length})',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              'Trades (${trades.length})',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 4),
             _TradesPreview(trades: trades.cast<Map<String, dynamic>>()),
           ],
@@ -370,7 +418,6 @@ class _HistoryTabState extends State<_HistoryTab> {
     );
   }
 }
-
 
 class _MetricChip extends StatelessWidget {
   final String label;
@@ -402,15 +449,19 @@ class _MetricChip extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label.replaceAll('_', ' '),
-              style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
-          Text(text, style: TextStyle(fontWeight: FontWeight.w600, color: color)),
+          Text(
+            label.replaceAll('_', ' '),
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+          ),
+          Text(
+            text,
+            style: TextStyle(fontWeight: FontWeight.w600, color: color),
+          ),
         ],
       ),
     );
   }
 }
-
 
 class _TradesPreview extends StatelessWidget {
   final List<Map<String, dynamic>> trades;
@@ -443,26 +494,56 @@ class _TradesPreview extends StatelessWidget {
           rows: List.generate(show.length, (i) {
             final t = show[i];
             final pnl = (t['pnl'] as num?)?.toDouble() ?? 0;
-            return DataRow(cells: [
-              DataCell(Text('${i + 1}')),
-              DataCell(Text(t['bot_id']?.toString() ?? '')),
-              DataCell(Text(pnl.toStringAsFixed(2),
-                  style: TextStyle(color: pnl >= 0 ? Colors.green : Colors.red))),
-              DataCell(Text(((t['pnl_pct'] as num?)?.toDouble() ?? 0).toStringAsFixed(2))),
-              DataCell(Text(((t['mfe_pct'] as num?)?.toDouble() ?? 0).toStringAsFixed(2),
-                  style: const TextStyle(color: Colors.green))),
-              DataCell(Text(((t['mae_pct'] as num?)?.toDouble() ?? 0).toStringAsFixed(2),
-                  style: const TextStyle(color: Colors.red))),
-              DataCell(Text('${(t['duration_bars'] as num?)?.toInt() ?? 0}')),
-              DataCell(Text(t['reason']?.toString() ?? '', style: const TextStyle(fontSize: 10))),
-            ]);
+            return DataRow(
+              cells: [
+                DataCell(Text('${i + 1}')),
+                DataCell(Text(t['bot_id']?.toString() ?? '')),
+                DataCell(
+                  Text(
+                    pnl.toStringAsFixed(2),
+                    style: TextStyle(
+                      color: pnl >= 0 ? Colors.green : Colors.red,
+                    ),
+                  ),
+                ),
+                DataCell(
+                  Text(
+                    ((t['pnl_pct'] as num?)?.toDouble() ?? 0).toStringAsFixed(
+                      2,
+                    ),
+                  ),
+                ),
+                DataCell(
+                  Text(
+                    ((t['mfe_pct'] as num?)?.toDouble() ?? 0).toStringAsFixed(
+                      2,
+                    ),
+                    style: const TextStyle(color: Colors.green),
+                  ),
+                ),
+                DataCell(
+                  Text(
+                    ((t['mae_pct'] as num?)?.toDouble() ?? 0).toStringAsFixed(
+                      2,
+                    ),
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+                DataCell(Text('${(t['duration_bars'] as num?)?.toInt() ?? 0}')),
+                DataCell(
+                  Text(
+                    t['reason']?.toString() ?? '',
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                ),
+              ],
+            );
           }),
         ),
       ),
     );
   }
 }
-
 
 // ──────────────────────────────────────────────────────────────────────────
 // Walk-Forward Analysis tab
@@ -582,21 +663,45 @@ class _WalkForwardTabState extends State<_WalkForwardTab> {
                   width: 220,
                   child: DropdownButtonFormField<String>(
                     initialValue: _objective,
-                    decoration: const InputDecoration(labelText: 'Objective metric'),
+                    decoration: const InputDecoration(
+                      labelText: 'Objective metric',
+                    ),
                     items: const [
-                      DropdownMenuItem(value: 'total_return_pct', child: Text('Total return %')),
-                      DropdownMenuItem(value: 'sharpe_ratio', child: Text('Sharpe ratio')),
-                      DropdownMenuItem(value: 'profit_factor', child: Text('Profit factor')),
-                      DropdownMenuItem(value: 'recovery_factor', child: Text('Recovery factor')),
-                      DropdownMenuItem(value: 'max_drawdown_pct', child: Text('Max DD % (min)')),
+                      DropdownMenuItem(
+                        value: 'total_return_pct',
+                        child: Text('Total return %'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'sharpe_ratio',
+                        child: Text('Sharpe ratio'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'profit_factor',
+                        child: Text('Profit factor'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'recovery_factor',
+                        child: Text('Recovery factor'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'max_drawdown_pct',
+                        child: Text('Max DD % (min)'),
+                      ),
                     ],
-                    onChanged: (v) => setState(() => _objective = v ?? 'total_return_pct'),
+                    onChanged: (v) =>
+                        setState(() => _objective = v ?? 'total_return_pct'),
                   ),
                 ),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Checkbox(value: _anchored, onChanged: (v) => setState(() => _anchored = v ?? false)),
-                  const Text('Anchored (expand train)'),
-                ]),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Checkbox(
+                      value: _anchored,
+                      onChanged: (v) => setState(() => _anchored = v ?? false),
+                    ),
+                    const Text('Anchored (expand train)'),
+                  ],
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -605,7 +710,8 @@ class _WalkForwardTabState extends State<_WalkForwardTab> {
               maxLines: 3,
               decoration: const InputDecoration(
                 labelText: 'Parameter ranges (JSON)',
-                helperText: 'Map of param name → [low, high] to optimize each window',
+                helperText:
+                    'Map of param name → [low, high] to optimize each window',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -614,16 +720,20 @@ class _WalkForwardTabState extends State<_WalkForwardTab> {
               onPressed: _running ? null : _run,
               icon: _running
                   ? const SizedBox(
-                      width: 16, height: 16,
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.play_arrow),
-              label: Text(_running ? 'Running walk-forward...' : 'Run Walk-Forward'),
+              label: Text(
+                _running ? 'Running walk-forward...' : 'Run Walk-Forward',
+              ),
             ),
-            if (_error != null) Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
-            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              ),
             if (_result != null) ...[
               const SizedBox(height: 24),
               _WalkForwardSummary(result: _result!),
@@ -635,7 +745,6 @@ class _WalkForwardTabState extends State<_WalkForwardTab> {
   }
 }
 
-
 Widget _fieldBox(String label, TextEditingController c, {double width = 100}) {
   return SizedBox(
     width: width,
@@ -645,7 +754,6 @@ Widget _fieldBox(String label, TextEditingController c, {double width = 100}) {
     ),
   );
 }
-
 
 class _WalkForwardSummary extends StatelessWidget {
   final Map<String, dynamic> result;
@@ -668,30 +776,60 @@ class _WalkForwardSummary extends StatelessWidget {
             border: Border.all(color: verdictColor, width: 2),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Row(children: [
-            Icon(_verdictIcon(verdict), color: verdictColor, size: 32),
-            const SizedBox(width: 12),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Verdict: ${verdict.toUpperCase()}',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: verdictColor)),
-              Text(_verdictExplanation(verdict),
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            ]),
-          ]),
+          child: Row(
+            children: [
+              Icon(_verdictIcon(verdict), color: verdictColor, size: 32),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Verdict: ${verdict.toUpperCase()}',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: verdictColor,
+                    ),
+                  ),
+                  Text(
+                    _verdictExplanation(verdict),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
-        Wrap(spacing: 10, runSpacing: 10, children: [
-          _MetricChip(label: 'Avg OOS return %', value: summary['avg_oos_return_pct']),
-          _MetricChip(label: 'Avg IS return %', value: summary['avg_is_return_pct']),
-          _MetricChip(label: 'Efficiency', value: summary['efficiency_ratio']),
-          _MetricChip(label: 'Consistency', value: summary['consistency']),
-          _MetricChip(
-            label: 'Profitable windows',
-            value: '${summary['profitable_windows']}/${summary['total_windows']}',
-          ),
-        ]),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            _MetricChip(
+              label: 'Avg OOS return %',
+              value: summary['avg_oos_return_pct'],
+            ),
+            _MetricChip(
+              label: 'Avg IS return %',
+              value: summary['avg_is_return_pct'],
+            ),
+            _MetricChip(
+              label: 'Efficiency',
+              value: summary['efficiency_ratio'],
+            ),
+            _MetricChip(label: 'Consistency', value: summary['consistency']),
+            _MetricChip(
+              label: 'Profitable windows',
+              value:
+                  '${summary['profitable_windows']}/${summary['total_windows']}',
+            ),
+          ],
+        ),
         const SizedBox(height: 16),
-        const Text('Per-window detail', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text(
+          'Per-window detail',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 8),
         _WindowsTable(windows: windows),
       ],
@@ -699,25 +837,27 @@ class _WalkForwardSummary extends StatelessWidget {
   }
 
   static Color _verdictColor(String v) => switch (v) {
-        'robust' => Colors.green,
-        'weak' => Colors.orange,
-        'overfit' => Colors.red,
-        _ => Colors.grey,
-      };
+    'robust' => Colors.green,
+    'weak' => Colors.orange,
+    'overfit' => Colors.red,
+    _ => Colors.grey,
+  };
   static IconData _verdictIcon(String v) => switch (v) {
-        'robust' => Icons.verified,
-        'weak' => Icons.warning_amber,
-        'overfit' => Icons.error,
-        _ => Icons.help_outline,
-      };
+    'robust' => Icons.verified,
+    'weak' => Icons.warning_amber,
+    'overfit' => Icons.error,
+    _ => Icons.help_outline,
+  };
   static String _verdictExplanation(String v) => switch (v) {
-        'robust' => 'OOS positive, efficient, and consistent — safe to deploy with caution.',
-        'weak'   => 'OOS positive but unstable. Re-tune or reduce position size.',
-        'overfit'=> 'IS optimization does not generalize. Do NOT deploy this setup.',
-        _ => 'Not enough data to draw a conclusion. Try smaller windows or more candles.',
-      };
+    'robust' =>
+      'OOS positive, efficient, and consistent — safe to deploy with caution.',
+    'weak' => 'OOS positive but unstable. Re-tune or reduce position size.',
+    'overfit' =>
+      'IS optimization does not generalize. Do NOT deploy this setup.',
+    _ =>
+      'Not enough data to draw a conclusion. Try smaller windows or more candles.',
+  };
 }
-
 
 class _WindowsTable extends StatelessWidget {
   final List<Map<String, dynamic>> windows;
@@ -751,32 +891,55 @@ class _WindowsTable extends StatelessWidget {
             final isMet = (w['is_metrics'] as Map?) ?? {};
             final oosMet = (w['oos_metrics'] as Map?) ?? {};
             final isRet = (isMet['total_return_pct'] as num?)?.toDouble() ?? 0;
-            final oosRet = (oosMet['total_return_pct'] as num?)?.toDouble() ?? 0;
+            final oosRet =
+                (oosMet['total_return_pct'] as num?)?.toDouble() ?? 0;
             final eff = (w['efficiency'] as num?)?.toDouble() ?? 0;
-            return DataRow(cells: [
-              DataCell(Text('${w['window_idx']}')),
-              DataCell(Text('${isRange[0]}–${isRange[1]}')),
-              DataCell(Text('${oosRange[0]}–${oosRange[1]}')),
-              DataCell(Text(isRet.toStringAsFixed(2),
-                  style: TextStyle(color: isRet >= 0 ? Colors.green : Colors.red))),
-              DataCell(Text(oosRet.toStringAsFixed(2),
-                  style: TextStyle(color: oosRet >= 0 ? Colors.green : Colors.red,
-                      fontWeight: FontWeight.bold))),
-              DataCell(Text(eff.toStringAsFixed(2),
-                  style: TextStyle(color: eff > 0.5 ? Colors.green : Colors.orange))),
-              DataCell(Text(
-                (w['best_params'] as Map).entries
-                    .map((e) => '${e.key}=${e.value}').join(', '),
-                style: const TextStyle(fontSize: 10),
-              )),
-            ]);
+            return DataRow(
+              cells: [
+                DataCell(Text('${w['window_idx']}')),
+                DataCell(Text('${isRange[0]}–${isRange[1]}')),
+                DataCell(Text('${oosRange[0]}–${oosRange[1]}')),
+                DataCell(
+                  Text(
+                    isRet.toStringAsFixed(2),
+                    style: TextStyle(
+                      color: isRet >= 0 ? Colors.green : Colors.red,
+                    ),
+                  ),
+                ),
+                DataCell(
+                  Text(
+                    oosRet.toStringAsFixed(2),
+                    style: TextStyle(
+                      color: oosRet >= 0 ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                DataCell(
+                  Text(
+                    eff.toStringAsFixed(2),
+                    style: TextStyle(
+                      color: eff > 0.5 ? Colors.green : Colors.orange,
+                    ),
+                  ),
+                ),
+                DataCell(
+                  Text(
+                    (w['best_params'] as Map).entries
+                        .map((e) => '${e.key}=${e.value}')
+                        .join(', '),
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                ),
+              ],
+            );
           }).toList(),
         ),
       ),
     );
   }
 }
-
 
 // ──────────────────────────────────────────────────────────────────────────
 // Monte Carlo tab
@@ -859,26 +1022,33 @@ class _MonteCarloTabState extends State<_MonteCarloTab> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: run == null ? Colors.orange.shade100 : Colors.indigo.shade50,
+                color: run == null
+                    ? Colors.orange.shade100
+                    : Colors.indigo.shade50,
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Row(children: [
-                Icon(run == null ? Icons.warning : Icons.check_circle,
-                    color: run == null ? Colors.orange : Colors.indigo),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    run == null
-                        ? 'Pick a run in the History tab to simulate its trade sequence.'
-                        : 'Source: ${run['symbol']} ${run['timeframe']} '
-                          '(run ${run['run_id']?.toString().substring(0, 8)}...)',
+              child: Row(
+                children: [
+                  Icon(
+                    run == null ? Icons.warning : Icons.check_circle,
+                    color: run == null ? Colors.orange : Colors.indigo,
                   ),
-                ),
-              ]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      run == null
+                          ? 'Pick a run in the History tab to simulate its trade sequence.'
+                          : 'Source: ${run['symbol']} ${run['timeframe']} '
+                                '(run ${run['run_id']?.toString().substring(0, 8)}...)',
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             Wrap(
-              spacing: 12, runSpacing: 12,
+              spacing: 12,
+              runSpacing: 12,
               children: [
                 _fieldBox('Trials', _trials, width: 100),
                 _fieldBox('Initial equity', _initial, width: 130),
@@ -888,8 +1058,14 @@ class _MonteCarloTabState extends State<_MonteCarloTab> {
                     initialValue: _method,
                     decoration: const InputDecoration(labelText: 'Method'),
                     items: const [
-                      DropdownMenuItem(value: 'shuffle', child: Text('Shuffle (order randomization)')),
-                      DropdownMenuItem(value: 'bootstrap', child: Text('Bootstrap (with replacement)')),
+                      DropdownMenuItem(
+                        value: 'shuffle',
+                        child: Text('Shuffle (order randomization)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'bootstrap',
+                        child: Text('Bootstrap (with replacement)'),
+                      ),
                     ],
                     onChanged: (v) => setState(() => _method = v ?? 'shuffle'),
                   ),
@@ -901,16 +1077,18 @@ class _MonteCarloTabState extends State<_MonteCarloTab> {
               onPressed: _running ? null : _run,
               icon: _running
                   ? const SizedBox(
-                      width: 16, height: 16,
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.play_arrow),
               label: Text(_running ? 'Simulating...' : 'Run Simulation'),
             ),
-            if (_error != null) Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
-            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              ),
             if (_result != null) ...[
               const SizedBox(height: 16),
               _MonteCarloSummary(result: _result!),
@@ -922,7 +1100,6 @@ class _MonteCarloTabState extends State<_MonteCarloTab> {
   }
 }
 
-
 class _MonteCarloSummary extends StatelessWidget {
   final Map<String, dynamic> result;
   const _MonteCarloSummary({required this.result});
@@ -931,7 +1108,8 @@ class _MonteCarloSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final ret = (result['return_pct'] as Map).cast<String, dynamic>();
     final dd = (result['max_drawdown_pct'] as Map).cast<String, dynamic>();
-    final streak = (result['worst_losing_streak'] as Map).cast<String, dynamic>();
+    final streak = (result['worst_losing_streak'] as Map)
+        .cast<String, dynamic>();
     final pp = (result['prob_profit'] as num).toDouble();
     final pr = (result['prob_ruin'] as num).toDouble();
     final var95 = (result['var_95_pct'] as num).toDouble();
@@ -943,29 +1121,53 @@ class _MonteCarloSummary extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Trials: ${result['n_trials']}  •  Trades: ${result['n_trades']}',
-            style: const TextStyle(color: Colors.grey)),
+        Text(
+          'Trials: ${result['n_trials']}  •  Trades: ${result['n_trades']}',
+          style: const TextStyle(color: Colors.grey),
+        ),
         const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: _percTable('Return %', ret)),
-          const SizedBox(width: 8),
-          Expanded(child: _percTable('Max DD %', dd)),
-          const SizedBox(width: 8),
-          Expanded(child: _percTable('Worst streak', streak)),
-        ]),
+        Row(
+          children: [
+            Expanded(child: _percTable('Return %', ret)),
+            const SizedBox(width: 8),
+            Expanded(child: _percTable('Max DD %', dd)),
+            const SizedBox(width: 8),
+            Expanded(child: _percTable('Worst streak', streak)),
+          ],
+        ),
         const SizedBox(height: 16),
-        Wrap(spacing: 10, runSpacing: 10, children: [
-          _bigMetric('P(profit)', '${(pp * 100).toStringAsFixed(1)}%',
-              color: pp > 0.6 ? Colors.green : Colors.orange),
-          _bigMetric('P(ruin)', '${(pr * 100).toStringAsFixed(1)}%',
-              color: pr > 0.1 ? Colors.red : Colors.green),
-          _bigMetric('VaR 95%', '${var95.toStringAsFixed(2)}%', color: Colors.red),
-          _bigMetric('CVaR 95%', '${cvar.toStringAsFixed(2)}%', color: Colors.red),
-        ]),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            _bigMetric(
+              'P(profit)',
+              '${(pp * 100).toStringAsFixed(1)}%',
+              color: pp > 0.6 ? Colors.green : Colors.orange,
+            ),
+            _bigMetric(
+              'P(ruin)',
+              '${(pr * 100).toStringAsFixed(1)}%',
+              color: pr > 0.1 ? Colors.red : Colors.green,
+            ),
+            _bigMetric(
+              'VaR 95%',
+              '${var95.toStringAsFixed(2)}%',
+              color: Colors.red,
+            ),
+            _bigMetric(
+              'CVaR 95%',
+              '${cvar.toStringAsFixed(2)}%',
+              color: Colors.red,
+            ),
+          ],
+        ),
         const SizedBox(height: 16),
         if (curves.isNotEmpty) ...[
-          const Text('Sample equity curves (${20} of trials)',
-              style: TextStyle(fontWeight: FontWeight.bold)),
+          const Text(
+            'Sample equity curves (${20} of trials)',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 4),
           SizedBox(
             height: 250,
@@ -982,11 +1184,16 @@ class _MonteCarloSummary extends StatelessWidget {
   Widget _percTable(String title, Map<String, dynamic> p) {
     Widget row(String k, dynamic v) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(k, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        Text((v as num).toStringAsFixed(2),
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
-      ]),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(k, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          Text(
+            (v as num).toStringAsFixed(2),
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          ),
+        ],
+      ),
     );
     return Container(
       padding: const EdgeInsets.all(8),
@@ -994,17 +1201,20 @@ class _MonteCarloSummary extends StatelessWidget {
         color: Colors.grey.shade100,
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        const Divider(height: 8),
-        row('P5  (worst case)', p['p5']),
-        row('P25', p['p25']),
-        row('P50 (median)', p['p50']),
-        row('P75', p['p75']),
-        row('P95 (best case)', p['p95']),
-        row('mean', p['mean']),
-        row('std', p['std']),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const Divider(height: 8),
+          row('P5  (worst case)', p['p5']),
+          row('P25', p['p25']),
+          row('P50 (median)', p['p50']),
+          row('P75', p['p75']),
+          row('P95 (best case)', p['p95']),
+          row('mean', p['mean']),
+          row('std', p['std']),
+        ],
+      ),
     );
   }
 
@@ -1016,14 +1226,22 @@ class _MonteCarloSummary extends StatelessWidget {
         border: Border.all(color: color),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Column(children: [
-        Text(label, style: TextStyle(fontSize: 11, color: color)),
-        Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
-      ]),
+      child: Column(
+        children: [
+          Text(label, style: TextStyle(fontSize: 11, color: color)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
-
 
 class _CurvesPainter extends CustomPainter {
   final List<List<double>> curves;
@@ -1063,8 +1281,11 @@ class _CurvesPainter extends CustomPainter {
     }
     // Initial equity baseline (dashed)
     final initial = curves[0][0];
-    final yBase = size.height - ((initial - minV) / (maxV - minV)) * size.height;
-    final base = Paint()..color = Colors.grey..strokeWidth = 1;
+    final yBase =
+        size.height - ((initial - minV) / (maxV - minV)) * size.height;
+    final base = Paint()
+      ..color = Colors.grey
+      ..strokeWidth = 1;
     for (double x = 0; x < size.width; x += 6) {
       canvas.drawLine(Offset(x, yBase), Offset(x + 3, yBase), base);
     }
@@ -1073,7 +1294,6 @@ class _CurvesPainter extends CustomPainter {
   @override
   bool shouldRepaint(_) => true;
 }
-
 
 // ──────────────────────────────────────────────────────────────────────────
 // Robustness tab — compare candidates side-by-side
@@ -1093,6 +1313,9 @@ class _RobustnessTabState extends State<_RobustnessTab> {
   List<Map<String, dynamic>> _runs = [];
   List<Map<String, dynamic>> _ranked = [];
   bool _scoring = false;
+  bool _runningStress = false;
+  String? _stressRunId;
+  Map<String, dynamic>? _stress;
 
   @override
   void initState() {
@@ -1104,6 +1327,9 @@ class _RobustnessTabState extends State<_RobustnessTab> {
     setState(() => _loading = true);
     try {
       _runs = await widget.api.listResults(limit: 200);
+      if (_runs.isNotEmpty) {
+        _stressRunId = (_runs.first["run_id"] ?? "").toString();
+      }
       setState(() => _loading = false);
     } catch (e) {
       setState(() {
@@ -1138,6 +1364,23 @@ class _RobustnessTabState extends State<_RobustnessTab> {
     }
   }
 
+  Future<void> _runStress() async {
+    if (_stressRunId == null || _stressRunId!.isEmpty) return;
+    setState(() => _runningStress = true);
+    try {
+      final res = await widget.api.runStressTests(runId: _stressRunId!);
+      setState(() {
+        _stress = res;
+        _runningStress = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = '$e';
+        _runningStress = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -1156,27 +1399,81 @@ class _RobustnessTabState extends State<_RobustnessTab> {
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
           const SizedBox(height: 12),
-          Row(children: [
-            ElevatedButton.icon(
-              onPressed: _runs.isEmpty || _scoring ? null : _score,
-              icon: _scoring
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.score),
-              label: Text(_scoring ? 'Scoring...' : 'Rank ${_runs.length} runs'),
-            ),
-            const SizedBox(width: 12),
-            if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
-          ]),
-          const SizedBox(height: 12),
-          if (_ranked.isNotEmpty) Expanded(child: _buildLeaderboard()),
-          if (_ranked.isEmpty && !_scoring) const Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'No ranking computed yet. Click "Rank runs" after generating '
-              'a few backtest results.',
-              style: TextStyle(color: Colors.grey),
-            ),
+          Row(
+            children: [
+              ElevatedButton.icon(
+                onPressed: _runs.isEmpty || _scoring ? null : _score,
+                icon: _scoring
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.score),
+                label: Text(
+                  _scoring ? 'Scoring...' : 'Rank ${_runs.length} runs',
+                ),
+              ),
+              const SizedBox(width: 12),
+              if (_error != null)
+                Text(_error!, style: const TextStyle(color: Colors.red)),
+            ],
           ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _stressRunId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Stress run',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: _runs
+                      .map(
+                        (r) => DropdownMenuItem<String>(
+                          value: (r['run_id'] ?? '').toString(),
+                          child: Text(
+                            '${(r['run_id'] ?? '').toString().substring(0, 8)}  ${(r['symbol'] ?? '')}/${(r['timeframe'] ?? '')}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => setState(() => _stressRunId = v),
+                ),
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton.icon(
+                onPressed: _runningStress || _stressRunId == null
+                    ? null
+                    : _runStress,
+                icon: _runningStress
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.warning_amber_rounded),
+                label: const Text('Run Stress'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_stress != null) _StressSummary(stress: _stress!),
+          const SizedBox(height: 10),
+          if (_ranked.isNotEmpty) Expanded(child: _buildLeaderboard()),
+          if (_ranked.isEmpty && !_scoring)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'No ranking computed yet. Click "Rank runs" after generating '
+                'a few backtest results.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
         ],
       ),
     );
@@ -1193,33 +1490,61 @@ class _RobustnessTabState extends State<_RobustnessTab> {
           margin: const EdgeInsets.symmetric(vertical: 3),
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: Row(children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: _rankColor(r['rank'] as int),
-                child: Text('${r['rank']}',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(r['label']?.toString() ?? '',
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                  Text(
-                    'Sharpe ${(metrics['sharpe_ratio'] ?? 0).toStringAsFixed(2)}  •  '
-                    'Return ${(metrics['total_return_pct'] ?? 0).toStringAsFixed(2)}%  •  '
-                    'DD ${(metrics['max_drawdown_pct'] ?? 0).toStringAsFixed(2)}%  •  '
-                    'Trades ${metrics['trades']}',
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: _rankColor(r['rank'] as int),
+                  child: Text(
+                    '${r['rank']}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ]),
-              ),
-              Column(children: [
-                Text(score.toStringAsFixed(3),
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                Text('score', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
-              ]),
-            ]),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        r['label']?.toString() ?? '',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        'Sharpe ${(metrics['sharpe_ratio'] ?? 0).toStringAsFixed(2)}  •  '
+                        'Return ${(metrics['total_return_pct'] ?? 0).toStringAsFixed(2)}%  •  '
+                        'DD ${(metrics['max_drawdown_pct'] ?? 0).toStringAsFixed(2)}%  •  '
+                        'Trades ${metrics['trades']}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  children: [
+                    Text(
+                      score.toStringAsFixed(3),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      'score',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -1227,13 +1552,68 @@ class _RobustnessTabState extends State<_RobustnessTab> {
   }
 
   Color _rankColor(int rank) {
-    if (rank == 1) return const Color(0xFFD4AF37);  // gold
-    if (rank == 2) return const Color(0xFFC0C0C0);  // silver
-    if (rank == 3) return const Color(0xFFCD7F32);  // bronze
+    if (rank == 1) return const Color(0xFFD4AF37); // gold
+    if (rank == 2) return const Color(0xFFC0C0C0); // silver
+    if (rank == 3) return const Color(0xFFCD7F32); // bronze
     return Colors.indigo;
   }
 }
 
+class _StressSummary extends StatelessWidget {
+  final Map<String, dynamic> stress;
+  const _StressSummary({required this.stress});
+
+  @override
+  Widget build(BuildContext context) {
+    String fmt(dynamic v) {
+      final n = (v is num) ? v.toDouble() : double.tryParse('$v') ?? 0.0;
+      return n == n.roundToDouble() ? n.round().toString() : n.toString();
+    }
+
+    final scenarios = (stress['scenarios'] as List?) ?? const [];
+    final sharpe = (stress['sharpe'] as Map?) ?? const {};
+    final returns = (stress['returns_pct'] as Map?) ?? const {};
+    final dd = (stress['max_dd_pct'] as Map?) ?? const {};
+    if (scenarios.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.black12,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Stress matrix',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 180,
+            child: ListView.builder(
+              itemCount: scenarios.length,
+              itemBuilder: (_, i) {
+                final s = (scenarios[i] as Map?) ?? const {};
+                final key =
+                    'f${fmt(s['fees_mult'])}_s${fmt(s['slippage_mult'])}_d${fmt(s['drop_best_pct'])}';
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    '$key  |  Sharpe ${(sharpe[key] ?? 0).toString()}  |  Return ${(returns[key] ?? 0).toString()}%  |  DD ${(dd[key] ?? 0).toString()}%',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -1242,8 +1622,7 @@ class _RobustnessTabState extends State<_RobustnessTab> {
 dynamic jsonDecodeSafe(String s) {
   // Light wrapper that gives a more useful exception type for the UI
   // (Dart's default jsonDecode throws FormatException already)
-  return jsonDecodeOrNull(s) ??
-      (throw const FormatException('Invalid JSON'));
+  return jsonDecodeOrNull(s) ?? (throw const FormatException('Invalid JSON'));
 }
 
 dynamic jsonDecodeOrNull(String s) {
@@ -1255,7 +1634,6 @@ dynamic jsonDecodeOrNull(String s) {
 }
 
 // (jsonDecode is imported at the top of this file)
-
 
 // ──────────────────────────────────────────────────────────────────────────
 // Compare tab — side-by-side run comparator
@@ -1372,46 +1750,51 @@ class _CompareTabState extends State<_CompareTab> {
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
           const SizedBox(height: 12),
-          Row(children: [
-            ElevatedButton.icon(
-              onPressed: _openSelector,
-              icon: const Icon(Icons.checklist),
-              label: Text(_selectedIds.isEmpty
-                  ? 'Pick runs'
-                  : 'Pick runs (${_selectedIds.length} selected)'),
+          Row(
+            children: [
+              ElevatedButton.icon(
+                onPressed: _openSelector,
+                icon: const Icon(Icons.checklist),
+                label: Text(
+                  _selectedIds.isEmpty
+                      ? 'Pick runs'
+                      : 'Pick runs (${_selectedIds.length} selected)',
+                ),
+              ),
+              const SizedBox(width: 12),
+              OutlinedButton.icon(
+                onPressed: _loadHistory,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Reload history'),
+              ),
+              if (_comparing)
+                const Padding(
+                  padding: EdgeInsets.only(left: 12),
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+            ],
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_error!, style: const TextStyle(color: Colors.red)),
             ),
-            const SizedBox(width: 12),
-            OutlinedButton.icon(
-              onPressed: _loadHistory,
-              icon: const Icon(Icons.refresh, size: 16),
-              label: const Text('Reload history'),
-            ),
-            if (_comparing) const Padding(
-              padding: EdgeInsets.only(left: 12),
-              child: SizedBox(
-                width: 16, height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
+          if (_missingRunIds.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Missing runs (deleted?): ${_missingRunIds.join(", ")}',
+                style: const TextStyle(color: Colors.orange, fontSize: 11),
               ),
             ),
-          ]),
-          if (_error != null) Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(_error!, style: const TextStyle(color: Colors.red)),
-          ),
-          if (_missingRunIds.isNotEmpty) Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              'Missing runs (deleted?): ${_missingRunIds.join(", ")}',
-              style: const TextStyle(color: Colors.orange, fontSize: 11),
-            ),
-          ),
           const SizedBox(height: 12),
           Expanded(
             child: SingleChildScrollView(
-              child: ComparePanel(
-                runs: _comparedRuns,
-                onAddRun: _openSelector,
-              ),
+              child: ComparePanel(runs: _comparedRuns, onAddRun: _openSelector),
             ),
           ),
         ],
@@ -1419,7 +1802,6 @@ class _CompareTabState extends State<_CompareTab> {
     );
   }
 }
-
 
 class _RunSelectorDialog extends StatefulWidget {
   final List<Map<String, dynamic>> history;
@@ -1447,13 +1829,15 @@ class _RunSelectorDialogState extends State<_RunSelectorDialog> {
     return AlertDialog(
       title: const Text('Select runs to compare'),
       content: SizedBox(
-        width: 460, height: 420,
+        width: 460,
+        height: 420,
         child: ListView.builder(
           itemCount: widget.history.length,
           itemBuilder: (_, i) {
             final r = widget.history[i];
             final runId = r['run_id'] as String? ?? '';
-            final payload = (r['payload'] as Map?) ?? (r['result'] as Map?) ?? r;
+            final payload =
+                (r['payload'] as Map?) ?? (r['result'] as Map?) ?? r;
             final summary = (payload['summary'] as Map?) ?? {};
             final ret = (summary['total_return_pct'] as num?)?.toDouble() ?? 0;
             return CheckboxListTile(
@@ -1466,8 +1850,10 @@ class _RunSelectorDialogState extends State<_RunSelectorDialog> {
                   _selected.remove(runId);
                 }
               }),
-              title: Text('${r['symbol']} ${r['timeframe']}',
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              title: Text(
+                '${r['symbol']} ${r['timeframe']}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
               subtitle: Text(
                 'Return ${ret.toStringAsFixed(2)}%  •  id ${runId.substring(0, runId.length.clamp(0, 8))}…',
                 style: const TextStyle(fontSize: 11),

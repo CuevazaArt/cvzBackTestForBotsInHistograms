@@ -286,6 +286,34 @@ def test_total_equity_with_no_positions_is_decimal_not_int():
     assert cost == Decimal("0")
 
 
+def test_portfolio_total_equity_handles_mixed_long_and_short():
+    """Long and short legs should both contribute correctly to equity."""
+    from backtester.core.engine import Portfolio, Position
+
+    p = Portfolio(cash=Decimal("1000"))
+    p.positions.append(
+        Position(
+            entry_price=Decimal("100"),
+            qty=Decimal("1"),
+            entry_idx=0,
+            entry_time=0,
+            side="long",
+        )
+    )
+    p.positions.append(
+        Position(
+            entry_price=Decimal("120"),
+            qty=Decimal("2"),
+            entry_idx=0,
+            entry_time=0,
+            side="short",
+        )
+    )
+    # equity = cash + long_value - short_liability
+    # = 1000 + (1*110) - (2*110) = 890
+    assert p.total_equity(Decimal("110")) == Decimal("890")
+
+
 def test_max_drawdown_uses_first_point_as_initial_peak():
     """Regression for WORKPLAN C5.
 

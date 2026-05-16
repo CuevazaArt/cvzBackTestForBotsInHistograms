@@ -29,6 +29,7 @@ def _zero_friction_config() -> BacktestConfig:
         initial_cash=Decimal("10000"),
         taker_fee_pct=Decimal("0"),
         slippage_pct=Decimal("0"),
+        fill_on_next_open=False,
     )
 
 
@@ -387,3 +388,157 @@ def test_circuit_breaker_halts_new_buys_after_drawdown():
     # Use per_bot.total_fees_usdt = 0 in both, but final_equity is different.
     # Without gate: all 6 buys land. With gate: ≤2 buys land before halt.
     assert with_gate.final_equity != no_gate.final_equity  # different paths
+
+
+def test_market_order_fills_on_next_open_when_enabled():
+    class _Bot:
+        placed = False
+        sold = False
+
+        def on_candle(self, candle, portfolio):
+            if not self.placed:
+                self.placed = True
+                return [{"side": "BUY", "qty": Decimal("1")}]
+            if portfolio.positions and not self.sold:
+                self.sold = True
+                return [{"side": "SELL", "qty": Decimal("1")}]
+            return []
+
+    candles = [
+        _candle(0, 100, 101, 99, 100),
+        _candle(3_600_000, 110, 112, 108, 111),
+        _candle(7_200_000, 105, 106, 103, 104),
+    ]
+    engine = BacktestEngine(
+        BacktestConfig(
+            initial_cash=Decimal("1000"),
+            taker_fee_pct=Decimal("0"),
+            slippage_pct=Decimal("0"),
+            fill_on_next_open=True,
+        )
+    )
+    result = engine.run([_Bot()], candles)
+    assert len(result.trades) == 1
+    # Buy signal on bar0 fills on bar1 open (=110), sell signal on bar1 fills on bar2 open (=105).
+    assert result.trades[0].entry_price == Decimal("110")
+    assert result.trades[0].exit_price == Decimal("105")
+
+
+def test_market_order_legacy_fill_uses_same_bar_close():
+    class _Bot:
+        placed = False
+        sold = False
+
+        def on_candle(self, candle, portfolio):
+            if not self.placed:
+                self.placed = True
+                return [{"side": "BUY", "qty": Decimal("1")}]
+            if portfolio.positions and not self.sold:
+                self.sold = True
+                return [{"side": "SELL", "qty": Decimal("1")}]
+            return []
+
+    candles = [
+        _candle(0, 100, 101, 99, 100),
+        _candle(3_600_000, 110, 112, 108, 111),
+    ]
+    engine = BacktestEngine(
+        BacktestConfig(
+            initial_cash=Decimal("1000"),
+            taker_fee_pct=Decimal("0"),
+            slippage_pct=Decimal("0"),
+            fill_on_next_open=False,
+        )
+    )
+    result = engine.run([_Bot()], candles)
+    assert len(result.trades) == 1
+    assert result.trades[0].entry_price == Decimal("100")
+    assert result.trades[0].exit_price == Decimal("111")
+
+
+def test_short_trade_positive_pnl_when_price_drops():
+    class _Bot:
+        step = 0
+
+        def on_candle(self, candle, portfolio):
+            self.step += 1
+            if self.step == 1:
+                return [{"side": "SHORT", "action": "open", "qty": Decimal("1")}]
+            if self.step == 2:
+                return [{"side": "COVER", "action": "close", "qty": Decimal("1")}]
+            return []
+
+    candles = [
+        _candle(0, 100, 100, 99, 100),
+        _candle(3_600_000, 90, 90, 89, 90),
+        _candle(7_200_000, 90, 90, 89, 90),
+    ]
+    engine = BacktestEngine(
+        BacktestConfig(
+            initial_cash=Decimal("1000"),
+            taker_fee_pct=Decimal("0"),
+            slippage_pct=Decimal("0"),
+            fill_on_next_open=False,
+        )
+    )
+    result = engine.run([_Bot()], candles)
+    assert len(result.trades) == 1
+    t = result.trades[0]
+    assert t.side == "short"
+    assert t.pnl == Decimal("10")
+
+
+def test_short_bracket_stop_loss_triggers_when_high_crosses():
+    class _Bot:
+        sent = False
+
+        def on_candle(self, candle, portfolio):
+            if not self.sent:
+                self.sent = True
+                return [
+                    {
+                        "side": "SHORT",
+                        "action": "open",
+                        "qty": Decimal("1"),
+                        "stop_loss_price": Decimal("110"),
+                    }
+                ]
+            return []
+
+    candles = [
+        _candle(0, 100, 100, 100, 100),
+        _candle(3_600_000, 100, 111, 99, 105),
+    ]
+    engine = BacktestEngine(_zero_friction_config())
+    result = engine.run([_Bot()], candles)
+    assert len(result.trades) == 1
+    assert result.trades[0].reason == "STOP_LOSS"
+    assert result.trades[0].side == "short"
+
+
+def test_short_bracket_take_profit_triggers_when_low_crosses():
+    class _Bot:
+        sent = False
+
+        def on_candle(self, candle, portfolio):
+            if not self.sent:
+                self.sent = True
+                return [
+                    {
+                        "side": "SHORT",
+                        "action": "open",
+                        "qty": Decimal("1"),
+                        "take_profit_price": Decimal("90"),
+                    }
+                ]
+            return []
+
+    candles = [
+        _candle(0, 100, 100, 100, 100),
+        _candle(3_600_000, 100, 101, 89, 95),
+    ]
+    engine = BacktestEngine(_zero_friction_config())
+    result = engine.run([_Bot()], candles)
+    assert len(result.trades) == 1
+    assert result.trades[0].reason == "TAKE_PROFIT"
+    assert result.trades[0].side == "short"

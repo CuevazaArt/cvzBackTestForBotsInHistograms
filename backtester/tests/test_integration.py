@@ -656,3 +656,65 @@ def test_html_report_endpoint_returns_404_for_unknown_run(app_with_synthetic_dat
     client = TestClient(app_with_synthetic_data)
     res = client.get("/api/backtest/does-not-exist/report.html")
     assert res.status_code == 404
+
+
+def test_stress_endpoint_returns_matrix(app_with_synthetic_data):
+    app = app_with_synthetic_data
+    app.state.ctx.result_store.save(
+        "run-stress",
+        "TESTUSDT",
+        "1h",
+        {"bots": [{"name": "EMACross", "params": {}}]},
+        {
+            "symbol": "TESTUSDT",
+            "timeframe": "1h",
+            "summary": {"total_return_pct": 5.0, "final_equity": 10500.0},
+            "trades": [
+                {"pnl": 120.0, "fee_usdt": 1.0},
+                {"pnl": -50.0, "fee_usdt": 1.0},
+                {"pnl": 60.0, "fee_usdt": 1.0},
+            ],
+        },
+    )
+    client = TestClient(app)
+    res = client.post(
+        "/api/backtest/run-stress/stress",
+        json={"fees_mult": [1, 2], "slippage_mult": [1], "drop_best_pct": [0, 10]},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["run_id"] == "run-stress"
+    assert len(body["scenarios"]) == 4
+    assert len(body["sharpe"]) == 4
+
+
+def test_stress_endpoint_404_for_unknown_run(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    res = client.post("/api/backtest/unknown-run/stress", json={})
+    assert res.status_code == 404
+
+
+def test_data_validate_endpoint_returns_quality_report(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    res = client.post(
+        "/api/data/validate", json={"symbol": "TESTUSDT", "timeframe": "1h"}
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["total_candles"] == 300
+    assert body["expected_candles"] == 300
+    assert body["completeness_pct"] == 100.0
+    assert body["gaps"] == []
+    assert body["duplicates"] == []
+    assert body["monotonic_ok"] is True
+    assert body["ohlc_consistency_violations"] == []
+    assert body["summary_ok"] is True
+    assert body["timeframe_seconds"] == 3600
+
+
+def test_data_validate_endpoint_returns_404_for_unknown_symbol(app_with_synthetic_data):
+    client = TestClient(app_with_synthetic_data)
+    res = client.post(
+        "/api/data/validate", json={"symbol": "NOEXIST", "timeframe": "1h"}
+    )
+    assert res.status_code == 404

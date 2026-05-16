@@ -116,6 +116,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     initial_cash=Decimal(str(req.initial_cash)),
                     taker_fee_pct=Decimal(str(req.taker_fee_pct)),
                     slippage_pct=Decimal(str(req.slippage_pct)),
+                    fill_on_next_open=req.fill_on_next_open,
                 )
 
                 # Assign a stable run_id so the client can retrieve stored results.
@@ -149,6 +150,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     "initial_cash": req.initial_cash,
                     "taker_fee_pct": req.taker_fee_pct,
                     "slippage_pct": req.slippage_pct,
+                    "fill_on_next_open": req.fill_on_next_open,
                 }
 
                 await asyncio.to_thread(

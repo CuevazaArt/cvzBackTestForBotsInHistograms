@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cvz-backtester"
-version = "0.5.1"
+version = "0.6.0"
 description = "Mini MetaTrader-style backtester for crypto trading bots with realistic fills, walk-forward, Monte Carlo, and a declarative strategy DSL."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -55,6 +55,10 @@ dev = [
     "pytest-cov>=5,<6",
     "ruff>=0.6",
     "mypy>=1.10",
+]
+test = [
+    "hypothesis>=6,<7",
+    "pytest-benchmark>=4,<5",
 ]
 
 [project.scripts]

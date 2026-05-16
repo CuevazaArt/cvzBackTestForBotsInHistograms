@@ -305,8 +305,7 @@ def monte_carlo_run(
                 status="done",
                 progress=1.0,
                 message=(
-                    f"P(profit)={result.prob_profit:.1%} "
-                    f"VaR95={result.var_95_pct:.2f}%"
+                    f"P(profit)={result.prob_profit:.1%} VaR95={result.var_95_pct:.2f}%"
                 ),
                 result=result.to_dict(),
             )

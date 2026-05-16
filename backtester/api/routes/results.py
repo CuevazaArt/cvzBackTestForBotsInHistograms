@@ -12,7 +12,10 @@ from backtester.api.schemas import (
     ComparedRun,
     CompareRunsRequest,
     CompareRunsResponse,
+    StressRequest,
+    StressResponse,
 )
+from backtester.analysis import run_stress_battery, stress_matrix_to_dict
 from backtester.reporting import build_report
 
 router = APIRouter(tags=["results"])
@@ -166,3 +169,23 @@ def compare_backtest_runs(
             )
         )
     return CompareRunsResponse(runs=runs, missing=missing)
+
+
+@router.post("/backtest/{run_id}/stress", response_model=StressResponse)
+def stress_backtest_run(
+    run_id: str,
+    req: StressRequest,
+    ctx: AppContext = Depends(get_ctx),
+) -> StressResponse:
+    record = ctx.result_store.get(run_id)
+    if record is None:
+        raise HTTPException(404, f"Backtest result '{run_id}' not found")
+    result_blob = record.get("result") or {}
+    matrix = run_stress_battery(
+        result_blob,
+        fees_mult=req.fees_mult,
+        slippage_mult=req.slippage_mult,
+        drop_best_pct=req.drop_best_pct,
+    )
+    payload = stress_matrix_to_dict(matrix)
+    return StressResponse(run_id=run_id, **payload)

@@ -46,8 +46,9 @@ def test_download_calls_fetch_from_start(dl: BinanceDownloader) -> None:
             return batch
         return []
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch), patch(
-        "backtester.core.downloader.time.sleep"
+    with (
+        patch.object(dl, "_fetch_batch", side_effect=fake_fetch),
+        patch("backtester.core.downloader.time.sleep"),
     ):
         dl.download("BTCUSDT", "1m", "2024-01-01", "2024-01-01")
 
@@ -68,8 +69,9 @@ def test_start_from_ms_skips_earlier_batches(dl: BinanceDownloader) -> None:
             return batch
         return []
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch), patch(
-        "backtester.core.downloader.time.sleep"
+    with (
+        patch.object(dl, "_fetch_batch", side_effect=fake_fetch),
+        patch("backtester.core.downloader.time.sleep"),
     ):
         count = dl.download(
             "BTCUSDT",
@@ -101,8 +103,9 @@ def test_on_progress_called_after_each_batch(dl: BinanceDownloader) -> None:
     def on_progress(candles_added: int, last_ts: int) -> None:
         call_log.append((candles_added, last_ts))
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch), patch(
-        "backtester.core.downloader.time.sleep"
+    with (
+        patch.object(dl, "_fetch_batch", side_effect=fake_fetch),
+        patch("backtester.core.downloader.time.sleep"),
     ):
         dl.download(
             "BTCUSDT",
@@ -133,8 +136,9 @@ def test_resume_produces_no_duplicates(dl: BinanceDownloader) -> None:
             return all_candles
         return []
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch_first), patch(
-        "backtester.core.downloader.time.sleep"
+    with (
+        patch.object(dl, "_fetch_batch", side_effect=fake_fetch_first),
+        patch("backtester.core.downloader.time.sleep"),
     ):
         dl.download("BTCUSDT", "1m", "2024-01-01", "2024-01-01")
 
@@ -146,8 +150,9 @@ def test_resume_produces_no_duplicates(dl: BinanceDownloader) -> None:
             return second_half
         return []
 
-    with patch.object(dl, "_fetch_batch", side_effect=fake_fetch_resume), patch(
-        "backtester.core.downloader.time.sleep"
+    with (
+        patch.object(dl, "_fetch_batch", side_effect=fake_fetch_resume),
+        patch("backtester.core.downloader.time.sleep"),
     ):
         dl.download(
             "BTCUSDT",

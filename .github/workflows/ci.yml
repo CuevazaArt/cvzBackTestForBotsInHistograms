@@ -132,11 +132,42 @@ jobs:
         working-directory: flutter_app
         run: flutter test --reporter=expanded
 
+  # ── Docker image smoke test ────────────────────────────────────
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t cvz-backtester:ci .
+      - name: Import smoke inside image
+        run: |
+          docker run --rm cvz-backtester:ci \
+            python -c "from backtester import BacktestEngine, BacktestConfig, BOT_REGISTRY, __version__; print('SDK', __version__, len(BOT_REGISTRY))"
+
+  # ── pre-commit hooks ────────────────────────────────────────────
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install pre-commit
+        run: pip install pre-commit==4.0.1
+      - name: Cache pre-commit envs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Run hooks
+        run: pre-commit run --all-files --show-diff-on-failure
+
   # ── Aggregate gate ─────────────────────────────────────────────
   # Required for branch protection. flutter promoted to required after B5
   # migrated widget tests to fakeAsync + cancellable Timer in home_screen.
   ci-gate:
-    needs: [lint-backend, typecheck-backend, test-backend, sdk-packaging, flutter]
+    needs: [lint-backend, typecheck-backend, test-backend, sdk-packaging, flutter, docker-smoke, pre-commit]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -146,7 +177,9 @@ jobs:
              [ "${{ needs.typecheck-backend.result }}" != "success" ] || \
              [ "${{ needs.test-backend.result }}" != "success" ] || \
              [ "${{ needs.sdk-packaging.result }}" != "success" ] || \
-             [ "${{ needs.flutter.result }}" != "success" ]; then
+             [ "${{ needs.flutter.result }}" != "success" ] || \
+             [ "${{ needs.docker-smoke.result }}" != "success" ] || \
+             [ "${{ needs.pre-commit.result }}" != "success" ]; then
             echo "One or more required jobs failed"
             exit 1
           fi

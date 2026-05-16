@@ -6,6 +6,7 @@ advanced risk-adjusted performance metrics (Sharpe, Sortino, Calmar).
 
 import math
 from decimal import Decimal
+from statistics import NormalDist
 from typing import Any
 
 from backtester.core.engine import BacktestResult
@@ -40,6 +41,61 @@ def _annualization_factor(timeframe: str) -> float:
         "1w": 52,
     }
     return mapping.get(timeframe, 8_760)  # default 1h
+
+
+def _compute_returns_moments(returns: list[float]) -> tuple[float, float]:
+    """Return (skewness, kurtosis) of returns.
+
+    Kurtosis returned here is the *non-excess* kurtosis (normal == 3).
+    """
+    n = len(returns)
+    if n < 3:
+        return 0.0, 3.0
+    mean_r = sum(returns) / n
+    var = sum((r - mean_r) ** 2 for r in returns) / n
+    if var <= 0:
+        return 0.0, 3.0
+    std = math.sqrt(var)
+    m3 = sum(((r - mean_r) / std) ** 3 for r in returns) / n
+    m4 = sum(((r - mean_r) / std) ** 4 for r in returns) / n
+    return m3, m4
+
+
+def probabilistic_sharpe_ratio(
+    sr_hat: float,
+    sr_benchmark: float,
+    n: int,
+    skew: float = 0.0,
+    kurt: float = 3.0,
+) -> float:
+    """Probability that estimated SR is greater than a benchmark SR."""
+    if n <= 1:
+        return 0.0
+    denom = math.sqrt(
+        max(1e-12, 1.0 - skew * sr_hat + ((kurt - 1.0) / 4.0) * (sr_hat**2))
+    )
+    z = ((sr_hat - sr_benchmark) * math.sqrt(n - 1)) / denom
+    return float(NormalDist().cdf(z))
+
+
+def deflated_sharpe_ratio(
+    sr_hat: float,
+    sr_benchmarks: list[float],
+    n: int,
+    skew: float = 0.0,
+    kurt: float = 3.0,
+) -> float:
+    """Deflated Sharpe ratio (DSR) using a multiple-testing benchmark."""
+    if not sr_benchmarks:
+        return probabilistic_sharpe_ratio(sr_hat, 0.0, n, skew, kurt)
+    mean_b = sum(sr_benchmarks) / len(sr_benchmarks)
+    var_b = sum((x - mean_b) ** 2 for x in sr_benchmarks) / len(sr_benchmarks)
+    std_b = math.sqrt(max(var_b, 0.0))
+    trials = max(2, len(sr_benchmarks))
+    quantile = 1.0 - (1.0 / trials)
+    z_max = NormalDist().inv_cdf(min(0.999999, max(0.500001, quantile)))
+    sr_star = mean_b + std_b * z_max
+    return probabilistic_sharpe_ratio(sr_hat, sr_star, n, skew, kurt)
 
 
 # ── Core ─────────────────────────────────────────────────────────
@@ -134,6 +190,19 @@ def compute_metrics(result: BacktestResult) -> dict[str, Any]:
     base["recovery_factor"] = _recovery_factor(result, base["total_return_pct"])
     base.update(_streak_analysis(closed))
     base.update(_excursion_stats(closed))
+
+    # ── Probabilistic / deflated Sharpe (selection-bias aware) ──
+    skew, kurt = _compute_returns_moments(returns)
+    sr_hat = float(base.get("sharpe_ratio", 0.0))
+    n_ret = len(returns)
+    base["psr"] = round(
+        probabilistic_sharpe_ratio(sr_hat, 0.0, n_ret, skew=skew, kurt=kurt), 6
+    )
+    # For single-run summaries we only have one observed SR; callers that have
+    # many trial SRs can call `deflated_sharpe_ratio(...)` directly.
+    base["dsr"] = round(
+        deflated_sharpe_ratio(sr_hat, [sr_hat], n_ret, skew=skew, kurt=kurt), 6
+    )
 
     return base
 

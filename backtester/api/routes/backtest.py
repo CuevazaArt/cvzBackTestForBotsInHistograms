@@ -62,6 +62,7 @@ def _execute(req: BacktestRequest, ctx: AppContext) -> BacktestResponse:
         initial_cash=Decimal(str(req.initial_cash)),
         taker_fee_pct=Decimal(str(req.taker_fee_pct)),
         slippage_pct=Decimal(str(req.slippage_pct)),
+        fill_on_next_open=req.fill_on_next_open,
     )
 
     bot_names = unique_bot_names(req.bots)

@@ -84,6 +84,11 @@ class PendingOrder:
     parent_position_id: Optional[int] = None
     # Tag carried for the eventual Trade.reason (e.g. STOP_LOSS, TAKE_PROFIT)
     fill_reason: TriggerReason = TriggerReason.MARKET_ENTRY
+    # Canonical action used by the engine router:
+    # open_long | close_long | open_short | close_short
+    order_action: str = "open_long"
+    # Optional bracket payload attached to deferred MARKET entries.
+    bracket: dict | None = None
 
 
 def parse_order_dict(d: dict) -> dict:
@@ -93,7 +98,38 @@ def parse_order_dict(d: dict) -> dict:
     ones with type, limit_price, etc. This function fills in defaults and
     coerces values to Decimal so the engine can be type-strict downstream.
     """
-    side = OrderSide(str(d.get("side", "")).upper())
+    raw_side = str(d.get("side", "")).upper()
+    raw_action = str(d.get("action", "")).strip().lower()
+    position_side = str(d.get("position_side", "")).strip().lower()
+
+    # Backward compatible normalization:
+    # - BUY/SELL legacy keeps existing behavior
+    # - side="SHORT"/"COVER" are accepted shorthands
+    # - action can disambiguate open/close and long/short intent
+    if raw_side == "SHORT":
+        side = OrderSide.SELL
+        if raw_action in {"", "open", "short"}:
+            raw_action = "open_short"
+        elif raw_action == "close":
+            raw_action = "close_short"
+    elif raw_side == "COVER":
+        side = OrderSide.BUY
+        if raw_action in {"", "close", "cover"}:
+            raw_action = "close_short"
+        elif raw_action == "open":
+            raw_action = "open_short"
+    else:
+        side = OrderSide(raw_side)
+
+    if not raw_action:
+        if side == OrderSide.BUY:
+            raw_action = "close_short" if position_side == "short" else "open_long"
+        else:
+            raw_action = "open_short" if position_side == "short" else "close_long"
+    elif raw_action == "open":
+        raw_action = "open_short" if side == OrderSide.SELL else "open_long"
+    elif raw_action == "close":
+        raw_action = "close_short" if side == OrderSide.BUY else "close_long"
     qty = Decimal(str(d.get("qty", 0)))
     type_str = str(d.get("type", "MARKET")).upper()
     otype = (
@@ -107,6 +143,7 @@ def parse_order_dict(d: dict) -> dict:
         "side": side,
         "qty": qty,
         "type": otype,
+        "action": raw_action,
         "limit_price": _dec(d.get("limit_price")),
         "stop_price": _dec(d.get("stop_price")),
         "trail_pct": _dec(d.get("trail_pct")),

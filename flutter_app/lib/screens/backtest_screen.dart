@@ -6,7 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:backtester_shell/services/api_service.dart';
 import 'package:backtester_shell/services/presets_service.dart';
 import 'package:backtester_shell/services/ws_service.dart';
-import 'package:backtester_shell/screens/optimization_screen.dart' show OptimizationResult;
+import 'package:backtester_shell/screens/optimization_screen.dart'
+    show OptimizationResult;
 import 'package:backtester_shell/widgets/chart_webview.dart';
 import 'package:backtester_shell/widgets/results_panel.dart';
 import 'package:backtester_shell/widgets/trades_table.dart';
@@ -53,6 +54,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
   double _initialCash = 10000.0;
   double _takerFeePct = 0.1;
   double _slippagePct = 0.05;
+  bool _fillOnNextOpen = true;
   String _selectedFormula = 'ohlc';
   double _brickSize = 10.0;
   String? _startDateIso;
@@ -83,17 +85,23 @@ class _BacktestScreenState extends State<BacktestScreen> {
     _loadCatalog();
     _wsSub = _ws.events.listen(_onWsEvent);
     if (widget.initialApply != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _consumeInitialApply(widget.initialApply!));
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _consumeInitialApply(widget.initialApply!),
+      );
     }
   }
 
   @override
   void didUpdateWidget(BacktestScreen old) {
     super.didUpdateWidget(old);
-    if (old.defaultCash != widget.defaultCash) _initialCash = widget.defaultCash;
-    if (old.defaultFeePct != widget.defaultFeePct) _takerFeePct = widget.defaultFeePct;
-    if (old.defaultSlippagePct != widget.defaultSlippagePct) _slippagePct = widget.defaultSlippagePct;
-    if (widget.initialApply != null && widget.initialApply != old.initialApply) {
+    if (old.defaultCash != widget.defaultCash)
+      _initialCash = widget.defaultCash;
+    if (old.defaultFeePct != widget.defaultFeePct)
+      _takerFeePct = widget.defaultFeePct;
+    if (old.defaultSlippagePct != widget.defaultSlippagePct)
+      _slippagePct = widget.defaultSlippagePct;
+    if (widget.initialApply != null &&
+        widget.initialApply != old.initialApply) {
       _consumeInitialApply(widget.initialApply!);
     }
   }
@@ -112,12 +120,16 @@ class _BacktestScreenState extends State<BacktestScreen> {
     });
     widget.onApplyConsumed?.call();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        backgroundColor: const Color(0xFFb388ff),
-        content: Text('Optimized params loaded for ${r.botName}. Click Run to backtest.',
-            style: const TextStyle(color: Colors.black, fontSize: 12)),
-        duration: const Duration(seconds: 3),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFFb388ff),
+          content: Text(
+            'Optimized params loaded for ${r.botName}. Click Run to backtest.',
+            style: const TextStyle(color: Colors.black, fontSize: 12),
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 
@@ -135,7 +147,8 @@ class _BacktestScreenState extends State<BacktestScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _catalogError = 'Cannot load symbols/bots. Check backend URL and token in Settings.';
+          _catalogError =
+              'Cannot load symbols/bots. Check backend URL and token in Settings.';
         });
       }
       debugPrint('BacktestScreen _loadCatalog error: $e');
@@ -169,8 +182,8 @@ class _BacktestScreenState extends State<BacktestScreen> {
     switch (ev.type) {
       case WsEventType.start:
         final overlayKeys = List<String>.from(ev.data['indicators_keys'] ?? []);
-        final oscKeys     = List<String>.from(ev.data['oscillator_keys'] ?? []);
-        final botIds      = List<String>.from(ev.data['bot_ids'] ?? []);
+        final oscKeys = List<String>.from(ev.data['oscillator_keys'] ?? []);
+        final botIds = List<String>.from(ev.data['bot_ids'] ?? []);
         _chartCtrl.initIndicators(overlayKeys);
         _chartCtrl.initOscillators(oscKeys);
         _chartCtrl.initBotSeries(['total', ...botIds]);
@@ -225,20 +238,25 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   void _maybeOfferDataManager(String message) {
     final lower = message.toLowerCase();
-    if (!lower.contains('no candles') && !lower.contains('download first')) return;
+    if (!lower.contains('no candles') && !lower.contains('download first'))
+      return;
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      backgroundColor: const Color(0xFFef5350),
-      duration: const Duration(seconds: 8),
-      content: Text('No data for ${_selectedSymbol ?? "this symbol"} ($_selectedTimeframe). Download first.',
-          style: const TextStyle(color: Colors.white, fontSize: 12)),
-      action: SnackBarAction(
-        label: 'Open Data Manager',
-        textColor: Colors.white,
-        onPressed: () => _showDownloadDialog(context),
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFFef5350),
+        duration: const Duration(seconds: 8),
+        content: Text(
+          'No data for ${_selectedSymbol ?? "this symbol"} ($_selectedTimeframe). Download first.',
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+        ),
+        action: SnackBarAction(
+          label: 'Open Data Manager',
+          textColor: Colors.white,
+          onPressed: () => _showDownloadDialog(context),
+        ),
       ),
-    ));
+    );
   }
 
   void _runBacktest() {
@@ -257,7 +275,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
     });
     _chartCtrl.clear();
 
-    final bots = _selectedBots.map((b) => {'name': b, 'params': _botsParams[b] ?? {}}).toList();
+    final bots = _selectedBots
+        .map((b) => {'name': b, 'params': _botsParams[b] ?? {}})
+        .toList();
 
     _ws.runBacktest(
       bots: bots,
@@ -268,6 +288,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
       initialCash: _initialCash,
       takerFeePct: _takerFeePct,
       slippagePct: _slippagePct,
+      fillOnNextOpen: _fillOnNextOpen,
       indicators: _selectedIndicators,
     );
   }
@@ -282,15 +303,72 @@ class _BacktestScreenState extends State<BacktestScreen> {
     return normalized.millisecondsSinceEpoch;
   }
 
+  Future<void> _validateData() async {
+    if (_selectedSymbol == null) return;
+    try {
+      final report = await widget.apiService.validateData(
+        symbol: _selectedSymbol!,
+        timeframe: _selectedTimeframe,
+        startMs: _parseDateToMs(_startDateIso),
+        endMs: _parseDateToMs(_endDateIso, endOfDay: true),
+      );
+      if (!mounted) return;
+      final summaryOk = report['summary_ok'] as bool? ?? false;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Data quality — ${_selectedSymbol!} $_selectedTimeframe'),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Status: ${summaryOk ? "OK" : "Issues found"}'),
+                Text('Candles: ${report["total_candles"]}'),
+                Text(
+                  'Completeness: ${(report["completeness_pct"] ?? 0).toString()}%',
+                ),
+                Text('Gaps: ${((report["gaps"] as List?) ?? const []).length}'),
+                Text(
+                  'Duplicates: ${((report["duplicates"] as List?) ?? const []).length}',
+                ),
+                Text(
+                  'OHLC violations: ${((report["ohlc_consistency_violations"] as List?) ?? const []).length}',
+                ),
+                Text(
+                  'Outliers: ${((report["outliers_iqr"] as List?) ?? const []).length}',
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Data validation failed: $e')));
+    }
+  }
+
   // ── Exports ────────────────────────────────────────────────────
 
   Future<void> _exportHtmlReport() async {
     final runId = _lastResult?['run_id'] as String?;
     if (runId == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('No run_id on the current result; rerun the backtest.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No run_id on the current result; rerun the backtest.'),
+        ),
+      );
       return;
     }
     try {
@@ -308,14 +386,16 @@ class _BacktestScreenState extends State<BacktestScreen> {
       await outFile.writeAsString(html);
       await Clipboard.setData(ClipboardData(text: outFile.path));
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        backgroundColor: const Color(0xFF26a69a),
-        content: Text(
-          'HTML report saved → ${outFile.path} (path copied)',
-          style: const TextStyle(color: Colors.black, fontSize: 12),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF26a69a),
+          content: Text(
+            'HTML report saved → ${outFile.path} (path copied)',
+            style: const TextStyle(color: Colors.black, fontSize: 12),
+          ),
+          duration: const Duration(seconds: 4),
         ),
-        duration: const Duration(seconds: 4),
-      ));
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -328,26 +408,42 @@ class _BacktestScreenState extends State<BacktestScreen> {
     if (_lastResult == null) return;
     final dir = Directory('${Directory.current.path}/exports');
     if (!dir.existsSync()) dir.createSync(recursive: true);
-    final ts = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+    final ts = DateTime.now()
+        .toIso8601String()
+        .replaceAll(':', '-')
+        .split('.')
+        .first;
     final subDir = Directory('${dir.path}/run_$ts');
     subDir.createSync();
 
     // trades.csv
     final tradesCsv = StringBuffer()
-      ..writeln('bot_id,entry_time,exit_time,entry_price,exit_price,qty,pnl,pnl_pct,fee_usdt,reason');
+      ..writeln(
+        'bot_id,entry_time,exit_time,entry_price,exit_price,qty,pnl,pnl_pct,fee_usdt,reason',
+      );
     for (final t in _trades) {
-      final eT = DateTime.fromMillisecondsSinceEpoch(t.entryTime * 1000, isUtc: true);
-      final xT = DateTime.fromMillisecondsSinceEpoch(t.exitTime * 1000, isUtc: true);
-      tradesCsv.writeln([
-        t.botId, eT.toIso8601String(), xT.toIso8601String(),
-        t.entryPrice.toStringAsFixed(6),
-        t.exitPrice.toStringAsFixed(6),
-        t.qty.toStringAsFixed(8),
-        t.pnl.toStringAsFixed(4),
-        t.pnlPct.toStringAsFixed(4),
-        t.feeUsdt.toStringAsFixed(4),
-        t.reason,
-      ].join(','));
+      final eT = DateTime.fromMillisecondsSinceEpoch(
+        t.entryTime * 1000,
+        isUtc: true,
+      );
+      final xT = DateTime.fromMillisecondsSinceEpoch(
+        t.exitTime * 1000,
+        isUtc: true,
+      );
+      tradesCsv.writeln(
+        [
+          t.botId,
+          eT.toIso8601String(),
+          xT.toIso8601String(),
+          t.entryPrice.toStringAsFixed(6),
+          t.exitPrice.toStringAsFixed(6),
+          t.qty.toStringAsFixed(8),
+          t.pnl.toStringAsFixed(4),
+          t.pnlPct.toStringAsFixed(4),
+          t.feeUsdt.toStringAsFixed(4),
+          t.reason,
+        ].join(','),
+      );
     }
     await File('${subDir.path}/trades.csv').writeAsString(tradesCsv.toString());
 
@@ -358,9 +454,12 @@ class _BacktestScreenState extends State<BacktestScreen> {
       'initial_cash': _initialCash,
       'taker_fee_pct': _takerFeePct,
       'slippage_pct': _slippagePct,
+      'fill_on_next_open': _fillOnNextOpen,
       if (_startDateIso != null) 'start_date': _startDateIso,
       if (_endDateIso != null) 'end_date': _endDateIso,
-      'bots': _selectedBots.map((b) => {'name': b, 'params': _botsParams[b] ?? {}}).toList(),
+      'bots': _selectedBots
+          .map((b) => {'name': b, 'params': _botsParams[b] ?? {}})
+          .toList(),
       'indicators': _selectedIndicators,
     };
     final summary = {
@@ -370,17 +469,22 @@ class _BacktestScreenState extends State<BacktestScreen> {
       'trades_count': _trades.length,
       'exported_at': DateTime.now().toIso8601String(),
     };
-    await File('${subDir.path}/summary.json')
-        .writeAsString(const JsonEncoder.withIndent('  ').convert(summary));
+    await File(
+      '${subDir.path}/summary.json',
+    ).writeAsString(const JsonEncoder.withIndent('  ').convert(summary));
 
     await Clipboard.setData(ClipboardData(text: subDir.path));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        backgroundColor: const Color(0xFF26a69a),
-        content: Text('Bundle saved → ${subDir.path} (path copied)',
-            style: const TextStyle(color: Colors.black, fontSize: 12)),
-        duration: const Duration(seconds: 4),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF26a69a),
+          content: Text(
+            'Bundle saved → ${subDir.path} (path copied)',
+            style: const TextStyle(color: Colors.black, fontSize: 12),
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
     }
   }
 
@@ -388,13 +492,17 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   Future<void> _savePresetDialog() async {
     if (_selectedSymbol == null || _selectedBots.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Select symbol and bots before saving a preset'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select symbol and bots before saving a preset'),
+        ),
+      );
       return;
     }
     final ctrl = TextEditingController(
-        text: '${_selectedSymbol}_${_selectedTimeframe}_${_selectedBots.join("-")}');
+      text:
+          '${_selectedSymbol}_${_selectedTimeframe}_${_selectedBots.join("-")}',
+    );
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -406,7 +514,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
           autofocus: true,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
             child: const Text('Save'),
@@ -421,17 +532,24 @@ class _BacktestScreenState extends State<BacktestScreen> {
       timeframe: _selectedTimeframe,
       initialCash: _initialCash,
       botNames: List<String>.from(_selectedBots),
-      botsParams: {for (final b in _selectedBots) b: Map<String, dynamic>.from(_botsParams[b] ?? {})},
+      botsParams: {
+        for (final b in _selectedBots)
+          b: Map<String, dynamic>.from(_botsParams[b] ?? {}),
+      },
       indicators: List<Map<String, dynamic>>.from(_selectedIndicators),
       createdAt: DateTime.now().toIso8601String(),
     );
     await _presets.save(preset);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        backgroundColor: const Color(0xFF26a69a),
-        content: Text('Preset "$name" saved',
-            style: const TextStyle(color: Colors.black, fontSize: 12)),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF26a69a),
+          content: Text(
+            'Preset "$name" saved',
+            style: const TextStyle(color: Colors.black, fontSize: 12),
+          ),
+        ),
+      );
     }
   }
 
@@ -448,9 +566,14 @@ class _BacktestScreenState extends State<BacktestScreen> {
           height: 320,
           child: presets.isEmpty
               ? Center(
-                  child: Text('No presets saved yet.\nFolder: ${_presets.dirPath}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Color(0xFF787B86), fontSize: 12)),
+                  child: Text(
+                    'No presets saved yet.\nFolder: ${_presets.dirPath}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF787B86),
+                      fontSize: 12,
+                    ),
+                  ),
                 )
               : ListView.builder(
                   itemCount: presets.length,
@@ -458,14 +581,27 @@ class _BacktestScreenState extends State<BacktestScreen> {
                     final p = presets[i];
                     return ListTile(
                       dense: true,
-                      title: Text(p.name, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                      title: Text(
+                        p.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                        ),
+                      ),
                       subtitle: Text(
-                          '${p.symbol} • ${p.timeframe} • ${p.botNames.join(", ")}',
-                          style: const TextStyle(color: Color(0xFF787B86), fontSize: 11)),
+                        '${p.symbol} • ${p.timeframe} • ${p.botNames.join(", ")}',
+                        style: const TextStyle(
+                          color: Color(0xFF787B86),
+                          fontSize: 11,
+                        ),
+                      ),
                       onTap: () => Navigator.pop(ctx, p),
                       trailing: IconButton(
                         iconSize: 16,
-                        icon: const Icon(Icons.delete_outline, color: Color(0xFFef5350)),
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: Color(0xFFef5350),
+                        ),
                         onPressed: () async {
                           await _presets.delete(p.name);
                           if (ctx.mounted) Navigator.pop(ctx, null);
@@ -477,7 +613,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
                 ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
         ],
       ),
     );
@@ -490,17 +629,24 @@ class _BacktestScreenState extends State<BacktestScreen> {
       _selectedTimeframe = p.timeframe;
       _initialCash = p.initialCash;
       _selectedBots = List<String>.from(p.botNames);
-      _botsParams = {for (final e in p.botsParams.entries) e.key: Map<String, dynamic>.from(e.value)};
+      _botsParams = {
+        for (final e in p.botsParams.entries)
+          e.key: Map<String, dynamic>.from(e.value),
+      };
       _selectedIndicators = List<Map<String, dynamic>>.from(p.indicators);
     });
     for (final b in _selectedBots) {
       _fetchBotParams(b);
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      backgroundColor: const Color(0xFF26a69a),
-      content: Text('Loaded preset "${p.name}"',
-          style: const TextStyle(color: Colors.black, fontSize: 12)),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFF26a69a),
+        content: Text(
+          'Loaded preset "${p.name}"',
+          style: const TextStyle(color: Colors.black, fontSize: 12),
+        ),
+      ),
+    );
   }
 
   // dispose is handled near initState
@@ -519,6 +665,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           initialCash: _initialCash,
           takerFeePct: _takerFeePct,
           slippagePct: _slippagePct,
+          fillOnNextOpen: _fillOnNextOpen,
           startDateIso: _startDateIso,
           endDateIso: _endDateIso,
           selectedIndicators: _selectedIndicators,
@@ -536,7 +683,10 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onBrickSizeChanged: (v) {
             setState(() => _brickSize = v);
             if (_selectedFormula == 'renko') {
-              _chartCtrl.setChartFormula(_selectedFormula, brickSize: _brickSize);
+              _chartCtrl.setChartFormula(
+                _selectedFormula,
+                brickSize: _brickSize,
+              );
             }
           },
           onBotsChanged: (v) {
@@ -548,6 +698,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onCashChanged: (v) => setState(() => _initialCash = v),
           onFeeChanged: (v) => setState(() => _takerFeePct = v),
           onSlippageChanged: (v) => setState(() => _slippagePct = v),
+          onFillOnNextOpenChanged: (v) => setState(() => _fillOnNextOpen = v),
           onStartDateChanged: (v) => setState(() => _startDateIso = v),
           onEndDateChanged: (v) => setState(() => _endDateIso = v),
           onIndicatorsChanged: (v) => setState(() => _selectedIndicators = v),
@@ -561,6 +712,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onApplyPreset: _applyPreset,
           onManagePresets: _loadPresetDialog,
           onReconnect: _ws.connect,
+          onValidateData: _validateData,
         ),
         if (_symbols.isEmpty)
           Container(
@@ -568,7 +720,11 @@ class _BacktestScreenState extends State<BacktestScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
-                const Icon(Icons.download_outlined, size: 18, color: Color(0xFF26a69a)),
+                const Icon(
+                  Icons.download_outlined,
+                  size: 18,
+                  color: Color(0xFF26a69a),
+                ),
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Text(
@@ -595,19 +751,32 @@ class _BacktestScreenState extends State<BacktestScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFef5350)),
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 18,
+                  color: Color(0xFFef5350),
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     _catalogError!,
-                    style: const TextStyle(color: Color(0xFFef5350), fontSize: 12),
+                    style: const TextStyle(
+                      color: Color(0xFFef5350),
+                      fontSize: 12,
+                    ),
                   ),
                 ),
                 TextButton(onPressed: _loadCatalog, child: const Text('Retry')),
               ],
             ),
           ),
-        Expanded(flex: 3, child: ChartWebView(controller: _chartCtrl, chartUrl: widget.chartUrl)),
+        Expanded(
+          flex: 3,
+          child: ChartWebView(
+            controller: _chartCtrl,
+            chartUrl: widget.chartUrl,
+          ),
+        ),
         const Divider(height: 1),
         if (_lastResult != null || _trades.isNotEmpty)
           SizedBox(
@@ -617,10 +786,13 @@ class _BacktestScreenState extends State<BacktestScreen> {
               perBot: _perBotResult,
               trades: _trades,
               onExportAll: _lastResult != null ? _exportBundle : null,
-              onExportHtml: (_lastResult != null && _lastResult!['run_id'] != null)
+              onExportHtml:
+                  (_lastResult != null && _lastResult!['run_id'] != null)
                   ? _exportHtmlReport
                   : null,
-              onSavePreset: _selectedSymbol != null && _selectedBots.isNotEmpty ? _savePresetDialog : null,
+              onSavePreset: _selectedSymbol != null && _selectedBots.isNotEmpty
+                  ? _savePresetDialog
+                  : null,
             ),
           ),
       ],
@@ -658,6 +830,7 @@ class _TopBar extends StatelessWidget {
   final double initialCash;
   final double takerFeePct;
   final double slippagePct;
+  final bool fillOnNextOpen;
   final String? startDateIso;
   final String? endDateIso;
   final List<Map<String, dynamic>> selectedIndicators;
@@ -674,18 +847,21 @@ class _TopBar extends StatelessWidget {
   final ValueChanged<double> onCashChanged;
   final ValueChanged<double> onFeeChanged;
   final ValueChanged<double> onSlippageChanged;
+  final ValueChanged<bool> onFillOnNextOpenChanged;
   final ValueChanged<String?> onStartDateChanged;
   final ValueChanged<String?> onEndDateChanged;
   final ValueChanged<List<Map<String, dynamic>>> onIndicatorsChanged;
   final Map<String, BotParamsResponse> botParamSpecs;
   final Map<String, Map<String, dynamic>> botsParamValues;
-  final void Function(String botName, Map<String, dynamic> params) onBotParamChanged;
+  final void Function(String botName, Map<String, dynamic> params)
+  onBotParamChanged;
   final VoidCallback onRun;
   final VoidCallback onDownload;
   final VoidCallback onSavePreset;
   final void Function(BacktestPreset) onApplyPreset;
   final VoidCallback onManagePresets;
   final VoidCallback onReconnect;
+  final VoidCallback onValidateData;
 
   const _TopBar({
     required this.symbols,
@@ -697,6 +873,7 @@ class _TopBar extends StatelessWidget {
     required this.initialCash,
     required this.takerFeePct,
     required this.slippagePct,
+    required this.fillOnNextOpen,
     required this.startDateIso,
     required this.endDateIso,
     required this.selectedIndicators,
@@ -713,6 +890,7 @@ class _TopBar extends StatelessWidget {
     required this.onCashChanged,
     required this.onFeeChanged,
     required this.onSlippageChanged,
+    required this.onFillOnNextOpenChanged,
     required this.onStartDateChanged,
     required this.onEndDateChanged,
     required this.onIndicatorsChanged,
@@ -725,150 +903,191 @@ class _TopBar extends StatelessWidget {
     required this.onApplyPreset,
     required this.onManagePresets,
     required this.onReconnect,
+    required this.onValidateData,
   });
 
   static const _timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
   @override
   Widget build(BuildContext context) {
-    final distinctSymbols = symbols.map((s) => s.symbol).toSet().toList()..sort();
+    final distinctSymbols = symbols.map((s) => s.symbol).toSet().toList()
+      ..sort();
     return Container(
       height: 48,
       color: const Color(0xFF1E222D),
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          _DropdownChip<String>(
-            value: selectedSymbol,
-            hint: 'Symbol',
-            items: distinctSymbols,
-            onChanged: onSymbolChanged,
-          ),
-          const SizedBox(width: 8),
-          _DropdownChip<String>(
-            value: selectedTimeframe,
-            hint: 'TF',
-            items: _timeframes,
-            onChanged: (v) {
-              if (v != null) onTimeframeChanged(v);
-            },
-          ),
-          const SizedBox(width: 8),
-          _DropdownChip<String>(
-            value: selectedFormula,
-            hint: 'Chart',
-            items: const ['ohlc', 'heikin_ashi', 'renko'],
-            onChanged: (v) {
-              if (v != null) onFormulaChanged(v);
-            },
-          ),
-          if (selectedFormula == 'renko') ...[
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _DropdownChip<String>(
+              value: selectedSymbol,
+              hint: 'Symbol',
+              items: distinctSymbols,
+              onChanged: onSymbolChanged,
+            ),
+            const SizedBox(width: 8),
+            _DropdownChip<String>(
+              value: selectedTimeframe,
+              hint: 'TF',
+              items: _timeframes,
+              onChanged: (v) {
+                if (v != null) onTimeframeChanged(v);
+              },
+            ),
+            const SizedBox(width: 8),
+            _DropdownChip<String>(
+              value: selectedFormula,
+              hint: 'Chart',
+              items: const ['ohlc', 'heikin_ashi', 'renko'],
+              onChanged: (v) {
+                if (v != null) onFormulaChanged(v);
+              },
+            ),
+            if (selectedFormula == 'renko') ...[
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 60,
+                child: TextFormField(
+                  initialValue: brickSize.toString(),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 8,
+                    ),
+                    hintText: 'Size',
+                    filled: true,
+                    fillColor: Color(0xFF2B2B43),
+                    border: OutlineInputBorder(borderSide: BorderSide.none),
+                  ),
+                  onChanged: (v) {
+                    final val = double.tryParse(v);
+                    if (val != null && val > 0) onBrickSizeChanged(val);
+                  },
+                ),
+              ),
+            ],
             const SizedBox(width: 8),
             SizedBox(
-              width: 60,
+              width: 96,
               child: TextFormField(
-                initialValue: brickSize.toString(),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: const TextStyle(color: Colors.white, fontSize: 13),
+                initialValue: startDateIso ?? '',
                 decoration: const InputDecoration(
+                  labelText: 'Start',
+                  hintText: 'YYYY-MM-DD',
                   isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  hintText: 'Size',
-                  filled: true,
-                  fillColor: Color(0xFF2B2B43),
-                  border: OutlineInputBorder(borderSide: BorderSide.none),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
                 ),
-                onChanged: (v) {
-                  final val = double.tryParse(v);
-                  if (val != null && val > 0) onBrickSizeChanged(val);
-                },
+                style: const TextStyle(fontSize: 11, color: Color(0xFFD9D9D9)),
+                onChanged: (v) =>
+                    onStartDateChanged(v.trim().isEmpty ? null : v.trim()),
               ),
             ),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 96,
+              child: TextFormField(
+                initialValue: endDateIso ?? '',
+                decoration: const InputDecoration(
+                  labelText: 'End',
+                  hintText: 'YYYY-MM-DD',
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
+                ),
+                style: const TextStyle(fontSize: 11, color: Color(0xFFD9D9D9)),
+                onChanged: (v) =>
+                    onEndDateChanged(v.trim().isEmpty ? null : v.trim()),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: () => _showBotsDialog(context),
+              icon: const Icon(Icons.smart_toy, size: 14),
+              label: Text('Bots (${selectedBots.length})'),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFD9D9D9),
+              ),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: () => _showIndicatorDialog(context),
+              icon: const Icon(Icons.show_chart, size: 14),
+              label: Text('Ind (${selectedIndicators.length})'),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFD9D9D9),
+              ),
+            ),
+            const SizedBox(width: 4),
+            // ── Presets ─────────────────────────────────────────────
+            _PresetsToolbar(
+              onSavePreset: onSavePreset,
+              onApplyPreset: onApplyPreset,
+              onManagePresets: onManagePresets,
+            ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed:
+                  running || selectedSymbol == null || selectedBots.isEmpty
+                  ? null
+                  : onRun,
+              icon: running
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.play_arrow, size: 16),
+              label: Text(running ? '${progress.toStringAsFixed(0)}%' : 'Run'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF26a69a),
+                minimumSize: const Size(80, 32),
+                textStyle: const TextStyle(fontSize: 13),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: onDownload,
+              icon: const Icon(Icons.download, size: 14),
+              label: const Text('Data'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF787B86),
+                side: const BorderSide(color: Color(0xFF2B2B43)),
+                minimumSize: const Size(72, 32),
+                textStyle: const TextStyle(fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              key: const ValueKey('validate-data-btn'),
+              onPressed: selectedSymbol == null ? null : onValidateData,
+              icon: const Icon(Icons.verified_outlined, size: 14),
+              label: const Text('Validar'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF787B86),
+                side: const BorderSide(color: Color(0xFF2B2B43)),
+                minimumSize: const Size(82, 32),
+                textStyle: const TextStyle(fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // ── Connection status indicator ─────────────────────────
+            _ConnStatus(status: wsStatus, error: wsError, onRetry: onReconnect),
           ],
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 96,
-            child: TextFormField(
-              initialValue: startDateIso ?? '',
-              decoration: const InputDecoration(
-                labelText: 'Start',
-                hintText: 'YYYY-MM-DD',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              ),
-              style: const TextStyle(fontSize: 11, color: Color(0xFFD9D9D9)),
-              onChanged: (v) => onStartDateChanged(v.trim().isEmpty ? null : v.trim()),
-            ),
-          ),
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 96,
-            child: TextFormField(
-              initialValue: endDateIso ?? '',
-              decoration: const InputDecoration(
-                labelText: 'End',
-                hintText: 'YYYY-MM-DD',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              ),
-              style: const TextStyle(fontSize: 11, color: Color(0xFFD9D9D9)),
-              onChanged: (v) => onEndDateChanged(v.trim().isEmpty ? null : v.trim()),
-            ),
-          ),
-          const SizedBox(width: 8),
-          TextButton.icon(
-            onPressed: () => _showBotsDialog(context),
-            icon: const Icon(Icons.smart_toy, size: 14),
-            label: Text('Bots (${selectedBots.length})'),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFFD9D9D9)),
-          ),
-          const SizedBox(width: 4),
-          TextButton.icon(
-            onPressed: () => _showIndicatorDialog(context),
-            icon: const Icon(Icons.show_chart, size: 14),
-            label: Text('Ind (${selectedIndicators.length})'),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFFD9D9D9)),
-          ),
-          const SizedBox(width: 4),
-          // ── Presets ─────────────────────────────────────────────
-          _PresetsToolbar(
-            onSavePreset: onSavePreset,
-            onApplyPreset: onApplyPreset,
-            onManagePresets: onManagePresets,
-          ),
-          const SizedBox(width: 8),
-          FilledButton.icon(
-            onPressed: running || selectedSymbol == null || selectedBots.isEmpty ? null : onRun,
-            icon: running
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.play_arrow, size: 16),
-            label: Text(running ? '${progress.toStringAsFixed(0)}%' : 'Run'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF26a69a),
-              minimumSize: const Size(80, 32),
-              textStyle: const TextStyle(fontSize: 13),
-            ),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: onDownload,
-            icon: const Icon(Icons.download, size: 14),
-            label: const Text('Data'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF787B86),
-              side: const BorderSide(color: Color(0xFF2B2B43)),
-              minimumSize: const Size(72, 32),
-              textStyle: const TextStyle(fontSize: 12),
-            ),
-          ),
-          const Spacer(),
-          // ── Connection status indicator ─────────────────────────
-          _ConnStatus(status: wsStatus, error: wsError, onRetry: onReconnect),
-        ],
+        ),
       ),
     );
   }
@@ -893,7 +1112,9 @@ class _TopBar extends StatelessWidget {
                         TextFormField(
                           initialValue: initialCash.toString(),
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Initial Cash / Wallet'),
+                          decoration: const InputDecoration(
+                            labelText: 'Initial Cash / Wallet',
+                          ),
                           onChanged: (v) {
                             final val = double.tryParse(v);
                             if (val != null) onCashChanged(val);
@@ -911,12 +1132,19 @@ class _TopBar extends StatelessWidget {
                               CheckboxListTile(
                                 title: Text(b.name),
                                 subtitle: b.description != null
-                                    ? Text(b.description!,
-                                        style: const TextStyle(fontSize: 11, color: Color(0xFF787B86)))
+                                    ? Text(
+                                        b.description!,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Color(0xFF787B86),
+                                        ),
+                                      )
                                     : null,
                                 value: isSelected,
                                 onChanged: (checked) {
-                                  final newList = List<String>.from(selectedBots);
+                                  final newList = List<String>.from(
+                                    selectedBots,
+                                  );
                                   if (checked == true) {
                                     newList.add(b.name);
                                   } else {
@@ -926,9 +1154,16 @@ class _TopBar extends StatelessWidget {
                                   setStateDialog(() {});
                                 },
                               ),
-                              if (isSelected && spec != null && spec.params.isNotEmpty)
+                              if (isSelected &&
+                                  spec != null &&
+                                  spec.params.isNotEmpty)
                                 Padding(
-                                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    0,
+                                    16,
+                                    8,
+                                  ),
                                   child: _BotParamEditor(
                                     botName: b.name,
                                     spec: spec,
@@ -948,8 +1183,13 @@ class _TopBar extends StatelessWidget {
                             Expanded(
                               child: TextFormField(
                                 initialValue: takerFeePct.toString(),
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: const InputDecoration(labelText: 'Taker Fee %'),
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Taker Fee %',
+                                ),
                                 onChanged: (v) {
                                   final n = double.tryParse(v);
                                   if (n != null) onFeeChanged(n);
@@ -960,8 +1200,13 @@ class _TopBar extends StatelessWidget {
                             Expanded(
                               child: TextFormField(
                                 initialValue: slippagePct.toString(),
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: const InputDecoration(labelText: 'Slippage %'),
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Slippage %',
+                                ),
                                 onChanged: (v) {
                                   final n = double.tryParse(v);
                                   if (n != null) onSlippageChanged(n);
@@ -969,6 +1214,20 @@ class _TopBar extends StatelessWidget {
                               ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 10),
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Realistic fill (next open)'),
+                          subtitle: const Text(
+                            'MARKET orders execute on next candle open.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF787B86),
+                            ),
+                          ),
+                          value: fillOnNextOpen,
+                          onChanged: onFillOnNextOpenChanged,
                         ),
                       ],
                     ),
@@ -978,7 +1237,10 @@ class _TopBar extends StatelessWidget {
             },
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
           ],
         );
       },
@@ -986,16 +1248,46 @@ class _TopBar extends StatelessWidget {
   }
 
   static const _indicatorPresets = [
-    {'label': 'EMA 9',        'spec': {'name': 'ema',   'period': 9}},
-    {'label': 'EMA 21',       'spec': {'name': 'ema',   'period': 21}},
-    {'label': 'EMA 50',       'spec': {'name': 'ema',   'period': 50}},
-    {'label': 'SMA 20',       'spec': {'name': 'sma',   'period': 20}},
-    {'label': 'SMA 200',      'spec': {'name': 'sma',   'period': 200}},
-    {'label': 'RSI 14',       'spec': {'name': 'rsi',   'period': 14}},
-    {'label': 'MACD (12/26/9)', 'spec': {'name': 'macd', 'fast': 12, 'slow': 26, 'signal': 9}},
-    {'label': 'BB 20',        'spec': {'name': 'bb',    'period': 20}},
-    {'label': 'Stoch 14',     'spec': {'name': 'stoch', 'k_period': 14, 'd_period': 3}},
-    {'label': 'VWAP',         'spec': {'name': 'vwap'}},
+    {
+      'label': 'EMA 9',
+      'spec': {'name': 'ema', 'period': 9},
+    },
+    {
+      'label': 'EMA 21',
+      'spec': {'name': 'ema', 'period': 21},
+    },
+    {
+      'label': 'EMA 50',
+      'spec': {'name': 'ema', 'period': 50},
+    },
+    {
+      'label': 'SMA 20',
+      'spec': {'name': 'sma', 'period': 20},
+    },
+    {
+      'label': 'SMA 200',
+      'spec': {'name': 'sma', 'period': 200},
+    },
+    {
+      'label': 'RSI 14',
+      'spec': {'name': 'rsi', 'period': 14},
+    },
+    {
+      'label': 'MACD (12/26/9)',
+      'spec': {'name': 'macd', 'fast': 12, 'slow': 26, 'signal': 9},
+    },
+    {
+      'label': 'BB 20',
+      'spec': {'name': 'bb', 'period': 20},
+    },
+    {
+      'label': 'Stoch 14',
+      'spec': {'name': 'stoch', 'k_period': 14, 'd_period': 3},
+    },
+    {
+      'label': 'VWAP',
+      'spec': {'name': 'vwap'},
+    },
   ];
 
   void _showIndicatorDialog(BuildContext context) {
@@ -1026,60 +1318,115 @@ class _TopBar extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('OVERLAY (main chart)',
-                      style: TextStyle(color: Color(0xFF787B86), fontSize: 10, letterSpacing: 1)),
+                  const Text(
+                    'OVERLAY (main chart)',
+                    style: TextStyle(
+                      color: Color(0xFF787B86),
+                      fontSize: 10,
+                      letterSpacing: 1,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   Wrap(
-                    spacing: 8, runSpacing: 6,
+                    spacing: 8,
+                    runSpacing: 6,
                     children: _indicatorPresets
-                        .where((p) => !['rsi', 'macd', 'stoch'].contains((p['spec'] as Map)['name']))
+                        .where(
+                          (p) => ![
+                            'rsi',
+                            'macd',
+                            'stoch',
+                          ].contains((p['spec'] as Map)['name']),
+                        )
                         .map((p) {
-                      final spec = Map<String, dynamic>.from(p['spec'] as Map);
-                      final active = isActive(spec);
-                      return FilterChip(
-                        label: Text(p['label'] as String,
-                            style: TextStyle(fontSize: 12, color: active ? Colors.black : const Color(0xFFD9D9D9))),
-                        selected: active,
-                        onSelected: (_) => toggle(spec),
-                        selectedColor: const Color(0xFF26a69a),
-                        backgroundColor: const Color(0xFF2B2B43),
-                        checkmarkColor: Colors.black,
-                        side: BorderSide.none,
-                      );
-                    }).toList(),
+                          final spec = Map<String, dynamic>.from(
+                            p['spec'] as Map,
+                          );
+                          final active = isActive(spec);
+                          return FilterChip(
+                            label: Text(
+                              p['label'] as String,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: active
+                                    ? Colors.black
+                                    : const Color(0xFFD9D9D9),
+                              ),
+                            ),
+                            selected: active,
+                            onSelected: (_) => toggle(spec),
+                            selectedColor: const Color(0xFF26a69a),
+                            backgroundColor: const Color(0xFF2B2B43),
+                            checkmarkColor: Colors.black,
+                            side: BorderSide.none,
+                          );
+                        })
+                        .toList(),
                   ),
                   const SizedBox(height: 14),
-                  const Text('OSCILLATORS (sub-panel)',
-                      style: TextStyle(color: Color(0xFF787B86), fontSize: 10, letterSpacing: 1)),
+                  const Text(
+                    'OSCILLATORS (sub-panel)',
+                    style: TextStyle(
+                      color: Color(0xFF787B86),
+                      fontSize: 10,
+                      letterSpacing: 1,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   Wrap(
-                    spacing: 8, runSpacing: 6,
+                    spacing: 8,
+                    runSpacing: 6,
                     children: _indicatorPresets
-                        .where((p) => ['rsi', 'macd', 'stoch'].contains((p['spec'] as Map)['name']))
+                        .where(
+                          (p) => [
+                            'rsi',
+                            'macd',
+                            'stoch',
+                          ].contains((p['spec'] as Map)['name']),
+                        )
                         .map((p) {
-                      final spec = Map<String, dynamic>.from(p['spec'] as Map);
-                      final active = isActive(spec);
-                      return FilterChip(
-                        label: Text(p['label'] as String,
-                            style: TextStyle(fontSize: 12, color: active ? Colors.black : const Color(0xFFD9D9D9))),
-                        selected: active,
-                        onSelected: (_) => toggle(spec),
-                        selectedColor: const Color(0xFFFFD700),
-                        backgroundColor: const Color(0xFF2B2B43),
-                        checkmarkColor: Colors.black,
-                        side: BorderSide.none,
-                      );
-                    }).toList(),
+                          final spec = Map<String, dynamic>.from(
+                            p['spec'] as Map,
+                          );
+                          final active = isActive(spec);
+                          return FilterChip(
+                            label: Text(
+                              p['label'] as String,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: active
+                                    ? Colors.black
+                                    : const Color(0xFFD9D9D9),
+                              ),
+                            ),
+                            selected: active,
+                            onSelected: (_) => toggle(spec),
+                            selectedColor: const Color(0xFFFFD700),
+                            backgroundColor: const Color(0xFF2B2B43),
+                            checkmarkColor: Colors.black,
+                            side: BorderSide.none,
+                          );
+                        })
+                        .toList(),
                   ),
                 ],
               ),
             ),
             actions: [
               TextButton(
-                onPressed: () { onIndicatorsChanged([]); setDialogState(() {}); },
-                child: const Text('Clear all', style: TextStyle(color: Color(0xFF787B86))),
+                onPressed: () {
+                  onIndicatorsChanged([]);
+                  setDialogState(() {});
+                },
+                child: const Text(
+                  'Clear all',
+                  style: TextStyle(color: Color(0xFF787B86)),
+                ),
               ),
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Done'),
+              ),
             ],
           );
         },
@@ -1092,7 +1439,11 @@ class _ConnStatus extends StatelessWidget {
   final ValueNotifier<WsStatus> status;
   final String? error;
   final VoidCallback onRetry;
-  const _ConnStatus({required this.status, required this.error, required this.onRetry});
+  const _ConnStatus({
+    required this.status,
+    required this.error,
+    required this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1114,12 +1465,19 @@ class _ConnStatus extends StatelessWidget {
                 child: Text(
                   '⚠ $error',
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Color(0xFFef5350), fontSize: 11),
+                  style: const TextStyle(
+                    color: Color(0xFFef5350),
+                    fontSize: 11,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
             ],
-            Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
             const SizedBox(width: 6),
             Text(label, style: TextStyle(color: color, fontSize: 11)),
             if (s == WsStatus.disconnected) ...[
@@ -1157,10 +1515,18 @@ class _DropdownChip<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     return DropdownButton<T>(
       value: value,
-      hint: Text(hint, style: const TextStyle(color: Color(0xFF787B86), fontSize: 13)),
-      items: items.map(
-        (e) => DropdownMenuItem(value: e, child: Text(e.toString(), style: const TextStyle(fontSize: 13))),
-      ).toList(),
+      hint: Text(
+        hint,
+        style: const TextStyle(color: Color(0xFF787B86), fontSize: 13),
+      ),
+      items: items
+          .map(
+            (e) => DropdownMenuItem(
+              value: e,
+              child: Text(e.toString(), style: const TextStyle(fontSize: 13)),
+            ),
+          )
+          .toList(),
       onChanged: onChanged,
       underline: const SizedBox(),
       isDense: true,
@@ -1223,9 +1589,9 @@ class _BotParamEditorState extends State<_BotParamEditor> {
       spacing: 12,
       runSpacing: 6,
       children: widget.spec.params.entries.map((e) {
-        final key  = e.key;
-        final p    = e.value;
-        final cur  = _vals[key] ?? p.defaultValue;
+        final key = e.key;
+        final p = e.value;
+        final cur = _vals[key] ?? p.defaultValue;
         final isInt = p.type == 'int';
 
         return SizedBox(
@@ -1234,8 +1600,10 @@ class _BotParamEditorState extends State<_BotParamEditor> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(key.replaceAll('_', ' '),
-                  style: const TextStyle(color: Color(0xFF787B86), fontSize: 10)),
+              Text(
+                key.replaceAll('_', ' '),
+                style: const TextStyle(color: Color(0xFF787B86), fontSize: 10),
+              ),
               if (p.min != null && p.max != null) ...[
                 Slider(
                   value: cur.toDouble().clamp(p.min!, p.max!),
@@ -1244,21 +1612,31 @@ class _BotParamEditorState extends State<_BotParamEditor> {
                   divisions: p.step != null
                       ? ((p.max! - p.min!) / p.step!).round().clamp(1, 200)
                       : null,
-                  label: isInt
-                      ? cur.toString()
-                      : cur.toStringAsFixed(3),
-                  onChanged: (v) => _update(key, isInt ? v.round() : double.parse(v.toStringAsFixed(4))),
+                  label: isInt ? cur.toString() : cur.toStringAsFixed(3),
+                  onChanged: (v) => _update(
+                    key,
+                    isInt ? v.round() : double.parse(v.toStringAsFixed(4)),
+                  ),
                   activeColor: const Color(0xFF26a69a),
                 ),
                 Text(
                   isInt ? '${cur.toInt()}' : cur.toStringAsFixed(3),
-                  style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 11),
+                  style: const TextStyle(
+                    color: Color(0xFFD9D9D9),
+                    fontSize: 11,
+                  ),
                 ),
               ] else
                 TextFormField(
                   initialValue: cur.toString(),
-                  style: const TextStyle(color: Color(0xFFD9D9D9), fontSize: 12),
-                  decoration: const InputDecoration(isDense: true, border: InputBorder.none),
+                  style: const TextStyle(
+                    color: Color(0xFFD9D9D9),
+                    fontSize: 12,
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                  ),
                   onChanged: (v) {
                     final parsed = isInt ? int.tryParse(v) : double.tryParse(v);
                     if (parsed != null) _update(key, parsed);
@@ -1279,6 +1657,7 @@ class _BotParamEditorState extends State<_BotParamEditor> {
 class _PresetsToolbar extends StatefulWidget {
   final VoidCallback onSavePreset;
   final void Function(BacktestPreset) onApplyPreset;
+
   /// Optional callback to open the full preset manager dialog (with delete).
   final VoidCallback? onManagePresets;
   const _PresetsToolbar({
@@ -1312,15 +1691,24 @@ class _PresetsToolbarState extends State<_PresetsToolbar> {
       mainAxisSize: MainAxisSize.min,
       children: [
         DropdownButton<BacktestPreset>(
-          hint: const Text('Preset',
-              style: TextStyle(color: Color(0xFF787B86), fontSize: 12)),
+          hint: const Text(
+            'Preset',
+            style: TextStyle(color: Color(0xFF787B86), fontSize: 12),
+          ),
           value: null,
           items: _presets
-              .map((p) => DropdownMenuItem(
-                    value: p,
-                    child: Text(p.name,
-                        style: const TextStyle(fontSize: 12, color: Color(0xFFD9D9D9))),
-                  ))
+              .map(
+                (p) => DropdownMenuItem(
+                  value: p,
+                  child: Text(
+                    p.name,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFFD9D9D9),
+                    ),
+                  ),
+                ),
+              )
               .toList(),
           onChanged: (p) {
             if (p != null) widget.onApplyPreset(p);
@@ -1339,7 +1727,10 @@ class _PresetsToolbarState extends State<_PresetsToolbar> {
             iconSize: 14,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-            icon: const Icon(Icons.bookmark_add_outlined, color: Color(0xFF787B86)),
+            icon: const Icon(
+              Icons.bookmark_add_outlined,
+              color: Color(0xFF787B86),
+            ),
             onPressed: () {
               widget.onSavePreset();
               // Reload after a brief delay to catch the newly saved preset.
@@ -1354,7 +1745,10 @@ class _PresetsToolbarState extends State<_PresetsToolbar> {
               iconSize: 14,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-              icon: const Icon(Icons.bookmarks_outlined, color: Color(0xFF787B86)),
+              icon: const Icon(
+                Icons.bookmarks_outlined,
+                color: Color(0xFF787B86),
+              ),
               onPressed: () async {
                 widget.onManagePresets!();
                 Future.delayed(const Duration(milliseconds: 500), _reload);
@@ -1371,7 +1765,10 @@ class _PresetsToolbarState extends State<_PresetsToolbar> {
 class _DownloadDialog extends StatefulWidget {
   final ApiService apiService;
   final Function(String, String) onCatalogSelect;
-  const _DownloadDialog({required this.apiService, required this.onCatalogSelect});
+  const _DownloadDialog({
+    required this.apiService,
+    required this.onCatalogSelect,
+  });
 
   @override
   State<_DownloadDialog> createState() => _DownloadDialogState();
@@ -1401,7 +1798,10 @@ class _DownloadDialogState extends State<_DownloadDialog> {
   void initState() {
     super.initState();
     _refreshCatalog();
-    _healthTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollWeight());
+    _healthTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _pollWeight(),
+    );
   }
 
   Future<void> _refreshCatalog() async {
@@ -1486,7 +1886,8 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                 doneJobs.add(id);
                 completed++;
                 totalProgress += 1.0;
-                totalCandles += (status.result?['candles_added'] as num?)?.toInt() ?? 0;
+                totalCandles +=
+                    (status.result?['candles_added'] as num?)?.toInt() ?? 0;
               } else if (status.status == 'error') {
                 hasError = true;
                 lastErr = status.message;
@@ -1522,7 +1923,6 @@ class _DownloadDialogState extends State<_DownloadDialog> {
             // Ignore polling errors
           }
         });
-
       } else {
         final result = await widget.apiService.downloadCandles(
           symbol: _symbolCtrl.text.trim().toUpperCase(),
@@ -1545,7 +1945,8 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                 setState(() {
                   _loading = false;
                   if (status.status == 'done') {
-                    _msg = '✓ Done: ${status.result?['candles_added'] ?? 0} candles';
+                    _msg =
+                        '✓ Done: ${status.result?['candles_added'] ?? 0} candles';
                     _refreshCatalog();
                   } else {
                     _msg = '✗ Error: ${status.message}';
@@ -1559,7 +1960,9 @@ class _DownloadDialogState extends State<_DownloadDialog> {
         });
       }
     } on ApiValidationError catch (e) {
-      setState(() { _loading = false; });
+      setState(() {
+        _loading = false;
+      });
       if (mounted) await ValidationErrorDialog.show(context, e);
     } catch (e) {
       setState(() {
@@ -1580,7 +1983,10 @@ class _DownloadDialogState extends State<_DownloadDialog> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const Text('API Weight (1m)', style: TextStyle(fontSize: 10, color: Color(0xFF787B86))),
+              const Text(
+                'API Weight (1m)',
+                style: TextStyle(fontSize: 10, color: Color(0xFF787B86)),
+              ),
               const SizedBox(height: 4),
               MiniWeightChart(
                 currentWeight: _apiWeight,
@@ -1603,7 +2009,13 @@ class _DownloadDialogState extends State<_DownloadDialog> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Download History', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  const Text(
+                    'Download History',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: _symbolCtrl,
@@ -1612,7 +2024,9 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
                     initialValue: _tf,
-                    items: _timeframes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                    items: _timeframes
+                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                        .toList(),
                     onChanged: (v) {
                       if (v != null) setState(() => _tf = v);
                     },
@@ -1636,14 +2050,18 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                         Expanded(
                           child: TextField(
                             controller: _fromCtrl,
-                            decoration: const InputDecoration(labelText: 'From (YYYY-MM-DD)'),
+                            decoration: const InputDecoration(
+                              labelText: 'From (YYYY-MM-DD)',
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: TextField(
                             controller: _toCtrl,
-                            decoration: const InputDecoration(labelText: 'To (YYYY-MM-DD)'),
+                            decoration: const InputDecoration(
+                              labelText: 'To (YYYY-MM-DD)',
+                            ),
                           ),
                         ),
                       ],
@@ -1654,7 +2072,9 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                         Expanded(
                           child: TextField(
                             controller: _yearCtrl,
-                            decoration: const InputDecoration(labelText: 'Year (YYYY)'),
+                            decoration: const InputDecoration(
+                              labelText: 'Year (YYYY)',
+                            ),
                             keyboardType: TextInputType.number,
                           ),
                         ),
@@ -1662,7 +2082,9 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                         Expanded(
                           child: TextField(
                             controller: _monthCtrl,
-                            decoration: const InputDecoration(labelText: 'Month (e.g. 1, 1-12, all)'),
+                            decoration: const InputDecoration(
+                              labelText: 'Month (e.g. 1, 1-12, all)',
+                            ),
                           ),
                         ),
                       ],
@@ -1683,13 +2105,17 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                   ],
                   if (_msg != null) ...[
                     const SizedBox(height: 12),
-                    Text(_msg!,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _msg!.startsWith('✓')
-                              ? const Color(0xFF26a69a)
-                              : (_msg!.startsWith('✗') ? const Color(0xFFef5350) : const Color(0xFFD9D9D9)),
-                        )),
+                    Text(
+                      _msg!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _msg!.startsWith('✓')
+                            ? const Color(0xFF26a69a)
+                            : (_msg!.startsWith('✗')
+                                  ? const Color(0xFFef5350)
+                                  : const Color(0xFFD9D9D9)),
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -1700,8 +2126,13 @@ class _DownloadDialogState extends State<_DownloadDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Local Histograms (DuckDB)',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  const Text(
+                    'Local Histograms (DuckDB)',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Expanded(
                     child: Container(
@@ -1715,12 +2146,25 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                           final c = _catalog[index];
                           return ListTile(
                             dense: true,
-                            title: Text('${c.symbol} • ${c.timeframe}',
-                                style: const TextStyle(color: Colors.white, fontSize: 13)),
-                            subtitle: Text('${c.candles} candles',
-                                style: const TextStyle(color: Color(0xFF787B86), fontSize: 11)),
+                            title: Text(
+                              '${c.symbol} • ${c.timeframe}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${c.candles} candles',
+                              style: const TextStyle(
+                                color: Color(0xFF787B86),
+                                fontSize: 11,
+                              ),
+                            ),
                             trailing: IconButton(
-                              icon: const Icon(Icons.play_circle_outline, color: Color(0xFF26a69a)),
+                              icon: const Icon(
+                                Icons.play_circle_outline,
+                                color: Color(0xFF26a69a),
+                              ),
                               tooltip: 'Load in Main Chart',
                               onPressed: () {
                                 widget.onCatalogSelect(c.symbol, c.timeframe);

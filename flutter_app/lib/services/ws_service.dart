@@ -90,6 +90,7 @@ class WsService {
     _controller ??= StreamController<WsEvent>.broadcast();
     return _controller!.stream;
   }
+
   bool get isConnected => status.value == WsStatus.connected;
 
   Future<void> connect() async {
@@ -106,9 +107,7 @@ class WsService {
     try {
       _channel = IOWebSocketChannel.connect(
         Uri.parse(wsUrl),
-        headers: {
-          if (apiToken.trim().isNotEmpty) 'x-api-key': apiToken.trim(),
-        },
+        headers: {if (apiToken.trim().isNotEmpty) 'x-api-key': apiToken.trim()},
       );
       _channel!.stream.listen(
         (raw) {
@@ -186,7 +185,9 @@ class WsService {
     if (status.value == WsStatus.disconnected) return;
     status.value = WsStatus.disconnected;
     // ignore: use_null_aware_elements
-    _controller?.add(WsEvent(WsEventType.disconnected, {if (error != null) 'message': error}));
+    _controller?.add(
+      WsEvent(WsEventType.disconnected, {if (error != null) 'message': error}),
+    );
 
     if (_wantConnected && _reconnectAttempts < maxReconnectAttempts) {
       _scheduleReconnect();
@@ -204,10 +205,13 @@ class WsService {
     // Exponential backoff: 500ms, 1s, 2s, 4s, 8s, max 15s
     final delayMs = reconnectDelayMs(_reconnectAttempts);
     status.value = WsStatus.reconnecting;
-    _controller?.add(WsEvent(
-      WsEventType.reconnecting,
-      {'attempt': _reconnectAttempts, 'delay_ms': delayMs, 'max': maxReconnectAttempts},
-    ));
+    _controller?.add(
+      WsEvent(WsEventType.reconnecting, {
+        'attempt': _reconnectAttempts,
+        'delay_ms': delayMs,
+        'max': maxReconnectAttempts,
+      }),
+    );
     _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
       if (_wantConnected) _doConnect();
     });
@@ -249,6 +253,7 @@ class WsService {
     double initialCash = 10000,
     double takerFeePct = 0.1,
     double slippagePct = 0.05,
+    bool fillOnNextOpen = true,
     List<Map<String, dynamic>>? indicators,
   }) {
     send({
@@ -264,6 +269,7 @@ class WsService {
         'initial_cash': initialCash,
         'taker_fee_pct': takerFeePct,
         'slippage_pct': slippagePct,
+        'fill_on_next_open': fillOnNextOpen,
         'indicators': indicators ?? [],
       },
     });
@@ -301,7 +307,8 @@ class WsService {
         'slippage_pct': slippagePct,
         'validation_split_pct': validationSplitPct,
         'min_trades': minTrades,
-        if (maxDrawdownPctLimit != null) 'max_drawdown_pct_limit': maxDrawdownPctLimit,
+        if (maxDrawdownPctLimit != null)
+          'max_drawdown_pct_limit': maxDrawdownPctLimit,
       },
     });
   }

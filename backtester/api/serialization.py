@@ -67,6 +67,7 @@ def trade_to_dto(t: Trade) -> TradeDTO:
         pnl_pct=float(t.pnl_pct),
         fee_usdt=float(t.fee_usdt),
         reason=t.reason,
+        side=t.side,
         bot_id=t.bot_id,
     )
 

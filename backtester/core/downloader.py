@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import duckdb
 import time
 import zipfile
@@ -12,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 _LOG = logging.getLogger("backtester.downloader")
 
@@ -20,8 +21,63 @@ _LOG = logging.getLogger("backtester.downloader")
 REQUEST_DELAY = 0.1  # 100ms between requests (safe margin)
 
 
-# Global variable to track API weight across the application
-BINANCE_USED_WEIGHT_1M = 0
+class WeightTracker:
+    """Thread-safe holder for Binance ``X-MBX-USED-WEIGHT-1M`` rate-limit weight.
+
+    The previous implementation kept the value in a module-level global that
+    was mutated from background download threads while the FastAPI ``/health``
+    endpoint read it from a worker thread. ``WeightTracker`` wraps the value
+    in a lock so concurrent reads/writes are race-free and so the rest of the
+    app can ask for an authoritative snapshot.
+    """
+
+    __slots__ = ("_value", "_lock")
+
+    def __init__(self, initial: int = 0) -> None:
+        self._value = int(initial)
+        self._lock = threading.Lock()
+
+    def get(self) -> int:
+        with self._lock:
+            return self._value
+
+    def set(self, value: int) -> None:
+        with self._lock:
+            self._value = int(value)
+
+    def increment(self, by: int = 1) -> int:
+        with self._lock:
+            self._value += int(by)
+            return self._value
+
+    def reset(self) -> None:
+        with self._lock:
+            self._value = 0
+
+
+BINANCE_WEIGHT_TRACKER = WeightTracker(0)
+
+
+def get_binance_used_weight_1m() -> int:
+    """Return the latest cached Binance ``X-MBX-USED-WEIGHT-1M`` value."""
+    return BINANCE_WEIGHT_TRACKER.get()
+
+
+def set_binance_used_weight_1m(value: int) -> None:
+    """Set the cached Binance weight (thread-safe)."""
+    BINANCE_WEIGHT_TRACKER.set(value)
+
+
+def __getattr__(name: str) -> int:  # pragma: no cover - backwards-compat shim
+    """Expose ``BINANCE_USED_WEIGHT_1M`` as a live read of the tracker.
+
+    Keeps legacy ``from backtester.core.downloader import BINANCE_USED_WEIGHT_1M``
+    imports working — each ``import`` resolves through ``__getattr__`` and gets
+    the current value rather than a stale snapshot.
+    """
+    if name == "BINANCE_USED_WEIGHT_1M":
+        return BINANCE_WEIGHT_TRACKER.get()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class BinanceDownloader:
@@ -118,7 +174,7 @@ class BinanceDownloader:
             progress = (current_ts - start_ts) / (end_ts - start_ts)
             _LOG.info(
                 f"{symbol} {timeframe}: {candles_added} candles "
-                f"({progress*100:.1f}% complete)"
+                f"({progress * 100:.1f}% complete)"
             )
 
             if on_progress is not None:
@@ -152,12 +208,11 @@ class BinanceDownloader:
                 timeout=10,
             )
 
-            # Track API Weight
+            # Track API Weight (thread-safe via shared WeightTracker).
             weight_header = resp.headers.get("X-MBX-USED-WEIGHT-1M")
             if weight_header:
-                global BINANCE_USED_WEIGHT_1M
                 try:
-                    BINANCE_USED_WEIGHT_1M = int(weight_header)
+                    BINANCE_WEIGHT_TRACKER.set(int(weight_header))
                 except ValueError:
                     pass
 

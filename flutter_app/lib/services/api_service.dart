@@ -18,12 +18,12 @@ class SymbolEntry {
   });
 
   factory SymbolEntry.fromJson(Map<String, dynamic> j) => SymbolEntry(
-        symbol: j['symbol'] as String,
-        timeframe: j['timeframe'] as String,
-        candles: j['candles'] as int,
-        firstMs: j['first_ms'] as int?,
-        lastMs: j['last_ms'] as int?,
-      );
+    symbol: j['symbol'] as String,
+    timeframe: j['timeframe'] as String,
+    candles: j['candles'] as int,
+    firstMs: j['first_ms'] as int?,
+    lastMs: j['last_ms'] as int?,
+  );
 }
 
 class BotInfo {
@@ -31,8 +31,10 @@ class BotInfo {
   final String? description;
   const BotInfo({required this.name, this.description});
 
-  factory BotInfo.fromJson(Map<String, dynamic> j) =>
-      BotInfo(name: j['name'] as String, description: j['description'] as String?);
+  factory BotInfo.fromJson(Map<String, dynamic> j) => BotInfo(
+    name: j['name'] as String,
+    description: j['description'] as String?,
+  );
 }
 
 class ParamSpec {
@@ -51,12 +53,12 @@ class ParamSpec {
   });
 
   factory ParamSpec.fromJson(Map<String, dynamic> j) => ParamSpec(
-        type: j['type'] as String,
-        defaultValue: j['default'],
-        min: (j['min'] as num?)?.toDouble(),
-        max: (j['max'] as num?)?.toDouble(),
-        step: (j['step'] as num?)?.toDouble(),
-      );
+    type: j['type'] as String,
+    defaultValue: j['default'],
+    min: (j['min'] as num?)?.toDouble(),
+    max: (j['max'] as num?)?.toDouble(),
+    step: (j['step'] as num?)?.toDouble(),
+  );
 }
 
 class BotParamsResponse {
@@ -86,7 +88,7 @@ class JobStatus {
   final double progress;
   final String? message;
   final Map<String, dynamic>? result;
-  
+
   const JobStatus({
     required this.id,
     required this.status,
@@ -96,12 +98,12 @@ class JobStatus {
   });
 
   factory JobStatus.fromJson(Map<String, dynamic> j) => JobStatus(
-        id: j['id'] as String,
-        status: j['status'] as String,
-        progress: (j['progress'] as num?)?.toDouble() ?? 0.0,
-        message: j['message'] as String?,
-        result: j['result'] as Map<String, dynamic>?,
-      );
+    id: j['id'] as String,
+    status: j['status'] as String,
+    progress: (j['progress'] as num?)?.toDouble() ?? 0.0,
+    message: j['message'] as String?,
+    result: j['result'] as Map<String, dynamic>?,
+  );
 }
 
 /// HTTP client for the FastAPI backend
@@ -112,25 +114,25 @@ class ApiService {
   ApiService({this.baseUrl = 'http://127.0.0.1:8002', this.apiToken = ''});
 
   Map<String, String> get _authHeaders => {
-        if (apiToken.trim().isNotEmpty) 'x-api-key': apiToken.trim(),
-      };
+    if (apiToken.trim().isNotEmpty) 'x-api-key': apiToken.trim(),
+  };
 
   Map<String, String> get _jsonHeaders => {
-        'Content-Type': 'application/json',
-        ..._authHeaders,
-      };
+    'Content-Type': 'application/json',
+    ..._authHeaders,
+  };
 
   Future<HealthStatus> checkHealth() async {
     try {
-      final res = await http.get(
-        Uri.parse('$baseUrl/health'),
-        headers: _authHeaders,
-      ).timeout(
-            const Duration(seconds: 3),
-          );
+      final res = await http
+          .get(Uri.parse('$baseUrl/health'), headers: _authHeaders)
+          .timeout(const Duration(seconds: 3));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
-        return HealthStatus(true, binanceWeight1m: (data['binance_weight_1m'] as num?)?.toInt() ?? 0);
+        return HealthStatus(
+          true,
+          binanceWeight1m: (data['binance_weight_1m'] as num?)?.toInt() ?? 0,
+        );
       }
       return const HealthStatus(false);
     } catch (_) {
@@ -174,7 +176,9 @@ class ApiService {
     );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final List<dynamic> data = jsonDecode(res.body) as List<dynamic>;
-    return data.map((e) => SymbolEntry.fromJson(e as Map<String, dynamic>)).toList();
+    return data
+        .map((e) => SymbolEntry.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<List<BotInfo>> listBots() async {
@@ -184,7 +188,9 @@ class ApiService {
     );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final List<dynamic> data = jsonDecode(res.body) as List<dynamic>;
-    return data.map((e) => BotInfo.fromJson(e as Map<String, dynamic>)).toList();
+    return data
+        .map((e) => BotInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<BotParamsResponse> getBotParams(String botName) async {
@@ -193,7 +199,9 @@ class ApiService {
       headers: _authHeaders,
     );
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
-    return BotParamsResponse.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    return BotParamsResponse.fromJson(
+      jsonDecode(res.body) as Map<String, dynamic>,
+    );
   }
 
   Future<Map<String, dynamic>> downloadCandles({
@@ -252,7 +260,8 @@ class ApiService {
       Uri.parse('$baseUrl/api/jobs/$jobId/cancel'),
       headers: _authHeaders,
     );
-    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}: ${res.body}');
+    if (res.statusCode != 200)
+      throw Exception('HTTP ${res.statusCode}: ${res.body}');
     return JobStatus.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
@@ -331,7 +340,8 @@ class ApiService {
         'slippage_pct': slippagePct,
         'validation_split_pct': validationSplitPct,
         'min_trades': minTrades,
-        if (maxDrawdownPctLimit != null) 'max_drawdown_pct_limit': maxDrawdownPctLimit,
+        if (maxDrawdownPctLimit != null)
+          'max_drawdown_pct_limit': maxDrawdownPctLimit,
       }),
     );
     if (res.statusCode == 422) {
@@ -428,6 +438,62 @@ class ApiService {
       headers: _jsonHeaders,
       body: jsonEncode({'run_ids': runIds}),
     );
+    if (res.statusCode == 422) {
+      throw ApiValidationError.fromBody(res.body);
+    }
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode, res.body);
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> runStressTests({
+    required String runId,
+    List<double> feesMult = const [1.0, 2.0, 3.0],
+    List<double> slippageMult = const [1.0, 2.0, 3.0],
+    List<double> dropBestPct = const [0.0, 5.0, 10.0],
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/backtest/$runId/stress'),
+      headers: _jsonHeaders,
+      body: jsonEncode({
+        'fees_mult': feesMult,
+        'slippage_mult': slippageMult,
+        'drop_best_pct': dropBestPct,
+      }),
+    );
+    if (res.statusCode == 404) {
+      throw ApiError(404, 'Run $runId not found');
+    }
+    if (res.statusCode == 422) {
+      throw ApiValidationError.fromBody(res.body);
+    }
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode, res.body);
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> validateData({
+    required String symbol,
+    required String timeframe,
+    int? startMs,
+    int? endMs,
+  }) async {
+    final body = <String, dynamic>{
+      'symbol': symbol,
+      'timeframe': timeframe,
+      if (startMs != null) 'start_ms': startMs,
+      if (endMs != null) 'end_ms': endMs,
+    };
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/data/validate'),
+      headers: _jsonHeaders,
+      body: jsonEncode(body),
+    );
+    if (res.statusCode == 404) {
+      throw ApiError(404, res.body);
+    }
     if (res.statusCode == 422) {
       throw ApiValidationError.fromBody(res.body);
     }
@@ -585,29 +651,28 @@ class ApiValidationError implements Exception {
         final parsed = <ValidationIssue>[];
         for (final raw in detail) {
           if (raw is! Map) continue;
-          final loc = (raw['loc'] as List?)
-                  ?.map((e) => e.toString())
-                  .toList() ??
+          final loc =
+              (raw['loc'] as List?)?.map((e) => e.toString()).toList() ??
               const <String>[];
-          parsed.add(ValidationIssue(
-            fieldPath: loc,
-            message: raw['msg'] as String? ?? 'Validation error',
-            type: raw['type'] as String? ?? '',
-          ));
+          parsed.add(
+            ValidationIssue(
+              fieldPath: loc,
+              message: raw['msg'] as String? ?? 'Validation error',
+              type: raw['type'] as String? ?? '',
+            ),
+          );
         }
         if (parsed.isNotEmpty) return ApiValidationError(parsed, body);
       }
       if (detail is String) {
-        return ApiValidationError(
-          [ValidationIssue(fieldPath: const [], message: detail)],
-          body,
-        );
+        return ApiValidationError([
+          ValidationIssue(fieldPath: const [], message: detail),
+        ], body);
       }
     } catch (_) {}
-    return ApiValidationError(
-      [ValidationIssue(fieldPath: const [], message: 'Validation error: $body')],
-      body,
-    );
+    return ApiValidationError([
+      ValidationIssue(fieldPath: const [], message: 'Validation error: $body'),
+    ], body);
   }
 
   /// Returns a helpful hint for known field/message combinations. The UI
@@ -631,9 +696,11 @@ class ApiValidationError implements Exception {
   String toString() {
     if (issues.isEmpty) return 'ApiValidationError';
     return issues
-        .map((i) => i.fieldPath.isEmpty
-            ? i.message
-            : '${i.fieldPath.join('.')}: ${i.message}')
+        .map(
+          (i) => i.fieldPath.isEmpty
+              ? i.message
+              : '${i.fieldPath.join('.')}: ${i.message}',
+        )
         .join('; ');
   }
 }
@@ -647,7 +714,8 @@ class ApiError implements Exception {
   String get friendlyMessage {
     if (statusCode == 404) return 'Resource not found (404).';
     if (statusCode == 401 || statusCode == 403) return 'Not authorized.';
-    if (statusCode >= 500) return 'Server error ($statusCode). Try again or check API logs.';
+    if (statusCode >= 500)
+      return 'Server error ($statusCode). Try again or check API logs.';
     return 'Request failed ($statusCode).';
   }
 

@@ -16,10 +16,13 @@ from backtester.bots import (
     BotBase,
     DorothyDCA,
     DSLBot,
+    DonchianBreakout,
     EMACross,
+    GridTrading,
     MACDCross,
     RSIReversion,
 )
+from backtester.analysis import run_stress_battery
 from backtester.core import (
     BacktestConfig,
     BacktestEngine,
@@ -29,9 +32,11 @@ from backtester.core import (
     Portfolio,
     compute_metrics,
 )
+from backtester.core.data_quality import DataQualityReport, validate_ohlcv
 from backtester.core.engine import BacktestResult, Trade
+from backtester.core.metrics import deflated_sharpe_ratio
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 __all__ = [
     # Engine
@@ -50,9 +55,15 @@ __all__ = [
     "BollingerReversion",
     "DorothyDCA",
     "DSLBot",
+    "DonchianBreakout",
+    "GridTrading",
     # Data + infra
     "BinanceDownloader",
     "CredentialManager",
+    "DataQualityReport",
+    "validate_ohlcv",
+    "run_stress_battery",
+    "deflated_sharpe_ratio",
     "compute_metrics",
     "__version__",
 ]
