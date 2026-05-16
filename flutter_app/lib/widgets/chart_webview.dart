@@ -3,32 +3,40 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_windows/webview_windows.dart';
 
-/// Controls exposed to BacktestScreen
+/// Public controller — pushes data into the chart from outside.
+/// Methods are no-ops while the WebView is still initializing.
 class ChartWebViewController {
   _ChartWebViewState? _state;
 
   void _attach(_ChartWebViewState s) => _state = s;
   void _detach() => _state = null;
 
-  void addCandle(Map<String, dynamic> data) => _state?._callJs('addCandle', data);
-  void appendCandles(List<Map<String, dynamic>> data) => _state?._callJs('appendCandles', data);
-  void setCandles(List<Map<String, dynamic>> data) => _state?._callJs('setCandles', data);
-  void addTradeMarker(Map<String, dynamic> data) => _state?._callJs('addTradeMarker', data);
-  void addEquityPoint(Map<String, dynamic> data) => _state?._callJs('addEquityPoint', data);
-  void clear() => _state?._callJs('clearChart', {});
-  void initIndicators(List<String> keys) => _state?._callJs('initIndicators', keys);
-  void initOscillators(List<String> keys) => _state?._callJs('initOscillators', keys);
-  void initBotSeries(List<String> botIds) => _state?._callJs('initBotSeries', botIds);
-  bool get isReady => _state?._initialized ?? false;
+  bool get isReady => _state?._jsReady ?? false;
+
+  void addCandle(Map<String, dynamic> d)            => _state?._call('addCandle', d);
+  void appendCandles(List<Map<String, dynamic>> d)  => _state?._call('appendCandles', d);
+  void setCandles(List<Map<String, dynamic>> d)     => _state?._call('setCandles', d);
+  void addTradeMarker(Map<String, dynamic> d)       => _state?._call('addTradeMarker', d);
+  void addEquityPoint(Map<String, dynamic> d)       => _state?._call('addEquityPoint', d);
+  void initIndicators(List<String> keys)            => _state?._call('initIndicators', keys);
+  void initOscillators(List<String> keys)           => _state?._call('initOscillators', keys);
+  void initBotSeries(List<String> botIds)           => _state?._call('initBotSeries', botIds);
+  void clear()                                      => _state?._call('clearChart', const <String, dynamic>{});
+  void forceResize()                                => _state?._call('forceResize', const <String, dynamic>{});
 
   void setChartFormula(String formula, {double? brickSize}) {
-    if (_state != null && isReady) {
-      final configJs = brickSize != null ? '{"brickSize": $brickSize}' : 'null';
-      _state!._wv.executeScript('if(window.setChartFormula) window.setChartFormula("$formula", $configJs);');
-    }
+    if (_state == null || !isReady) return;
+    final cfg = brickSize != null ? '{"brickSize": $brickSize}' : 'null';
+    _state!._wv.executeScript(
+      'if(window.setChartFormula) window.setChartFormula(${jsonEncode(formula)}, $cfg);',
+    );
   }
 }
 
+/// WebView2-backed chart. Mounts the `Webview` widget immediately and overlays
+/// a loading indicator until the chart JS bridge is ready, so the native COM
+/// control has real on-screen dimensions from the first frame (avoids the
+/// 0×0 first-render bug that prevented candles from drawing).
 class ChartWebView extends StatefulWidget {
   final ChartWebViewController controller;
   final String chartUrl;
@@ -45,91 +53,143 @@ class ChartWebView extends StatefulWidget {
 }
 
 class _ChartWebViewState extends State<ChartWebView> {
-  late final WebviewController _wv = WebviewController();
-  bool _initialized = false;
-  bool _timeout = false;
-  String _statusMsg = 'Initializing chart engine…';
-  Timer? _initTimer;
+  final WebviewController _wv = WebviewController();
+
+  bool _comReady = false;   // WebView2 COM control initialized
+  bool _navDone  = false;   // navigation finished
+  bool _jsReady  = false;   // window.__chartReady === true
+  bool _failed   = false;
+  bool _bootstrapRunning = false;
+  String _status = 'Starting WebView2…';
+
+  Timer? _watchdog;
+  Timer? _readyPoller;
+  StreamSubscription<LoadingState>? _loadSub;
+  StreamSubscription<dynamic>? _msgSub;
 
   @override
   void initState() {
     super.initState();
     widget.controller._attach(this);
-    _initWebview();
+    _bootstrap();
   }
 
-  Future<void> _initWebview() async {
+  Future<void> _bootstrap() async {
+    if (_bootstrapRunning) {
+      debugPrint('[chart] _bootstrap re-entry blocked');
+      return;
+    }
+    _bootstrapRunning = true;
     setState(() {
-      _timeout = false;
-      _initialized = false;
-      _statusMsg = 'Initializing WebView2 engine…';
+      _failed = false; _jsReady = false;
+      _status = 'Starting WebView2 runtime…';
     });
 
-    _initTimer?.cancel();
-    _initTimer = Timer(const Duration(seconds: 15), () {
-      if (mounted && !_initialized) {
-        debugPrint('ChartWebView: initialization timed out');
-        setState(() => _timeout = true);
+    _watchdog?.cancel();
+    _watchdog = Timer(const Duration(seconds: 20), () {
+      if (mounted && !_jsReady) {
+        debugPrint('[chart] watchdog tripped — init >20s, marking failed');
+        _probeForCrash();
+        setState(() => _failed = true);
       }
     });
 
     try {
-      // Step 1: Initialize WebView2 COM component
+      // initialize() can only be called ONCE on a WebviewController — subsequent
+      // calls throw "Stream has already been listened to". Skip if already done.
       if (!_wv.value.isInitialized) {
-        if (mounted) setState(() => _statusMsg = 'Starting WebView2 runtime…');
         await _wv.initialize();
       }
+      if (!mounted) { _bootstrapRunning = false; return; }
+      setState(() { _comReady = true; _status = 'Loading chart page…'; });
 
-      // Step 2: Subscribe to navigation events BEFORE loading
-      if (mounted) setState(() => _statusMsg = 'Loading chart page…');
-      final completer = Completer<void>();
-      late final StreamSubscription sub;
-      sub = _wv.loadingState.listen((state) {
-        debugPrint('ChartWebView loadingState: $state');
-        if (state == LoadingState.navigationCompleted && !completer.isCompleted) {
-          completer.complete();
-          sub.cancel();
+      // Primary readiness channel: JS posts 'chart-ready' via webMessage.
+      _msgSub?.cancel();
+      _msgSub = _wv.webMessage.listen((msg) {
+        debugPrint('[chart] webMessage=$msg');
+        if (msg == 'chart-ready' && mounted && !_jsReady) {
+          _markReady('webMessage');
         }
       });
 
-      // Step 3: Load the chart URL
+      _loadSub?.cancel();
+      _loadSub = _wv.loadingState.listen((s) {
+        debugPrint('[chart] loadingState=$s');
+        if (s == LoadingState.navigationCompleted && mounted && !_navDone) {
+          setState(() { _navDone = true; _status = 'Waiting for JS…'; });
+          // Fallback: polling, in case the webMessage path fails.
+          _startReadyPolling();
+        }
+      });
+
       await _wv.loadUrl(widget.chartUrl);
-
-      // Step 4: Wait for navigation to complete, with a fallback timeout
-      // The navigationCompleted event may not fire on cached pages, so we
-      // add a 3-second fallback.
-      if (mounted) setState(() => _statusMsg = 'Waiting for chart JS engine…');
-      await completer.future.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () {
-          debugPrint('ChartWebView: navigationCompleted timeout — using fallback');
-          sub.cancel();
-        },
-      );
-
-      // Step 5: Give the inline <script> a moment to execute
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      if (mounted) {
-        _initTimer?.cancel();
-        setState(() {
-          _initialized = true;
-          _statusMsg = 'Chart ready';
-        });
-        debugPrint('ChartWebView: initialized — JS bridge ready');
-        widget.onReady?.call();
-      }
-    } catch (e) {
-      debugPrint('ChartWebView init error: $e');
-      if (mounted) {
-        setState(() => _timeout = true);
-      }
+    } catch (e, st) {
+      debugPrint('[chart] init error: $e\n$st');
+      if (mounted) setState(() => _failed = true);
+    } finally {
+      _bootstrapRunning = false;
     }
   }
 
-  void _callJs(String fn, dynamic data) {
-    if (!_initialized) {
-      debugPrint('ChartWebView._callJs($fn): skipped — not initialized');
+  Future<void> _probeForCrash() async {
+    try {
+      final err = await _wv.executeScript('window.__chartError || null');
+      debugPrint('[chart] PROBE-CRASH __chartError=$err');
+    } catch (e) {
+      debugPrint('[chart] PROBE-CRASH probe error: $e');
+    }
+  }
+
+  void _markReady(String via) {
+    if (_jsReady || !mounted) return;
+    _watchdog?.cancel();
+    _readyPoller?.cancel();
+    setState(() { _jsReady = true; _status = 'Ready'; });
+    unawaited(_wv.executeScript('if(window.forceResize) window.forceResize();'));
+    debugPrint('[chart] JS bridge ready via $via');
+    widget.onReady?.call();
+  }
+
+  /// Fallback ready detection — polls `window.__chartReady === true` for ~10s
+  /// after nav completes. Used only if the webMessage push never arrives.
+  void _startReadyPolling() {
+    _readyPoller?.cancel();
+    var attempts = 0;
+
+    // One-shot diagnostic dump so we can see what's really inside the WebView.
+    () async {
+      try {
+        final probe = await _wv.executeScript(
+          'JSON.stringify({lib: typeof LightweightCharts, ready: !!window.__chartReady, stage: window.__chartStage||"none", err: typeof window.__chartError, hasPost: !!(window.chrome&&window.chrome.webview&&window.chrome.webview.postMessage), scripts: document.getElementsByTagName("script").length})',
+        );
+        debugPrint('[chart] DIAG probe=$probe');
+      } catch (e) {
+        debugPrint('[chart] DIAG probe error: $e');
+      }
+    }();
+
+    _readyPoller = Timer.periodic(const Duration(milliseconds: 300), (t) async {
+      attempts++;
+      if (!mounted || _jsReady) { t.cancel(); return; }
+      try {
+        final res = await _wv.executeScript('!!window.__chartReady');
+        debugPrint('[chart] poll#$attempts result=$res (type=${res.runtimeType})');
+        if (res == true && mounted && !_jsReady) {
+          t.cancel();
+          _markReady('poll/$attempts');
+        }
+      } catch (e) {
+        debugPrint('[chart] poll error: $e');
+      }
+      if (attempts >= 30) { // ~9s
+        t.cancel();
+      }
+    });
+  }
+
+  void _call(String fn, dynamic data) {
+    if (!_jsReady) {
+      debugPrint('[chart] _call($fn) skipped — JS not ready');
       return;
     }
     final json = jsonEncode(data);
@@ -138,7 +198,10 @@ class _ChartWebViewState extends State<ChartWebView> {
 
   @override
   void dispose() {
-    _initTimer?.cancel();
+    _watchdog?.cancel();
+    _readyPoller?.cancel();
+    _loadSub?.cancel();
+    _msgSub?.cancel();
     widget.controller._detach();
     _wv.dispose();
     super.dispose();
@@ -146,55 +209,65 @@ class _ChartWebViewState extends State<ChartWebView> {
 
   @override
   Widget build(BuildContext context) {
-    if (_timeout) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 48),
-            const SizedBox(height: 12),
-            const Text(
-              'Chart engine failed to initialize.',
-              style: TextStyle(color: Colors.white, fontSize: 14),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Verify the backend is running and try again.',
-              style: TextStyle(color: Color(0xFF787B86), fontSize: 11),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _initWebview,
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF26a69a)),
-              icon: const Icon(Icons.refresh, size: 16),
-              label: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-    if (!_initialized) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(
-                color: Color(0xFF26a69a),
-                strokeWidth: 2.5,
+    return LayoutBuilder(builder: (ctx, _) {
+      // Always render the Webview once the COM control is initialized — that
+      // way it has real dimensions from the start. Overlay a status panel
+      // until the JS bridge confirms readiness.
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          if (_comReady) Webview(_wv) else Container(color: const Color(0xFF131722)),
+          if (!_jsReady && !_failed)
+            Container(
+              color: const Color(0xFF131722).withValues(alpha: 0.85),
+              alignment: Alignment.center,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 24, height: 24,
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF26a69a),
+                      strokeWidth: 2.2,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(_status, style: const TextStyle(color: Color(0xFF787B86), fontSize: 11)),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            Text(
-              _statusMsg,
-              style: const TextStyle(color: Color(0xFF787B86), fontSize: 12),
+          if (_failed)
+            Container(
+              color: const Color(0xFF131722),
+              alignment: Alignment.center,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 40),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Chart engine failed to initialize.',
+                    style: TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Backend on :8002 reachable? lightweight-charts vendored?',
+                    style: TextStyle(color: Color(0xFF787B86), fontSize: 11),
+                  ),
+                  const SizedBox(height: 14),
+                  ElevatedButton.icon(
+                    onPressed: _bootstrap,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF26a69a),
+                    ),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+        ],
       );
-    }
-    return Webview(_wv);
+    });
   }
 }

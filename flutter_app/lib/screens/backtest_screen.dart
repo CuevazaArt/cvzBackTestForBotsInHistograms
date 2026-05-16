@@ -1027,8 +1027,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
               ],
             ),
           ),
+        // Chart pane — Expanded so it absorbs all remaining vertical space.
+        // (We rely on the chart's own ResizeObserver to handle dimension changes.)
         Expanded(
-          flex: 3,
           child: Stack(
             children: [
               ChartWebView(

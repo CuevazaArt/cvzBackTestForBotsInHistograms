@@ -12,9 +12,11 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from backtester.api.config import load_api_settings
 from backtester.api.deps import AppContext
@@ -86,6 +88,20 @@ def create_app(is_test: bool = False) -> FastAPI:
     # Static web (Lightweight Charts module). Created in Phase 3.
     web_dir = Path(__file__).resolve().parents[1] / "web"
     if web_dir.is_dir():
+        # Prevent WebView2 from serving stale chart HTML / JS lib. The chart
+        # bundle is small and changes frequently during development; aggressive
+        # caching causes "addCandlestickSeries is not a function" when an old
+        # lightweight-charts build lingers across reloads.
+        class _NoCacheStatic(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+                response: Response = await call_next(request)
+                if request.url.path.startswith("/static"):
+                    response.headers["Cache-Control"] = "no-store, max-age=0"
+                    response.headers["Pragma"] = "no-cache"
+                    response.headers["Expires"] = "0"
+                return response
+
+        app.add_middleware(_NoCacheStatic)
         app.mount(
             "/static", StaticFiles(directory=str(web_dir), html=True), name="static"
         )

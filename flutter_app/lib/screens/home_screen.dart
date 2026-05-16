@@ -78,7 +78,9 @@ class _HomeScreenState extends State<HomeScreen> {
       apiToken: _settings.apiToken,
     );
     final wsUrl = _toWsUrl(_settings.backendUrl);
-    _chartUrl = '${_settings.backendUrl}/static/index.html';
+    // Cache-bust per-process so WebView2 never serves a stale index.html.
+    final cb = DateTime.now().millisecondsSinceEpoch;
+    _chartUrl = '${_settings.backendUrl}/static/index.html?v=$cb';
     _wsService?.disconnect();
     _wsService = WsService(wsUrl: wsUrl, apiToken: _settings.apiToken);
     _wsService!.connect();

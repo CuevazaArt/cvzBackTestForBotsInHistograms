@@ -1,610 +1,615 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Backtester Chart</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            background-color: #131722;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            width: 100vw;
-        }
-        /* Main price chart — takes up most vertical space */
-        #main-wrap {
-            position: relative;
-            flex: 3;
-            min-height: 0;
-        }
-        #chart-container {
-            position: absolute;
-            inset: 0;
-        }
-        #custom-canvas {
-            position: absolute;
-            inset: 0;
-            z-index: 2;
-            pointer-events: none;
-        }
-        /* Oscillator panel — collapsible via JS */
-        #osc-wrap {
-            position: relative;
-            flex: 0 0 160px;
-            min-height: 0;
-            border-top: 1px solid #2B2B43;
-            display: none; /* shown only when oscillators are present */
-        }
-        #osc-container {
-            position: absolute;
-            inset: 0;
-        }
-        #osc-label {
-            position: absolute;
-            top: 4px; left: 8px;
-            font-size: 10px;
-            color: #787B86;
-            z-index: 10;
-            pointer-events: none;
-            font-family: sans-serif;
-            letter-spacing: 0.8px;
-            text-transform: uppercase;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backtester Chart</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #131722;
+      color: #D9D9D9;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+    }
+    #root {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+    }
+    #main-pane  { flex: 3 1 0; position: relative; min-height: 80px; }
+    #osc-pane   { flex: 0 0 140px; position: relative; border-top: 1px solid #2B2B43; display: none; }
+    #chart-main, #chart-osc { position: absolute; inset: 0; }
+    #overlay-canvas {
+      position: absolute; inset: 0; z-index: 5; pointer-events: none;
+    }
+    #osc-label {
+      position: absolute; top: 4px; left: 8px;
+      font-size: 10px; color: #787B86;
+      z-index: 10; pointer-events: none;
+      letter-spacing: 0.8px; text-transform: uppercase;
+    }
+    #empty-state {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; z-index: 4;
+      color: #555964; font-size: 13px;
+      transition: opacity 200ms;
+    }
+    #debug-badge {
+      position: absolute; top: 4px; right: 8px; z-index: 10;
+      font-size: 9px; color: #555964; pointer-events: none;
+      font-family: monospace;
+    }
+  </style>
 </head>
 <body>
-    <div id="main-wrap">
-        <div id="chart-container"></div>
-        <canvas id="custom-canvas"></canvas>
+  <div id="root">
+    <div id="main-pane">
+      <div id="chart-main"></div>
+      <canvas id="overlay-canvas"></canvas>
+      <div id="empty-state">Waiting for candles…</div>
+      <div id="debug-badge">init</div>
     </div>
-    <div id="osc-wrap">
-        <span id="osc-label">Oscillators</span>
-        <div id="osc-container"></div>
+    <div id="osc-pane">
+      <span id="osc-label">Oscillators</span>
+      <div id="chart-osc"></div>
     </div>
+  </div>
 
-    <!-- Lightweight Charts Standalone -->
-    <script src="assets/js/lightweight-charts.standalone.production.js"></script>
+  <script>
+    // ── Earliest possible diagnostics: catch all errors and post to host ──
+    (function () {
+      function post(msg) {
+        try {
+          if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
+            window.chrome.webview.postMessage(String(msg));
+          }
+        } catch (_) {}
+      }
+      window.__post = post;
+      post('dbg:script-start');
+      window.addEventListener('error', function (e) {
+        post('dbg:error:' + (e.message || 'unknown') + '@' + (e.filename || '?') + ':' + (e.lineno || 0));
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        post('dbg:reject:' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+      });
+    })();
+  </script>
+  <script src="assets/js/lightweight-charts.standalone.production.js?v=4.2.3"
+          onload="window.__post && window.__post('dbg:lib-loaded')"
+          onerror="window.__post && window.__post('dbg:lib-FAILED-to-load')"></script>
+  <script>
+    // CANARY: prove the IIFE script tag itself parses and runs
+    window.__chartReady = true;
+    window.__chartStage = 'canary';
+    try {
+      if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
+        window.chrome.webview.postMessage('dbg:CANARY-fired');
+      }
+    } catch (_) {}
+  </script>
+  <script>
+  (function () {
+    'use strict';
 
-    <script>
-    // ────────────────────────────────────────────────────────────
-    // 1. MAIN CHART SETUP
-    // ────────────────────────────────────────────────────────────
-    const chartContainer = document.getElementById('chart-container');
-    const oscContainer   = document.getElementById('osc-container');
-    const oscWrap        = document.getElementById('osc-wrap');
-    const mainWrap       = document.getElementById('main-wrap');
+  try {
+    window.__chartStage = 'iife-entered';
 
-    const CHART_OPTS = {
-        layout: {
-            background: { type: 'solid', color: '#131722' },
-            textColor: '#D9D9D9',
-        },
-        grid: {
-            vertLines: { color: '#2B2B43' },
-            horzLines: { color: '#2B2B43' },
-        },
-        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-        timeScale: {
-            borderColor: '#2B2B43',
-            timeVisible: true,
-            secondsVisible: false,
-        },
+    // ─────────────────────────────────────────────────────────────
+    // 0. SAFE-GUARDS
+    // ─────────────────────────────────────────────────────────────
+    const $badge = document.getElementById('debug-badge');
+    const $empty = document.getElementById('empty-state');
+    const setBadge = (txt) => { if ($badge) $badge.textContent = txt; };
+
+    if (typeof LightweightCharts === 'undefined') {
+      setBadge('ERROR: LightweightCharts lib missing');
+      $empty.textContent = 'Chart library failed to load (assets/js/lightweight-charts…js).';
+      $empty.style.color = '#ef5350';
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 1. CHART SETUP
+    // ─────────────────────────────────────────────────────────────
+    const $mainPane = document.getElementById('main-pane');
+    const $oscPane  = document.getElementById('osc-pane');
+    const $chartMain = document.getElementById('chart-main');
+    const $chartOsc  = document.getElementById('chart-osc');
+    const $canvas    = document.getElementById('overlay-canvas');
+    const ctx        = $canvas.getContext('2d');
+
+    const BASE_OPTS = {
+      layout: {
+        background: { type: 'solid', color: '#131722' },
+        textColor: '#D9D9D9',
+      },
+      grid: {
+        vertLines: { color: '#1f2230' },
+        horzLines: { color: '#1f2230' },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      timeScale: {
+        borderColor: '#2B2B43',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      rightPriceScale: {
+        borderColor: '#2B2B43',
+      },
     };
 
-    const chart = LightweightCharts.createChart(chartContainer, CHART_OPTS);
+    // Build chart with explicit dimensions to avoid 0x0 crash
+    const initialW = Math.max($mainPane.clientWidth, 300);
+    const initialH = Math.max($mainPane.clientHeight, 200);
+    const chart = LightweightCharts.createChart($chartMain, {
+      ...BASE_OPTS,
+      width:  initialW,
+      height: initialH,
+    });
 
-    // Candlestick series (price)
+    const oscChart = LightweightCharts.createChart($chartOsc, {
+      ...BASE_OPTS,
+      width: initialW,
+      height: 140,
+      timeScale: { ...BASE_OPTS.timeScale, visible: false },
+    });
+
+    // Diagnostic: inspect chart object BEFORE the failing line
+    try {
+      if (window.__post) {
+        window.__post('dbg:chart-type:' + (typeof chart));
+        window.__post('dbg:chart-has-acs:' + (typeof (chart && chart.addCandlestickSeries)));
+        var protoNames = chart ? Object.getOwnPropertyNames(Object.getPrototypeOf(chart) || {}).slice(0,20).join(',') : 'no-chart';
+        window.__post('dbg:chart-proto:' + protoNames);
+        window.__post('dbg:lib-version:' + LightweightCharts.version());
+      }
+    } catch (probeErr) {
+      if (window.__post) window.__post('dbg:probe-err:' + probeErr.message);
+    }
+
+    // Series ------------------------------------------------------
     const candleSeries = chart.addCandlestickSeries({
-        upColor: '#26a69a', downColor: '#ef5350',
-        borderVisible: false,
-        wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+      upColor: '#26a69a',   downColor: '#ef5350',
+      wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+      borderVisible: false,
     });
     chart.priceScale('right').applyOptions({
-        scaleMargins: { top: 0.05, bottom: 0.25 },
+      scaleMargins: { top: 0.05, bottom: 0.25 },
     });
 
-    // Volume histogram
     const volumeSeries = chart.addHistogramSeries({
-        color: '#26a69a',
-        priceFormat: { type: 'volume' },
-        priceScaleId: 'volume',
+      color: '#26a69a',
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
     });
     chart.priceScale('volume').applyOptions({
-        scaleMargins: { top: 0.80, bottom: 0 },
-        visible: false,
+      scaleMargins: { top: 0.80, bottom: 0 },
+      visible: false,
     });
 
-    // Equity curve (separate scale, bottom strip)
     const equitySeries = chart.addLineSeries({
-        color: '#2196F3',
-        lineWidth: 1,
-        priceScaleId: 'equity',
-        title: 'Equity',
+      color: '#2196F3', lineWidth: 1,
+      priceScaleId: 'equity', title: 'Equity',
     });
     chart.priceScale('equity').applyOptions({
-        scaleMargins: { top: 0.82, bottom: 0 },
-        visible: true,
+      scaleMargins: { top: 0.82, bottom: 0 },
+      visible: true,
     });
 
-    // ────────────────────────────────────────────────────────────
-    // 2. OSCILLATOR SUB-CHART
-    // ────────────────────────────────────────────────────────────
-    const oscChart = LightweightCharts.createChart(oscContainer, {
-        ...CHART_OPTS,
-        timeScale: {
-            ...CHART_OPTS.timeScale,
-            visible: false,  // share timescale with main, don't duplicate axis
-        },
+    // Sync time-scale between main and osc charts
+    chart.timeScale().subscribeVisibleTimeRangeChange((r) => {
+      if (r) try { oscChart.timeScale().setVisibleRange(r); } catch (_) {}
     });
 
-    // Sync time ranges between charts
-    chart.timeScale().subscribeVisibleTimeRangeChange(range => {
-        if (range) oscChart.timeScale().setVisibleRange(range);
-    });
+    // ─────────────────────────────────────────────────────────────
+    // 2. STATE
+    // ─────────────────────────────────────────────────────────────
+    const _rawCandles    = [];
+    const _equityData    = [];
+    const _tradeMarkers  = [];
+    let   currentFormula = 'ohlc';
+    let   currentBrickSize = 10;
+    let   _haPrev = null;
+    let   _renkoLast = null;
 
-    // ────────────────────────────────────────────────────────────
-    // 3. CANVAS OVERLAY (trade lines)
-    // ────────────────────────────────────────────────────────────
-    const canvas = document.getElementById('custom-canvas');
-    const ctx = canvas.getContext('2d');
-
-    const _tradeMarkers = [];
-    const _equityData   = [];
-    const _candleData   = [];
-
-    function resizeAll() {
-        const mw = mainWrap.clientWidth;
-        const mh = mainWrap.clientHeight;
-        canvas.width  = mw;
-        canvas.height = mh;
-        chart.resize(mw, mh);
-
-        const ow = oscWrap.clientWidth;
-        const oh = oscWrap.clientHeight;
-        if (oh > 0) oscChart.resize(ow, oh);
-
-        _redrawCanvas();
-    }
-    window.addEventListener('resize', resizeAll);
-    resizeAll();
-
-    chart.timeScale().subscribeVisibleLogicalRangeChange(_redrawCanvas);
-    chart.subscribeCrosshairMove(_redrawCanvas);
-
-    function _redrawCanvas() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        _drawTradeLines();
-    }
-
-    function _drawTradeLines() {
-        _tradeMarkers.forEach(m => {
-            const x1 = chart.timeScale().timeToCoordinate(m.entryTime);
-            const x2 = chart.timeScale().timeToCoordinate(m.exitTime);
-            const y1 = candleSeries.priceToCoordinate(m.entryPrice);
-            const y2 = candleSeries.priceToCoordinate(m.exitPrice);
-            if (x1 === null || x2 === null || y1 === null || y2 === null) return;
-
-            const color = m.pnl >= 0 ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)';
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 3]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-        });
-    }
-
-    // ────────────────────────────────────────────────────────────
-    // 4. JS BRIDGE — called by Flutter via executeScript()
-    // ────────────────────────────────────────────────────────────
-
-    let currentFormula  = 'ohlc'; // 'ohlc' | 'heikin_ashi' | 'renko'
-    let currentBrickSize = 10;
-    const _rawCandles   = [];
-    let _haPrev         = null;
-    let _renkoLastBrick = null;
-
-    // Bot color palette (distinct, accessible)
-    const BOT_COLORS = [
-        '#2196F3', // blue   — total / first bot
-        '#FF9800', // orange
-        '#E040FB', // purple
-        '#00E676', // green
-        '#FF5252', // red
-        '#FFD740', // amber
-        '#40C4FF', // light blue
-        '#69F0AE', // teal
-    ];
-
-    // Per-bot equity series {bot_id: LineSeries}
-    const _botEquitySeries = {};
-
-    // Global equity series ("total") — already created above as equitySeries
-    // We also keep a map entry so addEquityPoint can route it
-    _botEquitySeries['total'] = equitySeries;
-
-    // Overlay indicators on main chart (price scale)
     const _overlaySeries  = {};
-    // Oscillator indicators on sub-chart
     const _oscSeries      = {};
 
-    const _overlayColors  = ['#F23645', '#2962FF', '#FF9800', '#00BCD4', '#9C27B0'];
-    const _oscColors      = ['#FFD700', '#FF6B6B', '#4FC3F7', '#81C784', '#CE93D8'];
+    const BOT_COLORS = [
+      '#2196F3', '#FF9800', '#E040FB', '#00E676',
+      '#FF5252', '#FFD740', '#40C4FF', '#69F0AE',
+    ];
+    const OVERLAY_COLORS = ['#F23645', '#2962FF', '#FF9800', '#00BCD4', '#9C27B0'];
+    const OSC_COLORS     = ['#FFD700', '#FF6B6B', '#4FC3F7', '#81C784', '#CE93D8'];
 
-    // Map bot_id -> color index for trade markers
-    const _botColorIdx = {};
+    const _botEquitySeries = { total: equitySeries };
+    const _botColorIdx     = {};
 
-    // ── Heikin Ashi ────────────────────────────────────────────
-    function _applyFormula(rawCandle, isFirst) {
-        if (currentFormula === 'heikin_ashi') {
-            if (isFirst || !_haPrev) {
-                _haPrev = {
-                    time:  rawCandle.time,
-                    open:  (rawCandle.open + rawCandle.close) / 2,
-                    close: (rawCandle.open + rawCandle.high + rawCandle.low + rawCandle.close) / 4,
-                    high:  rawCandle.high,
-                    low:   rawCandle.low
-                };
-                return _haPrev;
-            }
-            const haClose = (rawCandle.open + rawCandle.high + rawCandle.low + rawCandle.close) / 4;
-            const haOpen  = (_haPrev.open + _haPrev.close) / 2;
-            _haPrev = {
-                time:  rawCandle.time,
-                open:  haOpen,
-                close: haClose,
-                high:  Math.max(rawCandle.high, haOpen, haClose),
-                low:   Math.min(rawCandle.low,  haOpen, haClose),
-            };
-            return _haPrev;
-        }
-        return rawCandle;
+    // ─────────────────────────────────────────────────────────────
+    // 3. RESIZE — use ResizeObserver so chart matches actual pane
+    // ─────────────────────────────────────────────────────────────
+    function resizeAll() {
+      const mw = $mainPane.clientWidth;
+      const mh = $mainPane.clientHeight;
+      if (mw > 0 && mh > 0) {
+        $canvas.width  = mw;
+        $canvas.height = mh;
+        try { chart.resize(mw, mh); } catch (_) {}
+      }
+      const ow = $oscPane.clientWidth;
+      const oh = $oscPane.clientHeight;
+      if (ow > 0 && oh > 0) {
+        try { oscChart.resize(ow, oh); } catch (_) {}
+      }
+      _redrawCanvas();
     }
 
-    // ── Renko (stateful) ───────────────────────────────────────
-    function _calculateRenko(candles, brickSize, prevBrick = null) {
-        if (!candles || candles.length === 0) return { bricks: [], lastBrick: prevBrick };
-        const renkoBricks = [];
-        let lastBrick = prevBrick;
+    const ro = new ResizeObserver(() => resizeAll());
+    ro.observe($mainPane);
+    ro.observe($oscPane);
+    window.addEventListener('resize', resizeAll);
 
-        for (let i = 0; i < candles.length; i++) {
-            const raw = candles[i];
-            if (!lastBrick) {
-                lastBrick = { time: raw.time, open: raw.close, close: raw.close,
-                              high: raw.close, low: raw.close, trend: 0 };
-                continue;
-            }
-            const diff = raw.close - lastBrick.close;
-            let bricksToForm = 0, direction = 0;
+    // Trigger a few resizes after page load — handles late WebView mount
+    setTimeout(resizeAll, 50);
+    setTimeout(resizeAll, 200);
+    setTimeout(resizeAll, 500);
 
-            if (lastBrick.trend >= 0 && diff >= brickSize)          { bricksToForm = Math.floor(diff / brickSize);   direction =  1; }
-            else if (lastBrick.trend <= 0 && -diff >= brickSize)    { bricksToForm = Math.floor(-diff / brickSize);  direction = -1; }
-            else if (lastBrick.trend > 0 && -diff >= brickSize * 2) { bricksToForm = Math.floor(-diff / brickSize);  direction = -1; }
-            else if (lastBrick.trend < 0 && diff >= brickSize * 2)  { bricksToForm = Math.floor(diff / brickSize);   direction =  1; }
+    // ─────────────────────────────────────────────────────────────
+    // 4. TRADE-LINE OVERLAY (canvas)
+    // ─────────────────────────────────────────────────────────────
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => _redrawCanvas());
+    chart.subscribeCrosshairMove(() => _redrawCanvas());
 
-            for (let b = 0; b < bricksToForm; b++) {
-                const newClose = lastBrick.close + direction * brickSize;
-                const newOpen  = lastBrick.close;
-                lastBrick = {
-                    time:  raw.time + b,  // +1s per brick for unique timestamps
-                    open:  newOpen, close: newClose,
-                    high:  Math.max(newOpen, newClose),
-                    low:   Math.min(newOpen, newClose),
-                    trend: direction
-                };
-                renkoBricks.push(lastBrick);
-            }
-        }
-        return { bricks: renkoBricks, lastBrick };
+    function _redrawCanvas() {
+      ctx.clearRect(0, 0, $canvas.width, $canvas.height);
+      _tradeMarkers.forEach((m) => {
+        const x1 = chart.timeScale().timeToCoordinate(m.entryTime);
+        const x2 = chart.timeScale().timeToCoordinate(m.exitTime);
+        const y1 = candleSeries.priceToCoordinate(m.entryPrice);
+        const y2 = candleSeries.priceToCoordinate(m.exitPrice);
+        if (x1 == null || x2 == null || y1 == null || y2 == null) return;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = m.pnl >= 0 ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
     }
 
-    // ── Show/hide oscillator panel ─────────────────────────────
-    function _showOscPanel(show) {
-        oscWrap.style.display = show ? 'block' : 'none';
-        resizeAll();
+    // ─────────────────────────────────────────────────────────────
+    // 5. FORMULAS (OHLC, Heikin-Ashi, Renko)
+    // ─────────────────────────────────────────────────────────────
+    function _applyFormula(c, isFirst) {
+      if (currentFormula !== 'heikin_ashi') return c;
+      if (isFirst || !_haPrev) {
+        _haPrev = {
+          time: c.time,
+          open:  (c.open + c.close) / 2,
+          close: (c.open + c.high + c.low + c.close) / 4,
+          high:  c.high,
+          low:   c.low,
+        };
+        return _haPrev;
+      }
+      const haClose = (c.open + c.high + c.low + c.close) / 4;
+      const haOpen  = (_haPrev.open + _haPrev.close) / 2;
+      _haPrev = {
+        time: c.time,
+        open: haOpen,
+        close: haClose,
+        high: Math.max(c.high, haOpen, haClose),
+        low:  Math.min(c.low,  haOpen, haClose),
+      };
+      return _haPrev;
     }
 
-    // ── Bridge: setChartFormula ────────────────────────────────
-    window.setChartFormula = function(formula, config) {
-        currentFormula = formula;
-        if (config && config.brickSize) currentBrickSize = config.brickSize;
-        _haPrev = null;
-        _renkoLastBrick = null;
-        _candleData.length = 0;
-
-        if (_rawCandles.length > 0) {
-            if (currentFormula === 'renko') {
-                const { bricks, lastBrick } = _calculateRenko(_rawCandles, currentBrickSize);
-                _renkoLastBrick = lastBrick;
-                _candleData.push(...bricks);
-                candleSeries.setData(bricks);
-            } else {
-                const transformed = _rawCandles.map((c, i) => _applyFormula(c, i === 0));
-                _candleData.push(...transformed);
-                candleSeries.setData(transformed);
-            }
+    function _calcRenko(candles, brick, prevBrick) {
+      const out = [];
+      let last = prevBrick;
+      for (let i = 0; i < candles.length; i++) {
+        const r = candles[i];
+        if (!last) {
+          last = { time: r.time, open: r.close, close: r.close,
+                   high: r.close, low: r.close, trend: 0 };
+          continue;
         }
-    };
-
-    // ── Bridge: initIndicators (overlays on main chart) ─────────
-    window.initIndicators = function(keys) {
-        keys.forEach((key, i) => {
-            if (!_overlaySeries[key]) {
-                // Bollinger middle/lower/upper share same style group
-                const isBBMid = key.includes('_middle');
-                _overlaySeries[key] = chart.addLineSeries({
-                    color: _overlayColors[i % _overlayColors.length],
-                    lineWidth: isBBMid ? 1 : 2,
-                    lineStyle: isBBMid ? 1 : 0,  // dashed for middle band
-                    priceScaleId: 'right',
-                    title: key.toUpperCase(),
-                    lastValueVisible: true,
-                });
-            }
-        });
-    };
-
-    // ── Bridge: initOscillators (sub-chart series) ─────────────
-    window.initOscillators = function(keys) {
-        if (!keys || keys.length === 0) { _showOscPanel(false); return; }
-        _showOscPanel(true);
-
-        keys.forEach((key, i) => {
-            if (!_oscSeries[key]) {
-                const isHist = key.endsWith('_hist');
-                if (isHist) {
-                    _oscSeries[key] = oscChart.addHistogramSeries({
-                        color: 'rgba(38,166,154,0.6)',
-                        priceScaleId: 'right',
-                        title: '',
-                    });
-                } else {
-                    _oscSeries[key] = oscChart.addLineSeries({
-                        color: _oscColors[i % _oscColors.length],
-                        lineWidth: 1,
-                        priceScaleId: 'right',
-                        title: key.toUpperCase(),
-                    });
-                }
-            }
-        });
-
-        // Reference lines for RSI
-        const hasRsi = keys.some(k => k.startsWith('rsi_'));
-        if (hasRsi) {
-            [30, 70].forEach(level => {
-                const refSeries = oscChart.addLineSeries({
-                    color: 'rgba(120,123,134,0.4)',
-                    lineWidth: 1,
-                    lineStyle: 2,  // dotted
-                    priceScaleId: 'right',
-                    lastValueVisible: false,
-                    crosshairMarkerVisible: false,
-                });
-                // Draw reference line across full time range on next setCandles
-                _oscSeries[`_ref_${level}`] = { series: refSeries, level };
-            });
+        const diff = r.close - last.close;
+        let count = 0, dir = 0;
+        if      (last.trend >= 0 && diff >=  brick)        { count = Math.floor( diff / brick); dir =  1; }
+        else if (last.trend <= 0 && -diff >= brick)        { count = Math.floor(-diff / brick); dir = -1; }
+        else if (last.trend  > 0 && -diff >= brick * 2)    { count = Math.floor(-diff / brick); dir = -1; }
+        else if (last.trend  < 0 &&  diff >= brick * 2)    { count = Math.floor( diff / brick); dir =  1; }
+        for (let b = 0; b < count; b++) {
+          const newOpen  = last.close;
+          const newClose = newOpen + dir * brick;
+          last = {
+            time: r.time + b,
+            open: newOpen, close: newClose,
+            high: Math.max(newOpen, newClose),
+            low:  Math.min(newOpen, newClose),
+            trend: dir,
+          };
+          out.push(last);
         }
+      }
+      return { bricks: out, lastBrick: last };
+    }
+
+    function _hideEmptyState() {
+      if ($empty) $empty.style.opacity = '0';
+    }
+    function _showEmptyState(msg) {
+      if (!$empty) return;
+      $empty.textContent = msg || 'Waiting for candles…';
+      $empty.style.opacity = '1';
+    }
+    function _showOscPane(show) {
+      $oscPane.style.display = show ? 'block' : 'none';
+      setTimeout(resizeAll, 30);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 6. BRIDGE — public functions called from Flutter
+    // ─────────────────────────────────────────────────────────────
+    window.setChartFormula = function (formula, config) {
+      currentFormula = formula || 'ohlc';
+      if (config && typeof config.brickSize === 'number') currentBrickSize = config.brickSize;
+      _haPrev = null; _renkoLast = null;
+      if (_rawCandles.length === 0) return;
+      if (currentFormula === 'renko') {
+        const { bricks, lastBrick } = _calcRenko(_rawCandles, currentBrickSize, null);
+        _renkoLast = lastBrick;
+        candleSeries.setData(bricks);
+      } else {
+        const transformed = _rawCandles.map((c, i) => _applyFormula(c, i === 0));
+        candleSeries.setData(transformed);
+      }
     };
 
-    // ── Bridge: addCandle ──────────────────────────────────────
-    window.addCandle = function(data) {
-        _rawCandles.push(data);
-
-        // Volume
-        volumeSeries.update({
-            time: data.time,
-            value: data.volume,
-            color: data.close >= data.open ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
+    window.initIndicators = function (keys) {
+      (keys || []).forEach((key, i) => {
+        if (_overlaySeries[key]) return;
+        const dashed = key.includes('_middle');
+        _overlaySeries[key] = chart.addLineSeries({
+          color: OVERLAY_COLORS[i % OVERLAY_COLORS.length],
+          lineWidth: dashed ? 1 : 2,
+          lineStyle: dashed ? 1 : 0,
+          priceScaleId: 'right',
+          title: key.toUpperCase(),
+          lastValueVisible: true,
         });
+      });
+    };
 
-        // Candles
-        if (currentFormula === 'renko') {
-            const { bricks, lastBrick } = _calculateRenko([data], currentBrickSize, _renkoLastBrick);
-            _renkoLastBrick = lastBrick;
-            bricks.forEach(b => { _candleData.push(b); candleSeries.update(b); });
+    window.initOscillators = function (keys) {
+      if (!keys || keys.length === 0) { _showOscPane(false); return; }
+      _showOscPane(true);
+      keys.forEach((key, i) => {
+        if (_oscSeries[key]) return;
+        if (key.endsWith('_hist')) {
+          _oscSeries[key] = oscChart.addHistogramSeries({
+            color: 'rgba(38,166,154,0.6)',
+            priceScaleId: 'right',
+            title: '',
+          });
         } else {
-            const displayData = _applyFormula(data, _rawCandles.length === 1);
-            _candleData.push(displayData);
-            candleSeries.update(displayData);
+          _oscSeries[key] = oscChart.addLineSeries({
+            color: OSC_COLORS[i % OSC_COLORS.length],
+            lineWidth: 1,
+            priceScaleId: 'right',
+            title: key.toUpperCase(),
+          });
         }
+      });
+    };
 
-        // Overlay indicators
-        if (data.indicators) {
-            Object.keys(data.indicators).forEach(key => {
-                const val = data.indicators[key];
-                if (val === null) return;
-                if (_overlaySeries[key]) {
-                    _overlaySeries[key].update({ time: data.time, value: val });
-                }
-                if (_oscSeries[key]) {
-                    const isHist = key.endsWith('_hist');
-                    _oscSeries[key].update({
-                        time: data.time,
-                        value: val,
-                        ...(isHist ? { color: val >= 0 ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)' } : {}),
-                    });
-                }
+    window.initBotSeries = function (botIds) {
+      (botIds || []).filter((id) => id !== 'total').forEach((id, i) => {
+        if (_botEquitySeries[id]) return;
+        const color = BOT_COLORS[(i + 1) % BOT_COLORS.length];
+        _botEquitySeries[id] = chart.addLineSeries({
+          color,
+          lineWidth: 1,
+          lineStyle: 1,
+          priceScaleId: 'equity',
+          title: id,
+          lastValueVisible: true,
+        });
+        _botColorIdx[id] = (i + 1) % BOT_COLORS.length;
+      });
+    };
+
+    window.addCandle = function (data) {
+      if (!data) return;
+      _rawCandles.push(data);
+
+      volumeSeries.update({
+        time: data.time,
+        value: data.volume,
+        color: data.close >= data.open ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
+      });
+
+      if (currentFormula === 'renko') {
+        const { bricks, lastBrick } = _calcRenko([data], currentBrickSize, _renkoLast);
+        _renkoLast = lastBrick;
+        bricks.forEach((b) => candleSeries.update(b));
+      } else {
+        candleSeries.update(_applyFormula(data, _rawCandles.length === 1));
+      }
+
+      if (data.indicators) {
+        Object.keys(data.indicators).forEach((k) => {
+          const v = data.indicators[k];
+          if (v == null) return;
+          if (_overlaySeries[k]) _overlaySeries[k].update({ time: data.time, value: v });
+          if (_oscSeries[k]) {
+            const isHist = k.endsWith('_hist');
+            _oscSeries[k].update({
+              time: data.time,
+              value: v,
+              ...(isHist ? { color: v >= 0 ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)' } : {}),
             });
-        }
-    };
-
-    // ── Bridge: appendCandles (incremental batch) ──────────────
-    // Unlike setCandles, this APPENDS without clearing existing data.
-    // Used by the Flutter _ChartDispatcher to drain its buffer in chunks.
-    window.appendCandles = function(dataArray) {
-        dataArray.forEach(data => window.addCandle(data));
-    };
-
-    // ── Bridge: setCandles (bulk load) ─────────────────────────
-    window.setCandles = function(dataArray) {
-        _rawCandles.length = 0;
-        _rawCandles.push(...dataArray);
-        _candleData.length = 0;
-        _haPrev = null;
-        _renkoLastBrick = null;
-
-        // Candles
-        if (currentFormula === 'renko') {
-            const { bricks, lastBrick } = _calculateRenko(_rawCandles, currentBrickSize);
-            _renkoLastBrick = lastBrick;
-            _candleData.push(...bricks);
-            candleSeries.setData(bricks);
-        } else {
-            const displayData = _rawCandles.map((c, i) => _applyFormula(c, i === 0));
-            _candleData.push(...displayData);
-            candleSeries.setData(displayData);
-        }
-
-        // Volume
-        volumeSeries.setData(dataArray.map(c => ({
-            time: c.time, value: c.volume,
-            color: c.close >= c.open ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
-        })));
-
-        // Indicators — split overlay vs oscillators
-        const indData = {};
-        dataArray.forEach(c => {
-            if (!c.indicators) return;
-            Object.keys(c.indicators).forEach(k => {
-                if (!indData[k]) indData[k] = [];
-                if (c.indicators[k] !== null) indData[k].push({ time: c.time, value: c.indicators[k] });
-            });
+          }
         });
-
-        Object.keys(indData).forEach(k => {
-            if (_overlaySeries[k]) {
-                _overlaySeries[k].setData(indData[k]);
-            }
-            if (_oscSeries[k]) {
-                const isHist = k.endsWith('_hist');
-                const mapped = isHist
-                    ? indData[k].map(p => ({
-                        ...p,
-                        color: p.value >= 0 ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)',
-                      }))
-                    : indData[k];
-                _oscSeries[k].setData(mapped);
-            }
-            // RSI reference lines: draw as horizontal across full time range
-            [30, 70].forEach(level => {
-                const ref = _oscSeries[`_ref_${level}`];
-                if (ref && indData[k] && indData[k].length > 1) {
-                    const first = indData[k][0].time;
-                    const last  = indData[k][indData[k].length - 1].time;
-                    ref.series.setData([{ time: first, value: level }, { time: last, value: level }]);
-                }
-            });
-        });
+      }
+      _hideEmptyState();
+      setBadge(`candles: ${_rawCandles.length}`);
     };
 
-    // ── Bridge: initBotSeries — called once at 'start' event ──
-    window.initBotSeries = function(botIds) {
-        // Skip 'total' — that's the main equitySeries already registered
-        botIds.filter(id => id !== 'total').forEach((id, i) => {
-            if (!_botEquitySeries[id]) {
-                const color = BOT_COLORS[(i + 1) % BOT_COLORS.length];
-                _botEquitySeries[id] = chart.addLineSeries({
-                    color,
-                    lineWidth: 1,
-                    lineStyle: 1,              // dashed to differ from 'total'
-                    priceScaleId: 'equity',
-                    title: id,
-                    lastValueVisible: true,
-                });
-                _botColorIdx[id] = (i + 1) % BOT_COLORS.length;
-            }
-        });
+    window.appendCandles = function (arr) {
+      (arr || []).forEach((d) => window.addCandle(d));
     };
 
-    // ── Bridge: addEquityPoint ─────────────────────────────────
-    window.addEquityPoint = function(data) {
-        const series = _botEquitySeries[data.bot_id || 'total'];
-        if (series) {
-            _equityData.push({ time: data.time, value: data.value });
-            series.update({ time: data.time, value: data.value });
-        }
-    };
-
-    // ── Bridge: addTradeMarker ─────────────────────────────────
-    window.addTradeMarker = function(data) {
-        const botId  = data.bot_id || 'total';
-        const cidx   = _botColorIdx[botId] || 0;
-        const buyColor  = BOT_COLORS[cidx];
-        const sellColor = data.pnl >= 0 ? '#26a69a' : '#ef5350';
-
-        _tradeMarkers.push({
-            entryTime:  data.entry_time,
-            exitTime:   data.exit_time,
-            entryPrice: data.entry_price,
-            exitPrice:  data.exit_price,
-            pnl:        data.pnl,
-        });
-        const existing = candleSeries.markers() || [];
-        candleSeries.setMarkers([
-            ...existing,
-            { time: data.entry_time, position: 'belowBar', color: buyColor,  shape: 'arrowUp',   text: 'B' },
-            { time: data.exit_time,  position: 'aboveBar', color: sellColor, shape: 'arrowDown',  text: 'S' },
-        ]);
-        _redrawCanvas();
-    };
-
-    // ── Bridge: clearChart ─────────────────────────────────────
-    window.clearChart = function() {
-        _rawCandles.length = 0;
-        _candleData.length = 0;
-        _equityData.length = 0;
-        _tradeMarkers.length = 0;
-        _haPrev = null;
-        _renkoLastBrick = null;
-
+    window.setCandles = function (arr) {
+      _rawCandles.length = 0;
+      _haPrev = null; _renkoLast = null;
+      if (!arr || arr.length === 0) {
         candleSeries.setData([]);
-        equitySeries.setData([]);
         volumeSeries.setData([]);
-        candleSeries.setMarkers([]);
+        _showEmptyState('No candles in range.');
+        return;
+      }
+      _rawCandles.push(...arr);
 
-        // Remove per-bot equity series (keep 'total' = equitySeries)
-        Object.entries(_botEquitySeries).forEach(([id, s]) => {
-            if (id !== 'total') chart.removeSeries(s);
+      if (currentFormula === 'renko') {
+        const { bricks, lastBrick } = _calcRenko(_rawCandles, currentBrickSize, null);
+        _renkoLast = lastBrick;
+        candleSeries.setData(bricks);
+      } else {
+        const transformed = _rawCandles.map((c, i) => _applyFormula(c, i === 0));
+        candleSeries.setData(transformed);
+      }
+
+      volumeSeries.setData(arr.map((c) => ({
+        time: c.time, value: c.volume,
+        color: c.close >= c.open ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
+      })));
+
+      // Indicators
+      const grouped = {};
+      arr.forEach((c) => {
+        if (!c.indicators) return;
+        Object.keys(c.indicators).forEach((k) => {
+          if (c.indicators[k] == null) return;
+          (grouped[k] ||= []).push({ time: c.time, value: c.indicators[k] });
         });
-        // Reset map but keep total alias
-        for (const k in _botEquitySeries) if (k !== 'total') delete _botEquitySeries[k];
-        for (const k in _botColorIdx) delete _botColorIdx[k];
+      });
+      Object.keys(grouped).forEach((k) => {
+        if (_overlaySeries[k]) _overlaySeries[k].setData(grouped[k]);
+        if (_oscSeries[k]) {
+          const isHist = k.endsWith('_hist');
+          const mapped = isHist
+            ? grouped[k].map((p) => ({ ...p, color: p.value >= 0 ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)' }))
+            : grouped[k];
+          _oscSeries[k].setData(mapped);
+        }
+      });
 
-        Object.values(_overlaySeries).forEach(s => chart.removeSeries(s));
-        for (const k in _overlaySeries) delete _overlaySeries[k];
-
-        Object.entries(_oscSeries).forEach(([k, v]) => {
-            if (k.startsWith('_ref_')) oscChart.removeSeries(v.series);
-            else oscChart.removeSeries(v);
-        });
-        for (const k in _oscSeries) delete _oscSeries[k];
-
-        _showOscPanel(false);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      chart.timeScale().fitContent();
+      _hideEmptyState();
+      setBadge(`candles: ${arr.length}`);
+      // Force a resize in case container just gained dimensions
+      setTimeout(resizeAll, 30);
     };
 
-    // ── Canvas heatmap (bonus visual) ─────────────────────────
-    window.drawLiquidityHeatmap = function(heatmapData) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        heatmapData.forEach(box => {
-            const x    = chart.timeScale().timeToCoordinate(box.time);
-            const yTop = candleSeries.priceToCoordinate(box.priceHigh);
-            const yBot = candleSeries.priceToCoordinate(box.priceLow);
-            if (x === null || yTop === null || yBot === null) return;
-            ctx.fillStyle = `rgba(255,160,0,${Math.min(1, Math.max(0, box.intensity))})`;
-            ctx.fillRect(x - 10, yTop, 20, yBot - yTop);
-        });
+    window.addEquityPoint = function (data) {
+      const s = _botEquitySeries[data.bot_id || 'total'];
+      if (!s) return;
+      _equityData.push({ time: data.time, value: data.value });
+      s.update({ time: data.time, value: data.value });
     };
 
-    // Signal to Flutter WebView bridge that all functions are defined.
+    window.addTradeMarker = function (data) {
+      const botId  = data.bot_id || 'total';
+      const cidx   = _botColorIdx[botId] || 0;
+      const buyCol = BOT_COLORS[cidx];
+      const selCol = data.pnl >= 0 ? '#26a69a' : '#ef5350';
+
+      _tradeMarkers.push({
+        entryTime: data.entry_time, exitTime: data.exit_time,
+        entryPrice: data.entry_price, exitPrice: data.exit_price,
+        pnl: data.pnl,
+      });
+      const existing = candleSeries.markers() || [];
+      candleSeries.setMarkers([
+        ...existing,
+        { time: data.entry_time, position: 'belowBar', color: buyCol, shape: 'arrowUp',   text: 'B' },
+        { time: data.exit_time,  position: 'aboveBar', color: selCol, shape: 'arrowDown', text: 'S' },
+      ]);
+      _redrawCanvas();
+    };
+
+    window.clearChart = function () {
+      _rawCandles.length = 0;
+      _equityData.length = 0;
+      _tradeMarkers.length = 0;
+      _haPrev = null; _renkoLast = null;
+
+      candleSeries.setData([]);
+      equitySeries.setData([]);
+      volumeSeries.setData([]);
+      candleSeries.setMarkers([]);
+
+      Object.entries(_botEquitySeries).forEach(([id, s]) => {
+        if (id !== 'total') { try { chart.removeSeries(s); } catch (_) {} }
+      });
+      for (const k in _botEquitySeries) if (k !== 'total') delete _botEquitySeries[k];
+      for (const k in _botColorIdx) delete _botColorIdx[k];
+
+      Object.values(_overlaySeries).forEach((s) => { try { chart.removeSeries(s); } catch (_) {} });
+      for (const k in _overlaySeries) delete _overlaySeries[k];
+
+      Object.values(_oscSeries).forEach((s) => { try { oscChart.removeSeries(s); } catch (_) {} });
+      for (const k in _oscSeries) delete _oscSeries[k];
+
+      _showOscPane(false);
+      ctx.clearRect(0, 0, $canvas.width, $canvas.height);
+      _showEmptyState('Waiting for candles…');
+      setBadge('cleared');
+    };
+
+    // Public hook for Flutter to force a resize (e.g. after parent resize)
+    window.forceResize = function () { resizeAll(); };
+
+    // Signal ready — both for poll-based detection (legacy) and webMessage push
     window.__chartReady = true;
+    setBadge('ready');
+    if (window.console && console.log) console.log('[chart] ready');
+    try {
+      if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
+        window.chrome.webview.postMessage('chart-ready');
+      }
+    } catch (e) {
+      console.error('[chart] postMessage failed', e);
+    }
 
-    </script>
+  } catch (initErr) {
+    // Expose the crash so Flutter polling can pick it up
+    window.__chartError = (initErr && initErr.message ? initErr.message : String(initErr))
+                          + ' @ ' + (initErr && initErr.stack ? initErr.stack.split('\n').slice(0, 3).join(' | ') : '?');
+    try {
+      if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
+        window.chrome.webview.postMessage('dbg:CRASH:' + window.__chartError);
+      }
+    } catch (_) {}
+    var $eb = document.getElementById('empty-state');
+    if ($eb) {
+      $eb.textContent = 'Chart init crashed: ' + window.__chartError;
+      $eb.style.color = '#ef5350';
+    }
+    var $bb = document.getElementById('debug-badge');
+    if ($bb) $bb.textContent = 'CRASH';
+  }
+  })();
+  </script>
 </body>
 </html>
