@@ -56,3 +56,8 @@ apply_sdk_patch.bat
 *.scratch.py
 
 scratch_pecunator/
+flutter_app/test_syntax.dart
+.cursor/
+.mypy_cache/
+.ruff_cache/
+.benchmarks/

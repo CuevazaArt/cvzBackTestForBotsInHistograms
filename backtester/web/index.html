@@ -434,6 +434,13 @@
         }
     };
 
+    // ── Bridge: appendCandles (incremental batch) ──────────────
+    // Unlike setCandles, this APPENDS without clearing existing data.
+    // Used by the Flutter _ChartDispatcher to drain its buffer in chunks.
+    window.appendCandles = function(dataArray) {
+        dataArray.forEach(data => window.addCandle(data));
+    };
+
     // ── Bridge: setCandles (bulk load) ─────────────────────────
     window.setCandles = function(dataArray) {
         _rawCandles.length = 0;
@@ -594,6 +601,9 @@
             ctx.fillRect(x - 10, yTop, 20, yBot - yTop);
         });
     };
+
+    // Signal to Flutter WebView bridge that all functions are defined.
+    window.__chartReady = true;
 
     </script>
 </body>

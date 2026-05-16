@@ -35,9 +35,23 @@ Plataforma minimalista para **backtesting ágil de bots de trading** sobre hist�
 ## 🚨 Directiva de Desarrollo
 
 **IMPORTANTE:** Para este proyecto, siempre que haya actualizaciones que involucren las funciones clave de la herramienta, se asume de facto la siguiente directiva local:
-1. **Borrar caché/purgar configuración anterior** (`flutter clean`).
-2. **Resetear y relanzar el servicio backend y la UI**.
-No es necesario solicitar autorización al L0 para ejecutar este flujo de purga y reinicio; debe realizarse proactivamente para evitar inconsistencias y dejar activa la UI ya actualizada.
+
+1. **Borrar caché/purgar configuración anterior:**
+   ```powershell
+   cd flutter_app && flutter clean && flutter pub get
+   ```
+2. **Detener procesos previos** del backend y la UI (kill de cualquier proceso en el puerto 8002 y de `backtester_shell.exe`).
+3. **Relanzar el servicio backend limpio:**
+   ```powershell
+   uvicorn backtester.api.server:app --host 127.0.0.1 --port 8002
+   ```
+4. **Relanzar la UI:**
+   ```powershell
+   cd flutter_app && flutter run -d windows
+   ```
+5. **Reportar al usuario** con la UI activa y el servicio verificado (`/health` 200 OK).
+
+> **No es necesario solicitar autorización al L0** para ejecutar este flujo de purga y reinicio; debe realizarse **proactivamente** como paso final de cualquier cambio para evitar inconsistencias ambientales y garantizar que el usuario reciba la herramienta en estado operativo.
 
 ## Quick start
 

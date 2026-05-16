@@ -28,6 +28,93 @@ const _speedPresets = <String, int>{
   'Max': 0,
 };
 
+/// Throttled buffer that decouples WebSocket event rate from WebView
+/// rendering rate.  All chart events are accumulated and drained at a
+/// controlled cadence (~60 fps) so the WebView2 COM bridge never overflows.
+class _ChartDispatcher {
+  _ChartDispatcher(this._ctrl);
+
+  final ChartWebViewController _ctrl;
+  Timer? _timer;
+
+  final List<Map<String, dynamic>> _candles = [];
+  final List<Map<String, dynamic>> _trades  = [];
+  final List<Map<String, dynamic>> _equity  = [];
+
+  /// Maximum candles to push per tick.  Keeps each JS call < 200 KB.
+  static const int _batchSize = 200;
+  /// Drain cadence: 16 ms ≈ 60 fps.
+  static const Duration _interval = Duration(milliseconds: 16);
+
+  // ── enqueue ──────────────────────────────────────────────────
+  void addCandle(Map<String, dynamic> c) => _candles.add(c);
+  void addTrade(Map<String, dynamic> t)  => _trades.add(t);
+  void addEquity(Map<String, dynamic> e) => _equity.add(e);
+
+  // ── lifecycle ────────────────────────────────────────────────
+  void start() {
+    _timer?.cancel();
+    _timer = Timer.periodic(_interval, (_) => _drain());
+  }
+
+  void reset() {
+    _timer?.cancel();
+    _candles.clear();
+    _trades.clear();
+    _equity.clear();
+  }
+
+  /// Flush everything remaining (called on 'result' or 'cancelled').
+  void flush() {
+    _timer?.cancel();
+    // Candles: append remaining without resetting chart.
+    if (_candles.isNotEmpty) {
+      _ctrl.appendCandles(_candles);
+      _candles.clear();
+    }
+    // Trades & equity: deliver individually (low volume).
+    for (final t in _trades) {
+      _ctrl.addTradeMarker(t);
+    }
+    for (final e in _equity) {
+      _ctrl.addEquityPoint(e);
+    }
+    _trades.clear();
+    _equity.clear();
+  }
+
+  void dispose() {
+    _timer?.cancel();
+  }
+
+  // ── internal drain tick ─────────────────────────────────────
+  void _drain() {
+    if (_candles.isEmpty && _trades.isEmpty && _equity.isEmpty) return;
+
+    // Candles: send a batch via appendCandles (one JS call, no reset).
+    if (_candles.isNotEmpty) {
+      final end = _candles.length.clamp(0, _batchSize);
+      final batch = _candles.sublist(0, end);
+      _ctrl.appendCandles(batch);
+      _candles.removeRange(0, end);
+    }
+
+    // Trades: up to 20 per tick.
+    final tradeEnd = _trades.length.clamp(0, 20);
+    for (var i = 0; i < tradeEnd; i++) {
+      _ctrl.addTradeMarker(_trades[i]);
+    }
+    if (tradeEnd > 0) _trades.removeRange(0, tradeEnd);
+
+    // Equity: up to 50 per tick.
+    final eqEnd = _equity.length.clamp(0, 50);
+    for (var i = 0; i < eqEnd; i++) {
+      _ctrl.addEquityPoint(_equity[i]);
+    }
+    if (eqEnd > 0) _equity.removeRange(0, eqEnd);
+  }
+}
+
 /// Main backtest workspace: controls + chart + results.
 class BacktestScreen extends StatefulWidget {
   final ApiService apiService;
@@ -88,7 +175,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
   Map<String, dynamic>? _perBotResult;
   String? _wsError;
   String? _catalogError;
+  String _statusText = 'Idle — select params and click Run';
   final List<TradeRow> _trades = [];
+  late final _ChartDispatcher _dispatcher = _ChartDispatcher(_chartCtrl);
 
   StreamSubscription<WsEvent>? _wsSub;
 
@@ -248,6 +337,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   @override
   void dispose() {
+    _dispatcher.dispose();
     _wsSub?.cancel();
     super.dispose();
   }
@@ -255,32 +345,42 @@ class _BacktestScreenState extends State<BacktestScreen> {
   void _onWsEvent(WsEvent ev) {
     switch (ev.type) {
       case WsEventType.start:
+        _dispatcher.reset();
+        _dispatcher.start();
         final overlayKeys = List<String>.from(ev.data['indicators_keys'] ?? []);
         final oscKeys = List<String>.from(ev.data['oscillator_keys'] ?? []);
         final botIds = List<String>.from(ev.data['bot_ids'] ?? []);
         _chartCtrl.initIndicators(overlayKeys);
         _chartCtrl.initOscillators(oscKeys);
         _chartCtrl.initBotSeries(['total', ...botIds]);
+        if (mounted) setState(() => _statusText = 'Streaming candles…');
       case WsEventType.candle:
-        _chartCtrl.addCandle(ev.data);
+        _dispatcher.addCandle(ev.data);
       case WsEventType.trade:
-        _chartCtrl.addTradeMarker(ev.data);
+        _dispatcher.addTrade(ev.data);
         if (mounted) {
           setState(() => _trades.add(TradeRow.fromWs(ev.data)));
         }
       case WsEventType.equity:
-        _chartCtrl.addEquityPoint(ev.data);
+        _dispatcher.addEquity(ev.data);
       case WsEventType.progress:
         if (mounted) {
-          setState(() => _progress = (ev.data['percent'] as num).toDouble());
+          final pct = (ev.data['percent'] as num).toDouble();
+          setState(() {
+            _progress = pct;
+            _statusText = 'Running backtest… ${pct.toStringAsFixed(0)}%';
+          });
         }
       case WsEventType.result:
+        if (mounted) setState(() => _statusText = 'Rendering chart…');
+        _dispatcher.flush();
         if (mounted) {
           setState(() {
             _runState = _RunState.done;
             _lastResult = ev.data;
             _perBotResult = ev.data['per_bot'] as Map<String, dynamic>?;
             _progress = 100;
+            _statusText = '✓ Backtest complete — ${_trades.length} trades';
           });
         }
       case WsEventType.error:
@@ -293,9 +393,19 @@ class _BacktestScreenState extends State<BacktestScreen> {
           _maybeOfferDataManager(msg);
         }
       case WsEventType.paused:
-        if (mounted) setState(() => _runState = _RunState.paused);
+        if (mounted) {
+          setState(() {
+            _runState = _RunState.paused;
+            _statusText = '⏸ Paused — press resume to continue';
+          });
+        }
       case WsEventType.resumed:
-        if (mounted) setState(() => _runState = _RunState.running);
+        if (mounted) {
+          setState(() {
+            _runState = _RunState.running;
+            _statusText = 'Resumed — streaming candles…';
+          });
+        }
       case WsEventType.cancelled:
         if (mounted) {
           // Treat cancellation as terminal for the current run and return to
@@ -364,8 +474,11 @@ class _BacktestScreenState extends State<BacktestScreen> {
       _perBotResult = null;
       _wsError = null;
       _trades.clear();
+      _statusText = 'Connecting to engine…';
     });
+    _dispatcher.reset();
     _chartCtrl.clear();
+    _chartCtrl.setChartFormula(_selectedFormula, brickSize: _brickSize);
 
     final bots = _selectedBots
         .map((b) => {'name': b, 'params': _botsParams[b] ?? {}})
@@ -916,10 +1029,45 @@ class _BacktestScreenState extends State<BacktestScreen> {
           ),
         Expanded(
           flex: 3,
-          child: ChartWebView(
-            controller: _chartCtrl,
-            chartUrl: widget.chartUrl,
-            onReady: _fetchInitialChartData,
+          child: Stack(
+            children: [
+              ChartWebView(
+                controller: _chartCtrl,
+                chartUrl: widget.chartUrl,
+                onReady: _fetchInitialChartData,
+              ),
+              // Status bar overlay
+              if (_runState != _RunState.idle || !_chartCtrl.isReady)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.7),
+                        ],
+                      ),
+                    ),
+                    child: Text(
+                      _statusText,
+                      style: const TextStyle(
+                        color: Color(0xFFD9D9D9),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
         const Divider(height: 1),
@@ -2122,6 +2270,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
   String? _msg;
   double _downloadProgress = 0.0;
   Timer? _pollTimer;
+  Map<String, dynamic>? _qualityReport;
   Timer? _healthTimer;
 
   List<SymbolEntry> _catalog = [];
@@ -2160,11 +2309,25 @@ class _DownloadDialogState extends State<_DownloadDialog> {
     super.dispose();
   }
 
+  /// Run data quality validation after a successful download.
+  Future<void> _runValidation(String symbol, String timeframe) async {
+    try {
+      final report = await widget.apiService.validateData(
+        symbol: symbol,
+        timeframe: timeframe,
+      );
+      if (mounted) setState(() => _qualityReport = report);
+    } catch (e) {
+      debugPrint('Data validation error: $e');
+    }
+  }
+
   void _download() async {
     setState(() {
       _loading = true;
       _msg = 'Initializing download...';
       _downloadProgress = 0.0;
+      _qualityReport = null;
     });
     try {
       if (_useZip) {
@@ -2252,6 +2415,9 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                   }
                   _refreshCatalog();
                 });
+                if (!hasError) {
+                  _runValidation(symbol, _tf);
+                }
               }
             }
           } catch (e) {
@@ -2287,6 +2453,12 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                     _msg = '✗ Error: ${status.message}';
                   }
                 });
+                if (status.status == 'done') {
+                  _runValidation(
+                    _symbolCtrl.text.trim().toUpperCase(),
+                    _tf,
+                  );
+                }
               }
             }
           } catch (e) {
@@ -2305,6 +2477,91 @@ class _DownloadDialogState extends State<_DownloadDialog> {
         _msg = '✗ $e';
       });
     }
+  }
+
+  Widget _buildQualityBadge(Map<String, dynamic> report) {
+    final isOk = report['summary_ok'] == true;
+    final gaps = (report['gaps'] as List?)?.length ?? 0;
+    final dupes = (report['duplicates'] as List?)?.length ?? 0;
+    final outliers = (report['outliers_iqr'] as List?)?.length ?? 0;
+    final ohlcViolations =
+        (report['ohlc_consistency_violations'] as List?)?.length ?? 0;
+    final completeness =
+        (report['completeness_pct'] as num?)?.toStringAsFixed(1) ?? '?';
+    final total = report['total_candles'] ?? 0;
+
+    final badgeColor = isOk ? const Color(0xFF26a69a) : const Color(0xFFFFA726);
+    final iconData = isOk ? Icons.check_circle : Icons.warning_amber_rounded;
+
+    final chips = <Widget>[];
+    if (!isOk) {
+      if (gaps > 0) {
+        chips.add(_qChip('$gaps gaps', const Color(0xFFFFA726)));
+      }
+      if (dupes > 0) {
+        chips.add(_qChip('$dupes dupes', const Color(0xFFef5350)));
+      }
+      if (outliers > 0) {
+        chips.add(_qChip('$outliers outliers', const Color(0xFFFFD54F)));
+      }
+      if (ohlcViolations > 0) {
+        chips.add(_qChip('$ohlcViolations OHLC', const Color(0xFFef5350)));
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: badgeColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: badgeColor.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(iconData, color: badgeColor, size: 16),
+              const SizedBox(width: 6),
+              Text(
+                isOk ? 'Data Quality: Clean' : 'Data Quality: Warnings',
+                style: TextStyle(
+                  color: badgeColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$total candles · $completeness%',
+                style: const TextStyle(
+                  color: Color(0xFF787B86),
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          ),
+          if (chips.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Wrap(spacing: 6, runSpacing: 4, children: chips),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _qChip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w500),
+      ),
+    );
   }
 
   @override
@@ -2451,6 +2708,10 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                                   : const Color(0xFFD9D9D9)),
                       ),
                     ),
+                  ],
+                  if (_qualityReport != null) ...[
+                    const SizedBox(height: 8),
+                    _buildQualityBadge(_qualityReport!),
                   ],
                 ],
               ),
