@@ -18,6 +18,11 @@ enum WsEventType {
   pong,
   trialCompleted,
   optimizeDone,
+  // Playback transport events (server echo)
+  paused,
+  resumed,
+  cancelled,
+  speedChanged,
   // Synthetic (client-side)
   disconnected,
   reconnecting,
@@ -44,6 +49,10 @@ class WsEvent {
       'pong' => WsEventType.pong,
       'trial_completed' => WsEventType.trialCompleted,
       'optimize_done' => WsEventType.optimizeDone,
+      'paused' => WsEventType.paused,
+      'resumed' => WsEventType.resumed,
+      'cancelled' => WsEventType.cancelled,
+      'speed_changed' => WsEventType.speedChanged,
       _ => WsEventType.unknown,
     };
     return WsEvent(t, (j['data'] as Map<String, dynamic>?) ?? {});
@@ -255,6 +264,7 @@ class WsService {
     double slippagePct = 0.05,
     bool fillOnNextOpen = true,
     List<Map<String, dynamic>>? indicators,
+    int speedMs = 100,
   }) {
     send({
       'action': 'backtest',
@@ -271,9 +281,27 @@ class WsService {
         'slippage_pct': slippagePct,
         'fill_on_next_open': fillOnNextOpen,
         'indicators': indicators ?? [],
+        'speed_ms': speedMs,
       },
     });
   }
+
+  /// Pause the active backtest run mid-execution.
+  void pause() => send({'action': 'pause'});
+
+  /// Resume a paused backtest run.
+  void resume() => send({'action': 'resume'});
+
+  /// Advance exactly one candle while paused.
+  void step() => send({'action': 'step'});
+
+  /// Change the wall-clock playback speed.
+  /// [speedMs] is milliseconds per candle: 200=0.5x, 100=1x, 50=2x,
+  /// 20=5x, 10=10x, 0=Max (no delay).
+  void setSpeed(int speedMs) => send({'action': 'set_speed', 'speed_ms': speedMs});
+
+  /// Cancel (stop) the active backtest run.
+  void cancelRun() => send({'action': 'cancel'});
 
   void runOptimize({
     required String bot,

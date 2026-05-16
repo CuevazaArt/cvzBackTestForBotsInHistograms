@@ -14,6 +14,19 @@ import 'package:backtester_shell/widgets/trades_table.dart';
 import 'package:backtester_shell/widgets/mini_weight_chart.dart';
 import 'package:backtester_shell/widgets/validation_error_dialog.dart';
 
+/// Playback transport state for a backtest run.
+enum _RunState { idle, running, paused, cancelled, done }
+
+/// Speed presets: label → speed_ms value.
+const _speedPresets = <String, int>{
+  '0.5x': 200,
+  '1x': 100,
+  '2x': 50,
+  '5x': 20,
+  '10x': 10,
+  'Max': 0,
+};
+
 /// Main backtest workspace: controls + chart + results.
 class BacktestScreen extends StatefulWidget {
   final ApiService apiService;
@@ -66,7 +79,8 @@ class _BacktestScreenState extends State<BacktestScreen> {
     {'name': 'ema', 'period': 21},
   ];
 
-  bool _running = false;
+  _RunState _runState = _RunState.idle;
+  int _selectedSpeedMs = 100;
   double _progress = 0;
   Map<String, dynamic>? _lastResult;
   Map<String, dynamic>? _perBotResult;
@@ -203,7 +217,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
       case WsEventType.result:
         if (mounted) {
           setState(() {
-            _running = false;
+            _runState = _RunState.done;
             _lastResult = ev.data;
             _perBotResult = ev.data['per_bot'] as Map<String, dynamic>?;
             _progress = 100;
@@ -213,11 +227,20 @@ class _BacktestScreenState extends State<BacktestScreen> {
         if (mounted) {
           final msg = ev.data['message'] as String? ?? 'Unknown error';
           setState(() {
-            _running = false;
+            _runState = _RunState.idle;
             _wsError = msg;
           });
           _maybeOfferDataManager(msg);
         }
+      case WsEventType.paused:
+        if (mounted) setState(() => _runState = _RunState.paused);
+      case WsEventType.resumed:
+        if (mounted) setState(() => _runState = _RunState.running);
+      case WsEventType.cancelled:
+        if (mounted) setState(() => _runState = _RunState.cancelled);
+      case WsEventType.speedChanged:
+        final ms = ev.data['speed_ms'];
+        if (mounted && ms is int) setState(() => _selectedSpeedMs = ms);
       case WsEventType.reconnecting:
         final attempt = ev.data['attempt'];
         final max = ev.data['max'];
@@ -227,7 +250,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
       case WsEventType.disconnected:
         if (mounted) {
           setState(() {
-            if (_running) _running = false;
+            if (_runState == _RunState.running || _runState == _RunState.paused) {
+              _runState = _RunState.idle;
+            }
             _wsError = ev.data['message'] as String? ?? 'Connection lost';
           });
         }
@@ -260,13 +285,14 @@ class _BacktestScreenState extends State<BacktestScreen> {
   }
 
   void _runBacktest() {
-    if (_selectedSymbol == null || _selectedBots.isEmpty || _running) return;
+    if (_selectedSymbol == null || _selectedBots.isEmpty) return;
+    if (_runState == _RunState.running || _runState == _RunState.paused) return;
     if (!_ws.isConnected) {
       setState(() => _wsError = 'Not connected to backend.');
       return;
     }
     setState(() {
-      _running = true;
+      _runState = _RunState.running;
       _progress = 0;
       _lastResult = null;
       _perBotResult = null;
@@ -290,6 +316,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
       slippagePct: _slippagePct,
       fillOnNextOpen: _fillOnNextOpen,
       indicators: _selectedIndicators,
+      speedMs: _selectedSpeedMs,
     );
   }
 
@@ -669,8 +696,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
           startDateIso: _startDateIso,
           endDateIso: _endDateIso,
           selectedIndicators: _selectedIndicators,
-          running: _running,
+          runState: _runState,
           progress: _progress,
+          selectedSpeedMs: _selectedSpeedMs,
           wsError: _wsError,
           wsStatus: _ws.status,
           onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
@@ -707,6 +735,21 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onBotParamChanged: (botName, params) =>
               setState(() => _botsParams[botName] = params),
           onRun: _runBacktest,
+          onPauseResume: () {
+            if (_runState == _RunState.running) {
+              _ws.pause();
+            } else if (_runState == _RunState.paused) {
+              _ws.resume();
+            }
+          },
+          onStep: _ws.step,
+          onStop: _ws.cancelRun,
+          onSpeedChanged: (ms) {
+            setState(() => _selectedSpeedMs = ms);
+            if (_runState == _RunState.running || _runState == _RunState.paused) {
+              _ws.setSpeed(ms);
+            }
+          },
           onDownload: () => _showDownloadDialog(context),
           onSavePreset: _savePresetDialog,
           onApplyPreset: _applyPreset,
@@ -834,8 +877,9 @@ class _TopBar extends StatelessWidget {
   final String? startDateIso;
   final String? endDateIso;
   final List<Map<String, dynamic>> selectedIndicators;
-  final bool running;
+  final _RunState runState;
   final double progress;
+  final int selectedSpeedMs;
   final String? wsError;
   final ValueNotifier<WsStatus> wsStatus;
   final ValueChanged<String?> onSymbolChanged;
@@ -856,6 +900,10 @@ class _TopBar extends StatelessWidget {
   final void Function(String botName, Map<String, dynamic> params)
   onBotParamChanged;
   final VoidCallback onRun;
+  final VoidCallback onPauseResume;
+  final VoidCallback onStep;
+  final VoidCallback onStop;
+  final ValueChanged<int> onSpeedChanged;
   final VoidCallback onDownload;
   final VoidCallback onSavePreset;
   final void Function(BacktestPreset) onApplyPreset;
@@ -877,8 +925,9 @@ class _TopBar extends StatelessWidget {
     required this.startDateIso,
     required this.endDateIso,
     required this.selectedIndicators,
-    required this.running,
+    required this.runState,
     required this.progress,
+    required this.selectedSpeedMs,
     this.wsError,
     required this.wsStatus,
     required this.onSymbolChanged,
@@ -898,6 +947,10 @@ class _TopBar extends StatelessWidget {
     required this.botsParamValues,
     required this.onBotParamChanged,
     required this.onRun,
+    required this.onPauseResume,
+    required this.onStep,
+    required this.onStop,
+    required this.onSpeedChanged,
     required this.onDownload,
     required this.onSavePreset,
     required this.onApplyPreset,
@@ -1036,27 +1089,16 @@ class _TopBar extends StatelessWidget {
               onManagePresets: onManagePresets,
             ),
             const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed:
-                  running || selectedSymbol == null || selectedBots.isEmpty
-                  ? null
-                  : onRun,
-              icon: running
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.play_arrow, size: 16),
-              label: Text(running ? '${progress.toStringAsFixed(0)}%' : 'Run'),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF26a69a),
-                minimumSize: const Size(80, 32),
-                textStyle: const TextStyle(fontSize: 13),
-              ),
+            _TransportCluster(
+              runState: runState,
+              progress: progress,
+              selectedSpeedMs: selectedSpeedMs,
+              canRun: selectedSymbol != null && selectedBots.isNotEmpty,
+              onRun: onRun,
+              onPauseResume: onPauseResume,
+              onStep: onStep,
+              onStop: onStop,
+              onSpeedChanged: onSpeedChanged,
             ),
             const SizedBox(width: 8),
             OutlinedButton.icon(
@@ -1755,6 +1797,196 @@ class _PresetsToolbarState extends State<_PresetsToolbar> {
               },
             ),
           ),
+      ],
+    );
+  }
+}
+
+// ── Transport cluster ──────────────────────────────────────────
+
+/// Run / Pause-Resume / Step / Speed / Stop bar that lives in the TopBar.
+class _TransportCluster extends StatelessWidget {
+  final _RunState runState;
+  final double progress;
+  final int selectedSpeedMs;
+  final bool canRun;
+  final VoidCallback onRun;
+  final VoidCallback onPauseResume;
+  final VoidCallback onStep;
+  final VoidCallback onStop;
+  final ValueChanged<int> onSpeedChanged;
+
+  const _TransportCluster({
+    required this.runState,
+    required this.progress,
+    required this.selectedSpeedMs,
+    required this.canRun,
+    required this.onRun,
+    required this.onPauseResume,
+    required this.onStep,
+    required this.onStop,
+    required this.onSpeedChanged,
+  });
+
+  bool get _isActive =>
+      runState == _RunState.running || runState == _RunState.paused;
+
+  String get _speedLabel =>
+      _speedPresets.entries
+          .firstWhere(
+            (e) => e.value == selectedSpeedMs,
+            orElse: () => MapEntry('${selectedSpeedMs}ms', selectedSpeedMs),
+          )
+          .key;
+
+  @override
+  Widget build(BuildContext context) {
+    final isMax = selectedSpeedMs == 0;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // ── Run button ──────────────────────────────────────────
+        FilledButton.icon(
+          onPressed: (_isActive || !canRun) ? null : onRun,
+          icon: (runState == _RunState.running)
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.play_arrow, size: 16),
+          label: Text(
+            runState == _RunState.running
+                ? '${progress.toStringAsFixed(0)}%'
+                : 'Run',
+          ),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF26a69a),
+            minimumSize: const Size(72, 32),
+            textStyle: const TextStyle(fontSize: 13),
+          ),
+        ),
+        const SizedBox(width: 4),
+        // ── Pause / Resume toggle ───────────────────────────────
+        Tooltip(
+          message: runState == _RunState.paused ? 'Resume' : 'Pause',
+          child: IconButton(
+            iconSize: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            icon: Icon(
+              runState == _RunState.paused
+                  ? Icons.play_circle_outline
+                  : Icons.pause_circle_outline,
+              color: _isActive
+                  ? const Color(0xFFFFD740)
+                  : const Color(0xFF2B2B43),
+            ),
+            onPressed: _isActive ? onPauseResume : null,
+          ),
+        ),
+        // ── PAUSED badge ────────────────────────────────────────
+        if (runState == _RunState.paused) ...[
+          const SizedBox(width: 2),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFD740).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: const Color(0xFFFFD740), width: 1),
+            ),
+            child: const Text(
+              'PAUSED',
+              style: TextStyle(
+                color: Color(0xFFFFD740),
+                fontSize: 9,
+                letterSpacing: 0.8,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 2),
+        ],
+        // ── Step button ─────────────────────────────────────────
+        Tooltip(
+          message: 'Step one candle',
+          child: IconButton(
+            iconSize: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            icon: Icon(
+              Icons.skip_next,
+              color: runState == _RunState.paused
+                  ? const Color(0xFFD9D9D9)
+                  : const Color(0xFF2B2B43),
+            ),
+            onPressed: runState == _RunState.paused ? onStep : null,
+          ),
+        ),
+        const SizedBox(width: 2),
+        // ── Speed dropdown ──────────────────────────────────────
+        Tooltip(
+          message: 'Playback speed (ms/candle)',
+          child: DropdownButton<int>(
+            value: selectedSpeedMs,
+            items: _speedPresets.entries
+                .map(
+                  (e) => DropdownMenuItem<int>(
+                    value: e.value,
+                    child: Text(
+                      e.key,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: e.value == 0
+                            ? const Color(0xFF787B86)
+                            : const Color(0xFFD9D9D9),
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v != null) onSpeedChanged(v);
+            },
+            hint: Text(
+              _speedLabel,
+              style: TextStyle(
+                fontSize: 12,
+                color: isMax ? const Color(0xFF787B86) : const Color(0xFFD9D9D9),
+              ),
+            ),
+            underline: const SizedBox(),
+            isDense: true,
+            style: TextStyle(
+              color: isMax ? const Color(0xFF787B86) : const Color(0xFFD9D9D9),
+              fontSize: 12,
+            ),
+            dropdownColor: const Color(0xFF1E222D),
+            iconEnabledColor: const Color(0xFF787B86),
+            iconSize: 14,
+          ),
+        ),
+        const SizedBox(width: 2),
+        // ── Stop button ─────────────────────────────────────────
+        Tooltip(
+          message: 'Stop run',
+          child: IconButton(
+            iconSize: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            icon: Icon(
+              Icons.stop_circle_outlined,
+              color: _isActive
+                  ? const Color(0xFFef5350)
+                  : const Color(0xFF2B2B43),
+            ),
+            onPressed: _isActive ? onStop : null,
+          ),
+        ),
       ],
     );
   }

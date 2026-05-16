@@ -77,7 +77,9 @@ def run_optuna(
         sampler=_build_optuna_sampler(sampler),
     )
     if seed is not None:
-        study.sampler = type(study.sampler)(seed=seed)
+        # Each Optuna sampler subclass accepts ``seed`` via its constructor
+        # but ``BaseSampler`` itself doesn't, so the call is dynamic.
+        study.sampler = type(study.sampler)(seed=seed)  # type: ignore[call-arg]
 
     collected: list[OptimizationResult] = []
 
