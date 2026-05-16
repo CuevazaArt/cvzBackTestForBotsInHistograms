@@ -237,7 +237,11 @@ class _BacktestScreenState extends State<BacktestScreen> {
       case WsEventType.resumed:
         if (mounted) setState(() => _runState = _RunState.running);
       case WsEventType.cancelled:
-        if (mounted) setState(() => _runState = _RunState.cancelled);
+        if (mounted) {
+          // Treat cancellation as terminal for the current run and return to
+          // idle immediately so a new run can only start from a clean state.
+          setState(() => _runState = _RunState.idle);
+        }
       case WsEventType.speedChanged:
         final ms = ev.data['speed_ms'];
         if (mounted && ms is int) setState(() => _selectedSpeedMs = ms);
@@ -250,7 +254,8 @@ class _BacktestScreenState extends State<BacktestScreen> {
       case WsEventType.disconnected:
         if (mounted) {
           setState(() {
-            if (_runState == _RunState.running || _runState == _RunState.paused) {
+            if (_runState == _RunState.running ||
+                _runState == _RunState.paused) {
               _runState = _RunState.idle;
             }
             _wsError = ev.data['message'] as String? ?? 'Connection lost';
@@ -746,7 +751,8 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onStop: _ws.cancelRun,
           onSpeedChanged: (ms) {
             setState(() => _selectedSpeedMs = ms);
-            if (_runState == _RunState.running || _runState == _RunState.paused) {
+            if (_runState == _RunState.running ||
+                _runState == _RunState.paused) {
               _ws.setSpeed(ms);
             }
           },
@@ -1831,13 +1837,12 @@ class _TransportCluster extends StatelessWidget {
   bool get _isActive =>
       runState == _RunState.running || runState == _RunState.paused;
 
-  String get _speedLabel =>
-      _speedPresets.entries
-          .firstWhere(
-            (e) => e.value == selectedSpeedMs,
-            orElse: () => MapEntry('${selectedSpeedMs}ms', selectedSpeedMs),
-          )
-          .key;
+  String get _speedLabel => _speedPresets.entries
+      .firstWhere(
+        (e) => e.value == selectedSpeedMs,
+        orElse: () => MapEntry('${selectedSpeedMs}ms', selectedSpeedMs),
+      )
+      .key;
 
   @override
   Widget build(BuildContext context) {
@@ -1956,7 +1961,9 @@ class _TransportCluster extends StatelessWidget {
               _speedLabel,
               style: TextStyle(
                 fontSize: 12,
-                color: isMax ? const Color(0xFF787B86) : const Color(0xFFD9D9D9),
+                color: isMax
+                    ? const Color(0xFF787B86)
+                    : const Color(0xFFD9D9D9),
               ),
             ),
             underline: const SizedBox(),
