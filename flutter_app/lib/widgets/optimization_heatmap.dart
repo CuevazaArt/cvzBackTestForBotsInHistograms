@@ -125,8 +125,9 @@ class _OptimizationHeatmapState extends State<OptimizationHeatmap> {
                                 if (xi < 0 || xi >= xs.length) return;
                                 if (yi < 0 || yi >= ys.length) return;
                                 final trial = cells[yi][xi];
-                                if (trial != null)
+                                if (trial != null) {
                                   widget.onCellTap?.call(trial);
+                                }
                               },
                               child: CustomPaint(
                                 size: Size(
