@@ -194,6 +194,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     "taker_fee_pct": req.taker_fee_pct,
                     "slippage_pct": req.slippage_pct,
                     "fill_on_next_open": req.fill_on_next_open,
+                    "indicators": [{"name": i.name, **i.to_kwargs()} for i in req.indicators],
+                    "formula": req.formula,
+                    "speed_ms": speed_ms,
                 }
 
                 async def _do_run() -> None:

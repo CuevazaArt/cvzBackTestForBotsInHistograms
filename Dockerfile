@@ -72,10 +72,10 @@ RUN mkdir -p /app/backtester/data /app/backtester/results /app/backtester/.vault
 
 USER appuser
 
-EXPOSE 8000
+EXPOSE 8002
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status==200 else 1)"]
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/healthz', timeout=3).status==200 else 1)"]
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["uvicorn", "backtester.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backtester.api.server:app", "--host", "0.0.0.0", "--port", "8002"]

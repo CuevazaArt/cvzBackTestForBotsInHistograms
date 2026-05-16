@@ -46,7 +46,7 @@ pip install -r requirements.txt
 # Configurar credenciales (copiar .env.example a .env y llenar keys)
 copy ..\.env.example ..\.env
 
-uvicorn backtester.api.server:app --host 127.0.0.1 --port 8000
+uvicorn backtester.api.server:app --host 127.0.0.1 --port 8002
 
 # Flutter shell (otra terminal, cuando esté creado)
 cd flutter_app

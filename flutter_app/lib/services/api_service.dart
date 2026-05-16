@@ -204,6 +204,27 @@ class ApiService {
     );
   }
 
+  Future<List<Map<String, dynamic>>> getCandles({
+    required String symbol,
+    required String timeframe,
+    int? startMs,
+    int? endMs,
+    int? limit,
+  }) async {
+    final qp = <String, String>{
+      if (startMs != null) 'start_ms': '$startMs',
+      if (endMs != null) 'end_ms': '$endMs',
+      if (limit != null) 'limit': '$limit',
+    };
+    final uri = Uri.parse('$baseUrl/api/candles/$symbol/$timeframe')
+        .replace(queryParameters: qp);
+    final res = await http.get(uri, headers: _authHeaders);
+    if (res.statusCode == 404) return [];
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    final List<dynamic> data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
   Future<Map<String, dynamic>> downloadCandles({
     required String symbol,
     required String timeframe,

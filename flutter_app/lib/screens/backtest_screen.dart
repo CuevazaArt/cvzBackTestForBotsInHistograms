@@ -135,6 +135,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
       }
       _botsParams[r.botName] = Map<String, dynamic>.from(r.params);
     });
+    await _fetchInitialChartData();
     widget.onApplyConsumed?.call();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -187,6 +188,26 @@ class _BacktestScreenState extends State<BacktestScreen> {
         });
       }
     } catch (_) {}
+  }
+
+  Future<void> _fetchInitialChartData() async {
+    if (_selectedSymbol == null || _runState == _RunState.running) return;
+    try {
+      final candles = await widget.apiService.getCandles(
+        symbol: _selectedSymbol!,
+        timeframe: _selectedTimeframe,
+        startMs: _parseDateToMs(_startDateIso),
+        endMs: _parseDateToMs(_endDateIso, endOfDay: true),
+        limit: 1500,
+      );
+      if (mounted && candles.isNotEmpty) {
+        _chartCtrl.clear();
+        _chartCtrl.setChartFormula(_selectedFormula, brickSize: _brickSize);
+        _chartCtrl.setCandles(candles);
+      }
+    } catch (e) {
+      debugPrint('Error fetching initial chart data: $e');
+    }
   }
 
   @override
@@ -326,6 +347,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
       fillOnNextOpen: _fillOnNextOpen,
       indicators: _selectedIndicators,
       speedMs: _selectedSpeedMs,
+      formula: _selectedFormula,
     );
   }
 
@@ -710,8 +732,14 @@ class _BacktestScreenState extends State<BacktestScreen> {
           selectedSpeedMs: _selectedSpeedMs,
           wsError: _wsError,
           wsStatus: _ws.status,
-          onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
-          onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
+          onSymbolChanged: (v) {
+            setState(() => _selectedSymbol = v);
+            _fetchInitialChartData();
+          },
+          onTimeframeChanged: (v) {
+            setState(() => _selectedTimeframe = v);
+            _fetchInitialChartData();
+          },
           onFormulaChanged: (v) {
             setState(() => _selectedFormula = v);
             _chartCtrl.setChartFormula(v, brickSize: _brickSize);
@@ -736,8 +764,14 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onFeeChanged: (v) => setState(() => _takerFeePct = v),
           onSlippageChanged: (v) => setState(() => _slippagePct = v),
           onFillOnNextOpenChanged: (v) => setState(() => _fillOnNextOpen = v),
-          onStartDateChanged: (v) => setState(() => _startDateIso = v),
-          onEndDateChanged: (v) => setState(() => _endDateIso = v),
+          onStartDateChanged: (v) {
+            setState(() => _startDateIso = v);
+            _fetchInitialChartData();
+          },
+          onEndDateChanged: (v) {
+            setState(() => _endDateIso = v);
+            _fetchInitialChartData();
+          },
           onIndicatorsChanged: (v) => setState(() => _selectedIndicators = v),
           botParamSpecs: _botParamSpecs,
           botsParamValues: _botsParams,

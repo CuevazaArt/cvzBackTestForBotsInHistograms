@@ -137,6 +137,8 @@ class BacktestRequest(BaseModel):
     taker_fee_pct: float = 0.1
     slippage_pct: float = 0.05
     fill_on_next_open: bool = True
+    formula: str = "ohlc"
+    speed_ms: Optional[int] = None
 
     @field_validator("initial_cash")
     @classmethod

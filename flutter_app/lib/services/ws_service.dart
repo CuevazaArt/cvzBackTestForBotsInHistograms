@@ -262,6 +262,7 @@ class WsService {
     bool fillOnNextOpen = true,
     List<Map<String, dynamic>>? indicators,
     int speedMs = 100,
+    String formula = 'ohlc',
   }) {
     send({
       'action': 'backtest',
@@ -277,6 +278,7 @@ class WsService {
         'fill_on_next_open': fillOnNextOpen,
         'indicators': indicators ?? [],
         'speed_ms': speedMs,
+        'formula': formula,
       },
     });
   }

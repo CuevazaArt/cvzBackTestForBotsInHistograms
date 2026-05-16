@@ -1,7 +1,7 @@
 # docker-compose.yml — local dev / smoke test stack for cvz-backtester.
 #
 # Usage:
-#   docker compose up --build         # boots FastAPI on http://localhost:8000
+#   docker compose up --build         # boots FastAPI on http://localhost:8002
 #   docker compose exec backend \
 #       python -m pytest backtester/tests/ -q   # run tests inside the image
 #   docker compose down               # stop and remove containers
@@ -18,7 +18,7 @@ services:
     container_name: cvz-backtester-backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8002:8002"
     env_file:
       - path: .env
         required: false
@@ -31,7 +31,7 @@ services:
       # Optional: persist HTML report exports / experiment outputs.
       - ./backtester/results:/app/backtester/results
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/healthz', timeout=3).status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3

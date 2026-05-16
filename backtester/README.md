@@ -94,7 +94,7 @@ instalar Python local.
 # Build + run (la primera vez tarda ~1–2 min; las siguientes usan cache).
 docker-compose up --build
 
-# La API queda en http://localhost:8000 — pega el WebSocket /ws/runs/{id}
+# La API queda en http://localhost:8002 — pega el WebSocket /ws/runs/{id}
 # desde la app de Flutter apuntando a esa URL.
 ```
 

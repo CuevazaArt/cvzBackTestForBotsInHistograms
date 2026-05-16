@@ -10,6 +10,7 @@ class ChartWebViewController {
   void _detach() => _state = null;
 
   void addCandle(Map<String, dynamic> data) => _state?._callJs('addCandle', data);
+  void setCandles(List<Map<String, dynamic>> data) => _state?._callJs('setCandles', data);
   void addTradeMarker(Map<String, dynamic> data) => _state?._callJs('addTradeMarker', data);
   void addEquityPoint(Map<String, dynamic> data) => _state?._callJs('addEquityPoint', data);
   void clear() => _state?._callJs('clearChart', {});

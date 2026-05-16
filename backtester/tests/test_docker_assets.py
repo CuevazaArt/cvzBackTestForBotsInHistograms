@@ -49,10 +49,10 @@ def test_dockerfile_uses_python_312_slim() -> None:
         )
 
 
-def test_dockerfile_exposes_port_8000() -> None:
-    """Container must expose the FastAPI port 8000."""
+def test_dockerfile_exposes_port_8002() -> None:
+    """Container must expose the FastAPI port 8002."""
     dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert "EXPOSE 8000" in dockerfile, "Dockerfile must contain `EXPOSE 8000`"
+    assert "EXPOSE 8002" in dockerfile, "Dockerfile must contain `EXPOSE 8002`"
 
 
 def test_dockerfile_runs_as_non_root_appuser() -> None:
@@ -76,7 +76,7 @@ def test_compose_defines_backend_service_with_volume_and_ports() -> None:
     """docker-compose must wire the backend service per S5 spec."""
     compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "backend:" in compose, "compose must define a `backend` service"
-    assert '"8000:8000"' in compose, "compose must publish port 8000:8000"
+    assert '"8002:8002"' in compose, "compose must publish port 8002:8002"
     assert (
         "./backtester/data:/app/backtester/data" in compose
     ), "compose must mount ./backtester/data as a persistent volume"
