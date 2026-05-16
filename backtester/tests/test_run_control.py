@@ -18,11 +18,17 @@ from backtester.core.run_control import RunController
 # ---------------------------------------------------------------------------
 
 
-def _run_wait_in_thread(ctrl: RunController) -> tuple[bool, float]:
-    """Call wait_if_paused() in a background thread; return (cancelled, elapsed)."""
-    result: list = []
+def _run_wait_in_thread(
+    ctrl: RunController,
+) -> tuple[threading.Thread, list[tuple[bool, float]]]:
+    """Call wait_if_paused() in a background thread.
 
-    def _worker():
+    Returns the started thread and a list that will receive ``(cancelled, elapsed)``
+    once ``wait_if_paused`` returns. Tests join the thread and inspect the list.
+    """
+    result: list[tuple[bool, float]] = []
+
+    def _worker() -> None:
         t0 = time.monotonic()
         cancelled = ctrl.wait_if_paused()
         result.append((cancelled, time.monotonic() - t0))

@@ -7,7 +7,7 @@ restarts. The legacy `JobRegistry` name is preserved for backwards compat.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Optional, Protocol, cast
 
 from backtester.core.job_store import Job, JobStore
 
@@ -35,9 +35,14 @@ class JobRegistry:
     def __init__(self, db_path: Path | str | None = None) -> None:
         # In-memory fallback for unit tests that pass no path.
         path = db_path if db_path is not None else ":memory:"
-        self._store: _JobStoreLike = (
+        store: object = (
             JobStore(path) if path != ":memory:" else _InMemoryJobStore()
         )
+        # ``JobStore`` and ``_InMemoryJobStore`` both satisfy ``_JobStoreLike``
+        # structurally; mypy can't unify them through the conditional expression
+        # because ``_InMemoryJobStore`` is forward-referenced (defined below),
+        # so we narrow the type explicitly here.
+        self._store: _JobStoreLike = cast(_JobStoreLike, store)
 
     # ── delegation ───────────────────────────────────────────────
 
