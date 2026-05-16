@@ -194,9 +194,7 @@ class WsService {
     if (status.value == WsStatus.disconnected) return;
     status.value = WsStatus.disconnected;
     // ignore: use_null_aware_elements
-    _controller?.add(
-      WsEvent(WsEventType.disconnected, {if (error != null) 'message': error}),
-    );
+    _controller?.add(WsEvent(WsEventType.disconnected, {'message': ?error}));
 
     if (_wantConnected && _reconnectAttempts < maxReconnectAttempts) {
       _scheduleReconnect();
@@ -298,7 +296,8 @@ class WsService {
   /// Change the wall-clock playback speed.
   /// [speedMs] is milliseconds per candle: 200=0.5x, 100=1x, 50=2x,
   /// 20=5x, 10=10x, 0=Max (no delay).
-  void setSpeed(int speedMs) => send({'action': 'set_speed', 'speed_ms': speedMs});
+  void setSpeed(int speedMs) =>
+      send({'action': 'set_speed', 'speed_ms': speedMs});
 
   /// Cancel (stop) the active backtest run.
   void cancelRun() => send({'action': 'cancel'});
@@ -335,8 +334,7 @@ class WsService {
         'slippage_pct': slippagePct,
         'validation_split_pct': validationSplitPct,
         'min_trades': minTrades,
-        if (maxDrawdownPctLimit != null)
-          'max_drawdown_pct_limit': maxDrawdownPctLimit,
+        'max_drawdown_pct_limit': ?maxDrawdownPctLimit,
       },
     });
   }

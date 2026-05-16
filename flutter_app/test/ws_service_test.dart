@@ -68,8 +68,8 @@ void main() {
     expect(WsService.reconnectDelayMs(3), 2000);
     expect(WsService.reconnectDelayMs(4), 4000);
     expect(WsService.reconnectDelayMs(5), 8000);
-    expect(WsService.reconnectDelayMs(6), 15000);   // 16 000 → clamped
-    expect(WsService.reconnectDelayMs(10), 15000);  // far beyond cap
+    expect(WsService.reconnectDelayMs(6), 15000); // 16 000 → clamped
+    expect(WsService.reconnectDelayMs(10), 15000); // far beyond cap
   });
 
   test('first reconnect delay is under 1 second', () {
@@ -88,7 +88,9 @@ void main() {
     fakeAsync((async) {
       final svc = WsService();
       // Fill the buffer.
-      for (int i = 0; i < 5; i++) svc.send({'i': i});
+      for (int i = 0; i < 5; i++) {
+        svc.send({'i': i});
+      }
       expect(svc.pendingOutbound, 5);
 
       // Disconnect (sync + cancels reconnect timer if any).

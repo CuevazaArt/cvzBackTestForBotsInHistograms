@@ -108,12 +108,15 @@ class _BacktestScreenState extends State<BacktestScreen> {
   @override
   void didUpdateWidget(BacktestScreen old) {
     super.didUpdateWidget(old);
-    if (old.defaultCash != widget.defaultCash)
+    if (old.defaultCash != widget.defaultCash) {
       _initialCash = widget.defaultCash;
-    if (old.defaultFeePct != widget.defaultFeePct)
+    }
+    if (old.defaultFeePct != widget.defaultFeePct) {
       _takerFeePct = widget.defaultFeePct;
-    if (old.defaultSlippagePct != widget.defaultSlippagePct)
+    }
+    if (old.defaultSlippagePct != widget.defaultSlippagePct) {
       _slippagePct = widget.defaultSlippagePct;
+    }
     if (widget.initialApply != null &&
         widget.initialApply != old.initialApply) {
       _consumeInitialApply(widget.initialApply!);
@@ -268,8 +271,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   void _maybeOfferDataManager(String message) {
     final lower = message.toLowerCase();
-    if (!lower.contains('no candles') && !lower.contains('download first'))
+    if (!lower.contains('no candles') && !lower.contains('download first')) {
       return;
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(

@@ -104,7 +104,11 @@ class _OptimizationHeatmapState extends State<OptimizationHeatmap> {
             Expanded(
               child: Row(
                 children: [
-                  _AxisLabels(values: ys.reversed.toList(), cellSize: cellH, axis: Axis.vertical),
+                  _AxisLabels(
+                    values: ys.reversed.toList(),
+                    cellSize: cellH,
+                    axis: Axis.vertical,
+                  ),
                   Expanded(
                     child: Column(
                       children: [
@@ -115,18 +119,24 @@ class _OptimizationHeatmapState extends State<OptimizationHeatmap> {
                               onTapUp: (d) {
                                 final xi = (d.localPosition.dx / cellW).floor();
                                 final yi =
-                                    ys.length - 1 - (d.localPosition.dy / cellH).floor();
+                                    ys.length -
+                                    1 -
+                                    (d.localPosition.dy / cellH).floor();
                                 if (xi < 0 || xi >= xs.length) return;
                                 if (yi < 0 || yi >= ys.length) return;
                                 final trial = cells[yi][xi];
-                                if (trial != null) widget.onCellTap?.call(trial);
+                                if (trial != null)
+                                  widget.onCellTap?.call(trial);
                               },
                               child: CustomPaint(
-                                size: Size(cellW * xs.length, cellH * ys.length),
+                                size: Size(
+                                  cellW * xs.length,
+                                  cellH * ys.length,
+                                ),
                                 painter: _HeatmapPainter(
                                   cells: cells,
-                                  vMin: vMin!,
-                                  vMax: vMax!,
+                                  vMin: vMin,
+                                  vMax: vMax,
                                   metric: widget.metric,
                                   cellW: cellW,
                                   cellH: cellH,
@@ -136,7 +146,11 @@ class _OptimizationHeatmapState extends State<OptimizationHeatmap> {
                             ),
                           ),
                         ),
-                        _AxisLabels(values: xs, cellSize: cellW, axis: Axis.horizontal),
+                        _AxisLabels(
+                          values: xs,
+                          cellSize: cellW,
+                          axis: Axis.horizontal,
+                        ),
                       ],
                     ),
                   ),
@@ -167,7 +181,11 @@ class _AxisLabels extends StatelessWidget {
   final List<num> values;
   final double cellSize;
   final Axis axis;
-  const _AxisLabels({required this.values, required this.cellSize, required this.axis});
+  const _AxisLabels({
+    required this.values,
+    required this.cellSize,
+    required this.axis,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -187,7 +205,10 @@ class _AxisLabels extends StatelessWidget {
     ];
     return axis == Axis.horizontal
         ? Row(mainAxisAlignment: MainAxisAlignment.start, children: children)
-        : Column(mainAxisAlignment: MainAxisAlignment.start, children: children);
+        : Column(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: children,
+          );
   }
 
   static String _format(num v) =>
@@ -224,7 +245,12 @@ class _HeatmapPainter extends CustomPainter {
       final invY = rows - 1 - yi;
       for (int xi = 0; xi < cols; xi++) {
         final t = cells[invY][xi];
-        final rect = Rect.fromLTWH(xi * cellW, yi * cellH, cellW - 1, cellH - 1);
+        final rect = Rect.fromLTWH(
+          xi * cellW,
+          yi * cellH,
+          cellW - 1,
+          cellH - 1,
+        );
         final paint = Paint();
         if (t == null) {
           paint.color = Colors.grey.shade800.withValues(alpha: 0.3);

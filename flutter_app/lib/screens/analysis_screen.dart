@@ -1424,7 +1424,7 @@ class _RobustnessTabState extends State<_RobustnessTab> {
             children: [
               Expanded(
                 child: DropdownButtonFormField<String>(
-                  value: _stressRunId,
+                  initialValue: _stressRunId,
                   isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Stress run',

@@ -260,8 +260,9 @@ class ApiService {
       Uri.parse('$baseUrl/api/jobs/$jobId/cancel'),
       headers: _authHeaders,
     );
-    if (res.statusCode != 200)
+    if (res.statusCode != 200) {
       throw Exception('HTTP ${res.statusCode}: ${res.body}');
+    }
     return JobStatus.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
@@ -340,8 +341,7 @@ class ApiService {
         'slippage_pct': slippagePct,
         'validation_split_pct': validationSplitPct,
         'min_trades': minTrades,
-        if (maxDrawdownPctLimit != null)
-          'max_drawdown_pct_limit': maxDrawdownPctLimit,
+        'max_drawdown_pct_limit': ?maxDrawdownPctLimit,
       }),
     );
     if (res.statusCode == 422) {
@@ -483,8 +483,8 @@ class ApiService {
     final body = <String, dynamic>{
       'symbol': symbol,
       'timeframe': timeframe,
-      if (startMs != null) 'start_ms': startMs,
-      if (endMs != null) 'end_ms': endMs,
+      'start_ms': ?startMs,
+      'end_ms': ?endMs,
     };
     final res = await http.post(
       Uri.parse('$baseUrl/api/data/validate'),
@@ -530,15 +530,15 @@ class ApiService {
       'param_ranges': paramRanges,
       'train_size': trainSize,
       'test_size': testSize,
-      if (stepSize != null) 'step_size': stepSize,
+      'step_size': ?stepSize,
       'anchored': anchored,
       'trials_per_window': trialsPerWindow,
       'objective_metric': objectiveMetric,
       'initial_cash': initialCash,
       'taker_fee_pct': takerFeePct,
       'slippage_pct': slippagePct,
-      if (startMs != null) 'start_ms': startMs,
-      if (endMs != null) 'end_ms': endMs,
+      'start_ms': ?startMs,
+      'end_ms': ?endMs,
     };
     final res = await http.post(
       Uri.parse('$baseUrl/api/analysis/walk-forward'),
@@ -564,11 +564,11 @@ class ApiService {
     double initialEquity = 10000.0,
   }) async {
     final body = <String, dynamic>{
-      if (runId != null) 'run_id': runId,
-      if (tradePnls != null) 'trade_pnls': tradePnls,
+      'run_id': ?runId,
+      'trade_pnls': ?tradePnls,
       'trials': trials,
       'method': method,
-      if (seed != null) 'seed': seed,
+      'seed': ?seed,
       'initial_equity': initialEquity,
     };
     final res = await http.post(
@@ -590,10 +590,7 @@ class ApiService {
     required List<Map<String, dynamic>> candidates,
     Map<String, double>? weights,
   }) async {
-    final body = {
-      'candidates': candidates,
-      if (weights != null) 'weights': weights,
-    };
+    final body = {'candidates': candidates, 'weights': ?weights};
     final res = await http.post(
       Uri.parse('$baseUrl/api/analysis/robustness'),
       headers: _jsonHeaders,
@@ -714,8 +711,9 @@ class ApiError implements Exception {
   String get friendlyMessage {
     if (statusCode == 404) return 'Resource not found (404).';
     if (statusCode == 401 || statusCode == 403) return 'Not authorized.';
-    if (statusCode >= 500)
+    if (statusCode >= 500) {
       return 'Server error ($statusCode). Try again or check API logs.';
+    }
     return 'Request failed ($statusCode).';
   }
 
