@@ -76,13 +76,21 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
             elif action == "backtest":
                 # Reject concurrent runs on the same socket.
-                if active_controller is not None and not active_controller.is_cancelled:
+                # NOTE: We check the asyncio task — not just the controller's
+                # is_cancelled flag — because cancel() flips that flag instantly
+                # while the engine thread keeps running until its next
+                # wait_if_paused checkpoint. Allowing a new backtest in that
+                # window would race two engine threads on the same WS sink
+                # and let the older task's `finally` clobber the new
+                # active_controller back to None.
+                if _run_task is not None and not _run_task.done():
                     _send(
                         "error",
                         {
                             "message": (
                                 "A backtest is already running on this connection. "
-                                "Send 'cancel' first or wait for it to finish."
+                                "Send 'cancel' first and wait for the 'cancelled' "
+                                "event before starting a new run."
                             )
                         },
                     )
@@ -139,7 +147,18 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 )
 
                 # Build controller — initial speed from payload or default 100 ms.
-                speed_ms: int = int(msg.get("speed_ms", RunController.DEFAULT_SPEED_MS))
+                # Accept ``speed_ms`` either at the top level of the message
+                # (programmatic clients) or nested inside ``config`` (Flutter
+                # client). BacktestRequest silently drops unknown fields, so we
+                # have to read it from the raw msg before any consumption.
+                _raw_speed = msg.get("speed_ms")
+                if _raw_speed is None and isinstance(msg.get("config"), dict):
+                    _raw_speed = msg["config"].get("speed_ms")
+                speed_ms: int = (
+                    int(_raw_speed)
+                    if _raw_speed is not None
+                    else RunController.DEFAULT_SPEED_MS
+                )
                 controller = RunController()
                 controller.set_speed(speed_ms)
                 active_controller = controller
@@ -187,7 +206,8 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                             symbol=req.symbol.upper(),
                             timeframe=req.timeframe,
                             indicator_specs=[
-                                {"name": i.name, **i.to_kwargs()} for i in req.indicators
+                                {"name": i.name, **i.to_kwargs()}
+                                for i in req.indicators
                             ],
                             bot_names=bot_names,
                         )
@@ -200,8 +220,10 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                                 _last_result,
                             )
                     finally:
-                        # Clear controller so a new run can start.
-                        active_controller = None
+                        # Only clear if we still own the slot — a later run
+                        # may have replaced us if the loop allowed it.
+                        if active_controller is controller:
+                            active_controller = None
 
                 _run_task = asyncio.create_task(_do_run())
 
@@ -235,7 +257,10 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     try:
                         speed_ms_val = int(msg["speed_ms"])
                     except (KeyError, ValueError, TypeError):
-                        _send("error", {"message": "set_speed requires integer field 'speed_ms'"})
+                        _send(
+                            "error",
+                            {"message": "set_speed requires integer field 'speed_ms'"},
+                        )
                         continue
                     active_controller.set_speed(speed_ms_val)
                     _send("speed_changed", {"speed_ms": speed_ms_val})
