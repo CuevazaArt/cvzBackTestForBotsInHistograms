@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:backtester_shell/screens/backtest_screen.dart';
 import 'package:backtester_shell/services/ws_service.dart';
 import 'package:backtester_shell/services/api_service.dart';
-import 'package:webview_windows/webview_windows.dart';
 
 class MockApiService extends ApiService {
   MockApiService() : super(baseUrl: 'http://localhost');
