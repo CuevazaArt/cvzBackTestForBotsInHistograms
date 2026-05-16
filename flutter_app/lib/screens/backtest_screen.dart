@@ -19,7 +19,9 @@ import 'package:backtester_shell/services/ui_state_service.dart';
 enum _RunState { idle, running, paused, done }
 
 /// Speed presets: label → speed_ms value.
+/// Higher ms = slower playback (delay between candles).
 const _speedPresets = <String, int>{
+  '0.2x': 500,
   '0.5x': 200,
   '1x': 100,
   '2x': 50,
@@ -316,7 +318,15 @@ class _BacktestScreenState extends State<BacktestScreen> {
   }
 
   Future<void> _fetchInitialChartData() async {
-    if (_selectedSymbol == null || _runState == _RunState.running || !_chartCtrl.isReady) return;
+    if (_selectedSymbol == null ||
+        _runState == _RunState.running ||
+        !_chartCtrl.isReady) {
+      return;
+    }
+    // Always clear first so the user sees the chart switch immediately — and
+    // stale data from the previous symbol/timeframe is never left on screen.
+    _chartCtrl.clear();
+    _chartCtrl.setChartFormula(_selectedFormula, brickSize: _brickSize);
     try {
       final candles = await widget.apiService.getCandles(
         symbol: _selectedSymbol!,
@@ -325,13 +335,23 @@ class _BacktestScreenState extends State<BacktestScreen> {
         endMs: _parseDateToMs(_endDateIso, endOfDay: true),
         limit: 1500,
       );
-      if (mounted && candles.isNotEmpty) {
-        _chartCtrl.clear();
-        _chartCtrl.setChartFormula(_selectedFormula, brickSize: _brickSize);
-        _chartCtrl.setCandles(candles);
+      if (!mounted) return;
+      // setCandles with [] makes the chart show its "no candles in range"
+      // empty state instead of stale data.
+      _chartCtrl.setCandles(candles);
+      if (candles.isEmpty) {
+        setState(() =>
+            _statusText = 'No data for $_selectedSymbol ($_selectedTimeframe) in selected range.');
+      } else {
+        setState(() => _statusText =
+            'Loaded ${candles.length} candles — ready to run backtest.');
       }
     } catch (e) {
       debugPrint('Error fetching initial chart data: $e');
+      if (mounted) {
+        setState(() => _statusText =
+            'Failed to load $_selectedSymbol ($_selectedTimeframe): ${e.toString().split(":").first}. Try downloading the range.');
+      }
     }
   }
 
