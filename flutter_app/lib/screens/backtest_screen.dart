@@ -13,6 +13,7 @@ import 'package:backtester_shell/widgets/results_panel.dart';
 import 'package:backtester_shell/widgets/trades_table.dart';
 import 'package:backtester_shell/widgets/mini_weight_chart.dart';
 import 'package:backtester_shell/widgets/validation_error_dialog.dart';
+import 'package:backtester_shell/services/ui_state_service.dart';
 
 /// Playback transport state for a backtest run.
 enum _RunState { idle, running, paused, done }
@@ -56,6 +57,7 @@ class BacktestScreen extends StatefulWidget {
 class _BacktestScreenState extends State<BacktestScreen> {
   WsService get _ws => widget.wsService;
   final PresetsService _presets = PresetsService();
+  final UiStateService _uiStateService = UiStateService();
   final ChartWebViewController _chartCtrl = ChartWebViewController();
 
   List<SymbolEntry> _symbols = [];
@@ -96,6 +98,31 @@ class _BacktestScreenState extends State<BacktestScreen> {
     _initialCash = widget.defaultCash;
     _takerFeePct = widget.defaultFeePct;
     _slippagePct = widget.defaultSlippagePct;
+
+    final saved = _uiStateService.load();
+    if (saved.isNotEmpty) {
+      _selectedSymbol = saved['symbol'] as String?;
+      _selectedTimeframe = saved['timeframe'] as String? ?? '1h';
+      _selectedFormula = saved['formula'] as String? ?? 'ohlc';
+      _selectedBots = (saved['bots'] as List?)?.cast<String>() ?? [];
+      _selectedSpeedMs = saved['speed_ms'] as int? ?? 100;
+      _startDateIso = saved['start_date'] as String?;
+      _endDateIso = saved['end_date'] as String?;
+      _brickSize = (saved['brick_size'] as num?)?.toDouble() ?? 10.0;
+      
+      if (saved['bots_params'] != null) {
+        final bp = saved['bots_params'] as Map;
+        for (final k in bp.keys) {
+          _botsParams[k as String] = Map<String, dynamic>.from(bp[k] as Map);
+        }
+      }
+      if (saved['indicators'] != null) {
+        _selectedIndicators = List<Map<String, dynamic>>.from(
+          (saved['indicators'] as List).map((e) => Map<String, dynamic>.from(e as Map))
+        );
+      }
+    }
+
     _loadCatalog();
     _wsSub = _ws.events.listen(_onWsEvent);
     if (widget.initialApply != null) {
@@ -160,7 +187,16 @@ class _BacktestScreenState extends State<BacktestScreen> {
           _symbols = syms;
           _bots = bots;
           _catalogError = null;
+          if (_symbols.isNotEmpty && _selectedSymbol == null) {
+            _selectedSymbol = _symbols.first.symbol;
+          }
+          final availableBots = bots.map((b) => b.name).toList()..sort();
+          if (availableBots.isNotEmpty && _selectedBots.isEmpty) {
+            _selectedBots = [availableBots.first];
+            _fetchBotParams(availableBots.first);
+          }
         });
+        await _fetchInitialChartData();
       }
     } catch (e) {
       if (mounted) {
@@ -191,7 +227,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
   }
 
   Future<void> _fetchInitialChartData() async {
-    if (_selectedSymbol == null || _runState == _RunState.running) return;
+    if (_selectedSymbol == null || _runState == _RunState.running || !_chartCtrl.isReady) return;
     try {
       final candles = await widget.apiService.getCandles(
         symbol: _selectedSymbol!,
@@ -353,7 +389,8 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   int? _parseDateToMs(String? isoDate, {bool endOfDay = false}) {
     if (isoDate == null || isoDate.trim().isEmpty) return null;
-    final dt = DateTime.tryParse(isoDate.trim());
+    final normalizedStr = isoDate.trim().replaceAll(' ', '-').replaceAll('/', '-');
+    final dt = DateTime.tryParse(normalizedStr);
     if (dt == null) return null;
     final normalized = endOfDay
         ? DateTime(dt.year, dt.month, dt.day, 23, 59, 59, 999)
@@ -682,7 +719,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
   }
 
   void _applyPreset(BacktestPreset p) {
-    setState(() {
+    _updateState(() {
       _selectedSymbol = p.symbol;
       _selectedTimeframe = p.timeframe;
       _initialCash = p.initialCash;
@@ -709,6 +746,26 @@ class _BacktestScreenState extends State<BacktestScreen> {
 
   // dispose is handled near initState
 
+  void _saveUiState() {
+    _uiStateService.save({
+      'symbol': _selectedSymbol,
+      'timeframe': _selectedTimeframe,
+      'formula': _selectedFormula,
+      'bots': _selectedBots,
+      'speed_ms': _selectedSpeedMs,
+      'start_date': _startDateIso,
+      'end_date': _endDateIso,
+      'brick_size': _brickSize,
+      'bots_params': _botsParams,
+      'indicators': _selectedIndicators,
+    });
+  }
+
+  void _updateState(VoidCallback fn) {
+    setState(fn);
+    _saveUiState();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -733,20 +790,20 @@ class _BacktestScreenState extends State<BacktestScreen> {
           wsError: _wsError,
           wsStatus: _ws.status,
           onSymbolChanged: (v) {
-            setState(() => _selectedSymbol = v);
+            _updateState(() => _selectedSymbol = v);
             _fetchInitialChartData();
           },
           onTimeframeChanged: (v) {
-            setState(() => _selectedTimeframe = v);
+            _updateState(() => _selectedTimeframe = v);
             _fetchInitialChartData();
           },
           onFormulaChanged: (v) {
-            setState(() => _selectedFormula = v);
+            _updateState(() => _selectedFormula = v);
             _chartCtrl.setChartFormula(v, brickSize: _brickSize);
           },
           brickSize: _brickSize,
           onBrickSizeChanged: (v) {
-            setState(() => _brickSize = v);
+            _updateState(() => _brickSize = v);
             if (_selectedFormula == 'renko') {
               _chartCtrl.setChartFormula(
                 _selectedFormula,
@@ -755,28 +812,28 @@ class _BacktestScreenState extends State<BacktestScreen> {
             }
           },
           onBotsChanged: (v) {
-            setState(() => _selectedBots = v);
+            _updateState(() => _selectedBots = v);
             for (final b in v) {
               _fetchBotParams(b);
             }
           },
-          onCashChanged: (v) => setState(() => _initialCash = v),
-          onFeeChanged: (v) => setState(() => _takerFeePct = v),
-          onSlippageChanged: (v) => setState(() => _slippagePct = v),
-          onFillOnNextOpenChanged: (v) => setState(() => _fillOnNextOpen = v),
+          onCashChanged: (v) => _updateState(() => _initialCash = v),
+          onFeeChanged: (v) => _updateState(() => _takerFeePct = v),
+          onSlippageChanged: (v) => _updateState(() => _slippagePct = v),
+          onFillOnNextOpenChanged: (v) => _updateState(() => _fillOnNextOpen = v),
           onStartDateChanged: (v) {
-            setState(() => _startDateIso = v);
+            _updateState(() => _startDateIso = v);
             _fetchInitialChartData();
           },
           onEndDateChanged: (v) {
-            setState(() => _endDateIso = v);
+            _updateState(() => _endDateIso = v);
             _fetchInitialChartData();
           },
-          onIndicatorsChanged: (v) => setState(() => _selectedIndicators = v),
+          onIndicatorsChanged: (v) => _updateState(() => _selectedIndicators = v),
           botParamSpecs: _botParamSpecs,
           botsParamValues: _botsParams,
           onBotParamChanged: (botName, params) =>
-              setState(() => _botsParams[botName] = params),
+              _updateState(() => _botsParams[botName] = params),
           onRun: _runBacktest,
           onPauseResume: () {
             if (_runState == _RunState.running) {
@@ -788,7 +845,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           onStep: _ws.step,
           onStop: _ws.cancelRun,
           onSpeedChanged: (ms) {
-            setState(() => _selectedSpeedMs = ms);
+            _updateState(() => _selectedSpeedMs = ms);
             if (_runState == _RunState.running ||
                 _runState == _RunState.paused) {
               _ws.setSpeed(ms);
@@ -862,6 +919,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
           child: ChartWebView(
             controller: _chartCtrl,
             chartUrl: widget.chartUrl,
+            onReady: _fetchInitialChartData,
           ),
         ),
         const Divider(height: 1),
@@ -2054,10 +2112,10 @@ class _DownloadDialog extends StatefulWidget {
 class _DownloadDialogState extends State<_DownloadDialog> {
   final _symbolCtrl = TextEditingController(text: 'BTCUSDT');
   String _tf = '1h';
-  final _fromCtrl = TextEditingController(text: '2024-01-01');
-  final _toCtrl = TextEditingController(text: '2024-12-31');
-  final _yearCtrl = TextEditingController(text: '2024');
-  final _monthCtrl = TextEditingController(text: '1');
+  final _fromCtrl = TextEditingController(text: '${DateTime.now().year}-01-01');
+  final _toCtrl = TextEditingController(text: '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}');
+  final _yearCtrl = TextEditingController(text: '2025');
+  final _monthCtrl = TextEditingController(text: 'all');
 
   bool _useZip = true;
   bool _loading = false;

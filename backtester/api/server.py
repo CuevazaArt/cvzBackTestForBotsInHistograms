@@ -39,7 +39,8 @@ _LOG = logging.getLogger("backtester.api.server")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.settings = load_api_settings()
-    app.state.ctx = AppContext.build()
+    is_test = getattr(app.state, "is_test", False)
+    app.state.ctx = AppContext.build(duckdb_read_only=is_test)
     _LOG.info(
         "AppContext initialized: %s | auth=%s",
         app.state.ctx.base_dir,
@@ -48,8 +49,9 @@ async def lifespan(app: FastAPI):
     yield
 
 
-def create_app() -> FastAPI:
+def create_app(is_test: bool = False) -> FastAPI:
     app = FastAPI(title="Backtester API", version="0.1.0", lifespan=lifespan)
+    app.state.is_test = is_test
 
     settings = load_api_settings()
     allow_origins = ["*"] if settings.allow_all_cors else settings.cors_allow_origins

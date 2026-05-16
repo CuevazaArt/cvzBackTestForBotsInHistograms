@@ -93,15 +93,16 @@ class BinanceDownloader:
         "1d": 1440,
     }
 
-    def __init__(self, db_path: Path, api_key: Optional[str] = None) -> None:
+    def __init__(self, db_path: Path, api_key: Optional[str] = None, read_only: bool = False) -> None:
         self.db_path = Path(db_path)
         if self.db_path.suffix == ".db":
             self.db_path = self.db_path.with_suffix(".duckdb")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.api_key = api_key
         # Shared connection for thread safety
-        self.conn = duckdb.connect(str(self.db_path))
-        self._init_db()
+        self.conn = duckdb.connect(str(self.db_path), read_only=read_only)
+        if not read_only:
+            self._init_db()
 
     def _init_db(self) -> None:
         """Create candles table if not exists."""

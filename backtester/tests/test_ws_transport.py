@@ -63,7 +63,7 @@ def ws_app():
     downloader = BinanceDownloader(root / "data" / "candles.duckdb")
     downloader._save_batch("TESTUSDT", "1h", _synthetic_klines(30))
 
-    app = create_app()
+    app = create_app(is_test=True)
     app.state.ctx = AppContext(
         base_dir=root,
         downloader=downloader,

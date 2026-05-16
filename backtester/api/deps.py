@@ -41,16 +41,15 @@ class AppContext:
             self.result_store = ResultStore(data_dir / "results.sqlite")
 
     @classmethod
-    def build(cls, base_dir: Path | None = None) -> "AppContext":
+    def build(cls, base_dir: Path | None = None, duckdb_read_only: bool = False) -> "AppContext":
         root = Path(base_dir) if base_dir else Path(__file__).resolve().parents[1]
         data_dir = root / "data"
         vault_dir = root / ".vault"
         data_dir.mkdir(parents=True, exist_ok=True)
-        vault_dir.mkdir(parents=True, exist_ok=True)
-
+        db_path = ":memory:" if duckdb_read_only else (data_dir / "candles.db")
         return cls(
             base_dir=root,
-            downloader=BinanceDownloader(data_dir / "candles.db"),
+            downloader=BinanceDownloader(db_path, read_only=False),
             credentials=CredentialManager(vault_dir),
             bot_registry=dict(BOT_REGISTRY),
             jobs=JobRegistry(data_dir / "jobs.sqlite"),

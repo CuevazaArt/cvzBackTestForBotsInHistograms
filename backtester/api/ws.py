@@ -120,8 +120,8 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     try:
                         bot = bot_cls(**b.params)
                         bots_instances.append(bot)
-                    except TypeError as e:
-                        _send("error", {"message": f"Invalid params for {b.name}: {e}"})
+                    except Exception as e:
+                        _send("error", {"message": f"Error initializing bot {b.name}: {e}"})
                         has_error = True
                         break
 

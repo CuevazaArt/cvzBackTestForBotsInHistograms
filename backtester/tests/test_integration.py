@@ -66,7 +66,7 @@ def app_with_synthetic_data():
     klines = _synthetic_klines(300)
     downloader._save_batch("TESTUSDT", "1h", klines)
 
-    app = create_app()
+    app = create_app(is_test=True)
     # Replace the lifespan-built context with our test context.
     from backtester.api.deps import BOT_REGISTRY
     from backtester.api.jobs import JobRegistry

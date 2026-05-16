@@ -1,0 +1,7 @@
+{
+  "backendUrl": "http://127.0.0.1:8002",
+  "apiToken": "",
+  "defaultCash": 10000.0,
+  "defaultFeePct": 0.1,
+  "defaultSlippagePct": 0.05
+}

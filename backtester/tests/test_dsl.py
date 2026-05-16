@@ -290,7 +290,7 @@ def test_validate_endpoint_accepts_valid_dsl():
 
     from backtester.api.server import create_app
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(is_test=True)) as client:
         res = client.post(
             "/api/bots/dsl/validate",
             json={"dsl_text": _VALID_DSL},
@@ -317,7 +317,7 @@ def test_validate_endpoint_returns_structured_error():
     exit:
       long: foo < 0
     """
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(is_test=True)) as client:
         res = client.post("/api/bots/dsl/validate", json={"dsl_text": bad_dsl})
     assert res.status_code == 200
     body = res.json()

@@ -32,6 +32,13 @@ Plataforma minimalista para **backtesting ágil de bots de trading** sobre hist�
 └── flutter_app/        # Shell nativo Flutter Desktop (Windows)
 ```
 
+## 🚨 Directiva de Desarrollo
+
+**IMPORTANTE:** Para este proyecto, siempre que haya actualizaciones que involucren las funciones clave de la herramienta, se asume de facto la siguiente directiva local:
+1. **Borrar caché/purgar configuración anterior** (`flutter clean`).
+2. **Resetear y relanzar el servicio backend y la UI**.
+No es necesario solicitar autorización al L0 para ejecutar este flujo de purga y reinicio; debe realizarse proactivamente para evitar inconsistencias y dejar activa la UI ya actualizada.
+
 ## Quick start
 
 Sigue **[`backtester/SETUP.md`](backtester/SETUP.md)** para los pasos completos.

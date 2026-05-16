@@ -81,7 +81,7 @@ def test_preset_persistence_across_instances(tmp_path):
 def client(tmp_path, monkeypatch):
     # Point AppContext at a tmp dir so we don't pollute backtester/data/.
     monkeypatch.chdir(tmp_path)
-    app = create_app()
+    app = create_app(is_test=True)
     with TestClient(app) as c:
         yield c
 
