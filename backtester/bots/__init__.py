@@ -1,5 +1,7 @@
 """Trading bots for backtesting."""
 
+from typing import Any, Callable
+
 from backtester.bots.bollinger_reversion import BollingerReversion
 from backtester.bots.bot_base import BotBase
 from backtester.bots.donchian_breakout import DonchianBreakout
@@ -10,7 +12,7 @@ from backtester.bots.grid_trading import GridTrading
 from backtester.bots.macd_cross import MACDCross
 from backtester.bots.rsi_reversion import RSIReversion
 
-BOT_REGISTRY: dict[str, type] = {
+BOT_REGISTRY: dict[str, Callable[..., Any]] = {
     "BollingerReversion": BollingerReversion,
     "DonchianBreakout": DonchianBreakout,
     "DorothyDCA": DorothyDCA,

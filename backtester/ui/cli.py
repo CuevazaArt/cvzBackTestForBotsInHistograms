@@ -3,14 +3,14 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional, cast
 
 from rich.console import Console
 from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
 
-from backtester.bots import BOT_REGISTRY
+from backtester.bots import BOT_REGISTRY, BotBase
 from backtester.core import (
     BinanceDownloader,
     BacktestEngine,
@@ -112,10 +112,10 @@ class BacktesterCLI:
             symbol, timeframe, bot_name, bot_class, params, candles_data
         )
 
-    def _edit_bot_params(self, bot_class: type) -> dict[str, Any]:
+    def _edit_bot_params(self, bot_class: Callable[..., Any]) -> dict[str, Any]:
         """Interactive parameter editor."""
-        spec = bot_class.param_spec()
-        params = {}
+        spec = cast(type[BotBase], bot_class).param_spec()
+        params: dict[str, Any] = {}
 
         console.print("\n[bold]Configure parameters:[/bold]")
 
@@ -145,7 +145,7 @@ class BacktesterCLI:
         symbol: str,
         timeframe: str,
         bot_name: str,
-        bot_class: type,
+        bot_class: Callable[..., Any],
         params: dict[str, Any],
         candles_data: list[dict],
     ) -> None:
@@ -232,7 +232,7 @@ class BacktesterCLI:
         )
         console.print(f"Trials:    [yellow]{trials}[/yellow]\n")
 
-        best_so_far = {"score": None}
+        best_so_far: dict[str, float | None] = {"score": None}
 
         with Progress(
             SpinnerColumn(),

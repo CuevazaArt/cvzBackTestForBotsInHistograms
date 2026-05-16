@@ -15,7 +15,7 @@ What changed in Phase 4:
 from typing import Any
 
 from backtester.bots.bot_base import BotBase
-from backtester.core.engine import Candle, Portfolio
+from backtester.core.engine import BacktestBot, Candle, Portfolio
 
 
 class EMACross(BotBase):
@@ -132,7 +132,7 @@ class EMACross(BotBase):
         if golden and not self._in_position:
             # Pick sizing method
             if self.use_risk_sizing:
-                qty = self.size_by_risk(
+                qty = BacktestBot.size_by_risk(
                     portfolio,
                     current_price=candle.close,
                     stop_pct=self.stop_loss_pct * 100,  # convert to %

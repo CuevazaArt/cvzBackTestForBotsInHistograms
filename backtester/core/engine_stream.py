@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from backtester.core.engine import (
     BacktestConfig,
@@ -66,7 +66,7 @@ class StreamingEngine(BacktestEngine):
     # ── helpers ───────────────────────────────────────────────────
 
     def _emit_candle(self, candle: Candle, indicators: dict | None = None) -> None:
-        payload = {
+        payload: dict[str, Any] = {
             "time": candle.timestamp_ms // 1000,
             "open": float(candle.open),
             "high": float(candle.high),
@@ -236,7 +236,10 @@ class StreamingEngine(BacktestEngine):
                     prev_closed[bi] = len(portfolio.closed_trades)
 
                 # ── 2. Global equity = sum of all portfolios ──────
-                total_equity = sum(p.total_equity(candle.close) for p in portfolios)
+                total_equity = sum(
+                    (p.total_equity(candle.close) for p in portfolios),
+                    start=Decimal("0"),
+                )
                 result.equity_curve.append(total_equity)
 
                 # ── 3. Throttled events ───────────────────────────
@@ -260,7 +263,10 @@ class StreamingEngine(BacktestEngine):
             # ── finalize ─────────────────────────────────────────
             result.trades = [t for p in portfolios for t in p.closed_trades]
             result.final_equity = (
-                sum(p.total_equity(candles[-1].close) for p in portfolios)
+                sum(
+                    (p.total_equity(candles[-1].close) for p in portfolios),
+                    start=Decimal("0"),
+                )
                 if candles
                 else Decimal("0")
             )

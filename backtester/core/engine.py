@@ -279,7 +279,9 @@ class BacktestResult:
         """
         initial = self.equity_curve[0] if self.equity_curve else Decimal("0")
         total_return = (
-            ((self.final_equity - initial) / initial * 100) if initial > 0 else 0
+            ((self.final_equity - initial) / initial * 100)
+            if initial > 0
+            else Decimal("0")
         )
 
         closed = [t for t in self.trades if t.exit_idx is not None]

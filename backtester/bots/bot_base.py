@@ -82,4 +82,4 @@ class BotBase(ABC):
 
     def max_sell_qty(self, portfolio: Portfolio) -> Decimal:
         """Total quantity held across all open positions."""
-        return sum(p.qty for p in portfolio.positions)
+        return sum((p.qty for p in portfolio.positions), start=Decimal("0"))

@@ -20,7 +20,9 @@ class JobRegistry:
     def __init__(self, db_path: Path | str | None = None) -> None:
         # In-memory fallback for unit tests that pass no path.
         path = db_path if db_path is not None else ":memory:"
-        self._store = JobStore(path) if path != ":memory:" else _InMemoryJobStore()
+        self._store: JobStore | _InMemoryJobStore = (
+            JobStore(path) if path != ":memory:" else _InMemoryJobStore()
+        )
 
     # ── delegation ───────────────────────────────────────────────
 

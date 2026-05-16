@@ -87,7 +87,7 @@ def equity_curve_dto(result: BacktestResult, candles: list) -> list[EquityPoint]
 
 
 def result_to_response(
-    bots: list[dict],
+    bots: list[Any],
     result: BacktestResult,
     candles: list,
 ) -> BacktestResponse:
