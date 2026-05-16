@@ -190,13 +190,13 @@ class BinanceDownloader:
         limit: int = 1000,
     ) -> list[list]:
         """Fetch a batch of candles from Binance API."""
-        params = {
+        params: dict[str, str | int] = {
             "symbol": symbol,
             "interval": timeframe,
             "startTime": start_time,
             "limit": min(limit, 1000),
         }
-        headers = {}
+        headers: dict[str, str] = {}
         if self.api_key:
             headers["X-MBX-APIKEY"] = self.api_key
 
