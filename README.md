@@ -1,5 +1,7 @@
 # cvzBackTestForBotsInHistograms
 
+> ⚠️ **Branch `master` deprecated as of 2026-05-17.** This branch carries the *replay + overlay* prototype (a.k.a. the "blue UI") and is no longer the active line of work. Use the `main` branch instead — it has the full 5-screen UI (Backtest, Analysis, Optimization, Settings) on port `8002`, with DuckDB storage, ZIP ingestion, optimizer, and the matured chart bridge. The `master` line is kept only as a reference snapshot (tag `v2.0-mvp-functional`). New features should target `main`.
+
 Plataforma minimalista para **backtesting ágil de bots de trading** sobre históricos de velas (Binance), inspirada en el Strategy Tester de MetaTrader 4/5 pero sin su pesadez.
 
 ## Stack
