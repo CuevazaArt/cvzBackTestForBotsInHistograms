@@ -18,6 +18,7 @@ class ChartWebViewController {
   void setCandles(List<Map<String, dynamic>> d)     => _state?._call('setCandles', d);
   void addTradeMarker(Map<String, dynamic> d)       => _state?._call('addTradeMarker', d);
   void addEquityPoint(Map<String, dynamic> d)       => _state?._call('addEquityPoint', d);
+  void addBotState(Map<String, dynamic> d)          => _state?._call('addBotState', d);
   void initIndicators(List<String> keys)            => _state?._call('initIndicators', keys);
   void initOscillators(List<String> keys)           => _state?._call('initOscillators', keys);
   void initBotSeries(List<String> botIds)           => _state?._call('initBotSeries', botIds);

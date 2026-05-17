@@ -239,6 +239,22 @@ class StreamingEngine(BacktestEngine):
                             },
                         )
                         orders = []
+                    # 1d. Surface bot internal state for the chart hover panel.
+                    # Bots opt in by assigning ``self.last_state = {...}`` inside
+                    # on_candle; bots that don't opt in (last_state is None) emit
+                    # nothing, so there's zero cost for legacy bots. Throttled to
+                    # the same cadence as candles so payload volume scales with
+                    # the chart's resolution, not the engine's tick rate.
+                    bot_state = getattr(bot, "last_state", None)
+                    if bot_state is not None and idx % self._candle_every == 0:
+                        self._emit(
+                            "bot_state",
+                            {
+                                "time": int(candle.timestamp_ms) // 1000,
+                                "bot_id": bot_id,
+                                "state": bot_state,
+                            },
+                        )
                     for raw in orders:
                         self._submit_order(
                             raw,

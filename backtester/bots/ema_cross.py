@@ -99,7 +99,17 @@ class EMACross(BotBase):
         # ── Warm-up phase: collect enough prices for SMA seed ────
         if not self._warmed_up:
             self._warmup_prices.append(price)
-            if len(self._warmup_prices) >= self.slow_ema:
+            warmup_done = len(self._warmup_prices)
+            # Surface warm-up progress so the chart hover panel doesn't go blank
+            # on the first slow_ema bars (otherwise the user sees an empty
+            # tooltip and assumes the bot is dead).
+            self.last_state = {
+                "phase": "warmup",
+                "warmup_pct": round(warmup_done / self.slow_ema * 100, 1),
+                "bars_seen": warmup_done,
+                "decision": "hold",
+            }
+            if warmup_done >= self.slow_ema:
                 # Seed both EMAs with their respective SMA
                 fast_prices = self._warmup_prices[-self.fast_ema :]
                 self._fast_ema = sum(fast_prices) / len(fast_prices)
@@ -122,12 +132,40 @@ class EMACross(BotBase):
         if self._in_position and not portfolio.positions:
             self._in_position = False
 
+        # ── Build the per-bar diagnostic state up-front so it's set even
+        # when no crossover fires. The decision label gets overwritten below
+        # if a golden / death cross happens this bar.
+        # spread_pct is the fast-vs-slow EMA gap as a % of price — a quick
+        # read on trend strength. Positive = fast > slow = uptrend.
+        spread_pct = (
+            ((self._fast_ema - self._slow_ema) / price * 100.0)
+            if price > 0 and self._fast_ema is not None and self._slow_ema is not None
+            else 0.0
+        )
+        self.last_state = {
+            "phase": "live",
+            "fast_ema": round(self._fast_ema, 4) if self._fast_ema is not None else None,
+            "slow_ema": round(self._slow_ema, 4) if self._slow_ema is not None else None,
+            "spread_pct": round(spread_pct, 4),
+            "in_position": self._in_position,
+            "decision": "hold",
+        }
+
         # ── Crossover signals ────────────────────────────────────
         if self._prev_fast is None or self._prev_slow is None:
             return orders
 
         golden = self._prev_fast <= self._prev_slow and self._fast_ema > self._slow_ema
         death = self._prev_fast >= self._prev_slow and self._fast_ema < self._slow_ema
+
+        if golden:
+            self.last_state["decision"] = (
+                "buy_golden_cross" if not self._in_position else "ignore_already_long"
+            )
+        elif death:
+            self.last_state["decision"] = (
+                "sell_death_cross" if self._in_position else "ignore_not_in_position"
+            )
 
         if golden and not self._in_position:
             # Pick sizing method

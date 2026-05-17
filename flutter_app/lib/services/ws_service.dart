@@ -18,6 +18,10 @@ enum WsEventType {
   pong,
   trialCompleted,
   optimizeDone,
+  // Per-bar bot internal state (opt-in via BotBase.last_state on the engine
+  // side). Used by the chart's hover panel to show "what the bot was
+  // thinking" at any given candle.
+  botState,
   // Playback transport events (server echo)
   paused,
   resumed,
@@ -49,6 +53,7 @@ class WsEvent {
       'pong' => WsEventType.pong,
       'trial_completed' => WsEventType.trialCompleted,
       'optimize_done' => WsEventType.optimizeDone,
+      'bot_state' => WsEventType.botState,
       'paused' => WsEventType.paused,
       'resumed' => WsEventType.resumed,
       'cancelled' => WsEventType.cancelled,

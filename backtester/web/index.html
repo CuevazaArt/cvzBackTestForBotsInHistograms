@@ -219,6 +219,13 @@
     // mfe_pct, mae_pct, duration_bars, fee_usdt, qty, bot_id, etc.).
     const _tradeByTime   = {};
     let   $tradeTooltip  = null;
+    // Bot-state lookup for the "bot brain" hover panel. Shape:
+    //   _botStateByTime[time] = { bot_id: state_dict, ... }
+    // Bots that opt in (BotBase.last_state) populate this via the
+    // engine's `bot_state` events. Surfaces when the crosshair lands on
+    // a bar where at least one bot had something to say.
+    const _botStateByTime = {};
+    let   $botStatePanel  = null;
     let   currentFormula = 'ohlc';
     let   currentBrickSize = 10;
     let   _haPrev = null;
@@ -286,10 +293,31 @@
     ].join(';');
     document.body.appendChild($tradeTooltip);
 
+    // ── Bot-state hover panel ─────────────────────────────────────
+    // Pinned to the top-right of the chart pane. Renders the per-bot
+    // diagnostic state at the crosshair's time when at least one bot has
+    // emitted `bot_state` for that bar. Visually distinct from the trade
+    // tooltip (it's pinned, not cursor-following) so the user can read
+    // both at once without overlap.
+    $botStatePanel = document.createElement('div');
+    $botStatePanel.id = 'bot-state-panel';
+    $botStatePanel.style.cssText = [
+      'position:absolute', 'top:4px', 'right:4px',
+      'z-index:30', 'pointer-events:none',
+      'background:rgba(19,23,34,0.92)', 'color:#d1d4dc',
+      'border:1px solid #2a2e39', 'border-radius:4px',
+      'padding:6px 8px', 'font-size:11px',
+      'font-family:system-ui,-apple-system,sans-serif',
+      'min-width:180px', 'max-width:280px',
+      'display:none',
+    ].join(';');
+    $mainPane.appendChild($botStatePanel);
+
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => _redrawCanvas());
     chart.subscribeCrosshairMove((param) => {
       _redrawCanvas();
       _updateTradeTooltip(param);
+      _updateBotStatePanel(param);
     });
 
     function _fmt(n, digits) {
@@ -352,6 +380,67 @@
         y = chartRect.top + param.point.y - tip.height - 18;
         $tradeTooltip.style.top = Math.max(4, y) + 'px';
       }
+    }
+
+    // Render bot state at the crosshair's time. Show one block per bot.
+    // The state dict is opaque — keys are rendered in their natural order,
+    // values formatted defensively. The "decision" key gets a colored badge
+    // because it's the headline (hold / buy / sell).
+    function _updateBotStatePanel(param) {
+      if (!$botStatePanel) return;
+      if (!param || param.time == null) {
+        $botStatePanel.style.display = 'none';
+        return;
+      }
+      const byBot = _botStateByTime[param.time];
+      if (!byBot) {
+        $botStatePanel.style.display = 'none';
+        return;
+      }
+      const blocks = Object.keys(byBot).map(function (botId) {
+        const st = byBot[botId] || {};
+        const decision = st.decision || 'hold';
+        const decLower = String(decision).toLowerCase();
+        let decColor = '#787b86';
+        if (decLower.indexOf('buy') === 0) decColor = '#26a69a';
+        else if (decLower.indexOf('sell') === 0) decColor = '#ef5350';
+        else if (decLower.indexOf('ignore') === 0) decColor = '#FFB300';
+        const rows = Object.keys(st)
+          .filter(function (k) { return k !== 'decision'; })
+          .map(function (k) {
+            const v = st[k];
+            let formatted;
+            if (typeof v === 'number') {
+              formatted = (Math.abs(v) >= 100 || Number.isInteger(v))
+                ? v.toString()
+                : v.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+            } else if (typeof v === 'boolean') {
+              formatted = v ? '✓' : '–';
+            } else if (v == null) {
+              formatted = '—';
+            } else {
+              formatted = String(v);
+            }
+            return '<span style="color:#787b86">' + k + '</span>' +
+                   '<span>' + formatted + '</span>';
+          }).join('');
+        return '<div style="margin-bottom:6px">' +
+               '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">' +
+                 '<span style="font-weight:600;color:#d1d4dc">' + botId + '</span>' +
+                 '<span style="font-size:9px;padding:1px 5px;border-radius:2px;' +
+                   'border:1px solid ' + decColor + ';color:' + decColor + ';' +
+                   'letter-spacing:0.4px;font-weight:600">' +
+                   String(decision).toUpperCase().replace(/_/g, ' ') +
+                 '</span>' +
+               '</div>' +
+               '<div style="display:grid;grid-template-columns:auto 1fr;' +
+                 'gap:1px 10px;font-size:10px">' + rows + '</div>' +
+               '</div>';
+      }).join('');
+      $botStatePanel.innerHTML =
+        '<div style="font-size:9px;color:#787b86;letter-spacing:0.6px;' +
+          'font-weight:600;margin-bottom:4px">BOT BRAIN</div>' + blocks;
+      $botStatePanel.style.display = 'block';
     }
 
     function _redrawCanvas() {
@@ -616,6 +705,17 @@
       s.update({ time: data.time, value: data.value });
     };
 
+    // Bot internal state for one (time, bot_id). Stored per-bar with one
+    // slot per bot so hovering a candle that has state from multiple bots
+    // shows them all stacked in the hover panel.
+    window.addBotState = function (data) {
+      if (!data || data.time == null) return;
+      const t = data.time;
+      const bid = data.bot_id || 'total';
+      if (!_botStateByTime[t]) _botStateByTime[t] = {};
+      _botStateByTime[t][bid] = data.state || {};
+    };
+
     window.addTradeMarker = function (data) {
       const botId  = data.bot_id || 'total';
       const cidx   = _botColorIdx[botId] || 0;
@@ -647,6 +747,8 @@
       _tradeMarkers.length = 0;
       for (const k in _tradeByTime) delete _tradeByTime[k];
       if ($tradeTooltip) $tradeTooltip.style.display = 'none';
+      for (const k in _botStateByTime) delete _botStateByTime[k];
+      if ($botStatePanel) $botStatePanel.style.display = 'none';
       _haPrev = null; _renkoLast = null;
 
       candleSeries.setData([]);

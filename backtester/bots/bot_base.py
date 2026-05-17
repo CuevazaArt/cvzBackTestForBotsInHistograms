@@ -18,6 +18,15 @@ class BotBase(ABC):
     # Default: risk 2% of available cash per trade.
     risk_per_trade_pct: float = 2.0
 
+    # Optional per-candle diagnostic state. Subclasses can assign
+    # ``self.last_state = {...}`` at the end of ``on_candle`` to surface
+    # what the bot was "thinking" — indicator readings, signal score,
+    # threshold values, decision label. The streaming engine reads this
+    # after each call and emits a ``bot_state`` event (throttled to the
+    # candle cadence) so the chart can show it on hover. Leaving it as
+    # ``None`` is the opt-out path: zero overhead, no events emitted.
+    last_state: dict[str, Any] | None = None
+
     @abstractmethod
     def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict[str, Any]]:
         """Called on each new candle.
