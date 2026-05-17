@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CVZ Chart</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; overflow: hidden; }
+    #chart { width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="chart"></div>
+  <script src="lightweight-charts.standalone.production.js"></script>
+  <script>
+    // Chart initialization — will be populated in Phase 6
+    window.__chartReady = false;
+    window.__post = function(msg) {
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage(msg);
+      }
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+      window.__chartReady = true;
+      window.__post('chart:ready');
+    });
+  </script>
+</body>
+</html>

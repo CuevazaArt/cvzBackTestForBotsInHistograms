@@ -1,0 +1,59 @@
+name: cvz_backtester
+description: "Trading backtester — single-binary Flutter Desktop app"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # SQLite (type-safe, WAL, migrations)
+  drift: ^2.22.0
+  sqlite3_flutter_libs: ^0.5.28
+
+  # State management
+  flutter_riverpod: ^2.6.0
+  riverpod_annotation: ^2.6.0
+
+  # HTTP (Binance REST)
+  http: ^1.3.0
+
+  # Chart (WebView on Windows)
+  webview_windows: ^0.4.0
+
+  # UI utilities
+  data_table_2: ^2.5.0
+  fl_chart: ^0.70.0
+
+  # File/path
+  path_provider: ^2.1.0
+  path: ^1.9.0
+
+  # YAML parsing (DSL bots)
+  yaml: ^3.1.0
+
+  # Utilities
+  collection: ^1.18.0
+  intl: ^0.19.0
+  freezed_annotation: ^2.4.0
+  json_annotation: ^4.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  build_runner: ^2.4.0
+  drift_dev: ^2.22.0
+  freezed: ^2.5.0
+  json_serializable: ^6.8.0
+  riverpod_generator: ^2.6.0
+  mocktail: ^1.0.0
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/chart/
