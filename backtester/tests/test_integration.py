@@ -380,7 +380,7 @@ def test_dorothy_dca_runs_end_to_end():
         margin_drop_factor=0.004,
         max_positions=3,
         stop_loss_pct=0.15,
-        risk_per_trade_pct=5.0,
+        quote_order_qty=7.0,
     )
     eng = BacktestEngine(BacktestConfig(initial_cash=Decimal("10000")))
     result = eng.run(

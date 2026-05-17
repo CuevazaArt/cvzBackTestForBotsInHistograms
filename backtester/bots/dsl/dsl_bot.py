@@ -18,6 +18,22 @@ from backtester.bots.dsl.parser import StrategySpec, parse_dsl
 from backtester.core.engine import Candle, Portfolio
 from backtester.core.indicators import add_indicators
 
+# Minimal valid strategy so registry/tests/UI can instantiate without user YAML.
+DEFAULT_DSL_TEXT = """\
+name: EMA cross (starter)
+indicators:
+  - ema(close, 12) as fast
+  - ema(close, 26) as slow
+entry:
+  long: fast > slow
+exit:
+  long: fast < slow
+risk:
+  stop_loss_pct: 0.05
+  take_profit_pct: 0.10
+  size_pct: 2.0
+"""
+
 
 class DSLBot(BotBase):
     """Generic bot whose behavior is defined by a YAML DSL document.
@@ -68,7 +84,7 @@ class DSLBot(BotBase):
         return {
             "dsl_text": {
                 "type": "str",
-                "default": "",
+                "default": DEFAULT_DSL_TEXT,
             }
         }
 

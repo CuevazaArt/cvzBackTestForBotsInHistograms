@@ -15,6 +15,10 @@ from backtester.bots import (
     BotBase,
     DorothyDCA,
     ElphabaShort,
+    get_bot_class,
+    instantiate_bot,
+    list_bot_names,
+    validate_registry,
 )
 from backtester.analysis import run_stress_battery
 from backtester.core import (
@@ -45,6 +49,10 @@ __all__ = [
     "BOT_REGISTRY",
     "DorothyDCA",
     "ElphabaShort",
+    "get_bot_class",
+    "instantiate_bot",
+    "list_bot_names",
+    "validate_registry",
     # Data + infra
     "BinanceDownloader",
     "CredentialManager",

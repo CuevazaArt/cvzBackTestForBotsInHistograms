@@ -100,17 +100,19 @@ def on_candle(self, candle: Candle, portfolio: Portfolio) -> list[dict]:
 
 ### Paso 4: Registrar el bot
 
-En `backtester/ui/cli.py`, agrega a `BOT_REGISTRY`:
+En `backtester/bots/registry.py`, importa tu clase y añádela a `_BOT_CLASSES`:
 
 ```python
-from backtester.bots import MyAwesomeBot
+from backtester.bots.my_awesome_bot import MyAwesomeBot
 
-BOT_REGISTRY = {
-    "EMACross": EMACross,
-    "RSIReversion": RSIReversion,
-    "MyAwesomeBot": MyAwesomeBot,  # ← Agregado aquí
-}
+_BOT_CLASSES: tuple[type[BotBase], ...] = (
+    # ... bots existentes ...
+    MyAwesomeBot,
+)
 ```
+
+`BOT_REGISTRY` se construye solo desde esa tupla (API, CLI y Flutter leen el mismo catálogo).
+Ejecuta `pytest backtester/tests/test_bot_registry.py` para validar el registro.
 
 ### Paso 5: Usar
 
