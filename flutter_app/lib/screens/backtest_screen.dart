@@ -1646,6 +1646,15 @@ class _TopBar extends StatelessWidget {
   }
 
   void _showBotsDialog(BuildContext context) {
+    final selectedLocal = List<String>.from(selectedBots);
+    final paramsLocal = <String, Map<String, dynamic>>{
+      for (final e in botsParamValues.entries)
+        e.key: Map<String, dynamic>.from(e.value),
+    };
+    final cashCtrl = TextEditingController(text: initialCash.toString());
+    final feeCtrl = TextEditingController(text: takerFeePct.toString());
+    final slippageCtrl = TextEditingController(text: slippagePct.toString());
+
     showDialog(
       context: context,
       builder: (context) {
@@ -1655,135 +1664,221 @@ class _TopBar extends StatelessWidget {
           content: StatefulBuilder(
             builder: (context, setStateDialog) {
               return SizedBox(
-                width: 380,
+                width: 560,
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 520),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextFormField(
-                          initialValue: initialCash.toString(),
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Initial Cash / Wallet',
-                          ),
-                          onChanged: (v) {
-                            final val = double.tryParse(v);
-                            if (val != null) onCashChanged(val);
-                          },
+                  constraints: const BoxConstraints(maxHeight: 620),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: cashCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
                         ),
-                        const SizedBox(height: 16),
-                        ...bots.map((b) {
-                          final isSelected = selectedBots.contains(b.name);
-                          final spec = botParamSpecs[b.name];
-                          final vals = botsParamValues[b.name] ?? {};
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              CheckboxListTile(
-                                title: Text(b.name),
-                                subtitle: b.description != null
-                                    ? Text(
-                                        b.description!,
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: Color(0xFF787B86),
-                                        ),
-                                      )
-                                    : null,
-                                value: isSelected,
-                                onChanged: (checked) {
-                                  final newList = List<String>.from(
-                                    selectedBots,
-                                  );
-                                  if (checked == true) {
-                                    newList.add(b.name);
-                                  } else {
-                                    newList.remove(b.name);
-                                  }
-                                  onBotsChanged(newList);
-                                  setStateDialog(() {});
-                                },
+                        decoration: const InputDecoration(
+                          labelText: 'Initial Cash / Wallet',
+                        ),
+                        onChanged: (v) {
+                          final val = double.tryParse(v);
+                          if (val != null) onCashChanged(val);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Text(
+                            'Bots selected: ${selectedLocal.length}/${bots.length}',
+                            style: const TextStyle(
+                              color: Color(0xFF787B86),
+                              fontSize: 11,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () {
+                              selectedLocal
+                                ..clear()
+                                ..addAll(bots.map((b) => b.name));
+                              onBotsChanged(List<String>.from(selectedLocal));
+                              setStateDialog(() {});
+                            },
+                            child: const Text('Select all'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              selectedLocal.clear();
+                              onBotsChanged(const []);
+                              setStateDialog(() {});
+                            },
+                            child: const Text('Clear'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: ListView.separated(
+                          itemCount: bots.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 6),
+                          itemBuilder: (context, i) {
+                            final b = bots[i];
+                            final isSelected = selectedLocal.contains(b.name);
+                            final spec = botParamSpecs[b.name];
+                            final vals =
+                                paramsLocal[b.name] ??
+                                botsParamValues[b.name] ??
+                                {};
+                            return Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF151823),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? const Color(0xFF26a69a)
+                                      : const Color(0xFF2B2B43),
+                                ),
                               ),
-                              if (isSelected &&
-                                  spec != null &&
-                                  spec.params.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    16,
-                                    0,
-                                    16,
-                                    8,
-                                  ),
-                                  child: _BotParamEditor(
-                                    botName: b.name,
-                                    spec: spec,
-                                    values: vals,
-                                    onChanged: (newVals) {
-                                      onBotParamChanged(b.name, newVals);
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  CheckboxListTile(
+                                    dense: true,
+                                    value: isSelected,
+                                    contentPadding: EdgeInsets.zero,
+                                    controlAffinity:
+                                        ListTileControlAffinity.leading,
+                                    title: Text(b.name),
+                                    subtitle: b.description != null
+                                        ? Text(
+                                            b.description!,
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: Color(0xFF787B86),
+                                            ),
+                                          )
+                                        : null,
+                                    onChanged: (checked) {
+                                      if (checked == true) {
+                                        if (!selectedLocal.contains(b.name)) {
+                                          selectedLocal.add(b.name);
+                                        }
+                                      } else {
+                                        selectedLocal.remove(b.name);
+                                      }
+                                      onBotsChanged(List<String>.from(selectedLocal));
                                       setStateDialog(() {});
                                     },
                                   ),
-                                ),
-                            ],
-                          );
-                        }),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextFormField(
-                                initialValue: takerFeePct.toString(),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
-                                decoration: const InputDecoration(
-                                  labelText: 'Taker Fee %',
-                                ),
-                                onChanged: (v) {
-                                  final n = double.tryParse(v);
-                                  if (n != null) onFeeChanged(n);
-                                },
+                                  AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 160),
+                                    child: isSelected
+                                        ? Padding(
+                                            key: ValueKey('params-${b.name}'),
+                                            padding: const EdgeInsets.fromLTRB(
+                                              8,
+                                              0,
+                                              8,
+                                              8,
+                                            ),
+                                            child: spec == null
+                                                ? const Text(
+                                                    'Loading params…',
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: Color(0xFF787B86),
+                                                    ),
+                                                  )
+                                                : spec.params.isEmpty
+                                                ? const Text(
+                                                    'This bot has no tunable params.',
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: Color(0xFF787B86),
+                                                    ),
+                                                  )
+                                                : _BotParamEditor(
+                                                    botName: b.name,
+                                                    spec: spec,
+                                                    values: vals,
+                                                    onChanged: (newVals) {
+                                                      paramsLocal[b.name] =
+                                                          Map<String, dynamic>.from(
+                                                            newVals,
+                                                          );
+                                                      onBotParamChanged(
+                                                        b.name,
+                                                        newVals,
+                                                      );
+                                                      setStateDialog(() {});
+                                                    },
+                                                  ),
+                                          )
+                                        : const SizedBox.shrink(),
+                                  ),
+                                ],
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: TextFormField(
-                                initialValue: slippagePct.toString(),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
-                                decoration: const InputDecoration(
-                                  labelText: 'Slippage %',
-                                ),
-                                onChanged: (v) {
-                                  final n = double.tryParse(v);
-                                  if (n != null) onSlippageChanged(n);
-                                },
-                              ),
-                            ),
-                          ],
+                            );
+                          },
                         ),
-                        const SizedBox(height: 10),
-                        SwitchListTile.adaptive(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Realistic fill (next open)'),
-                          subtitle: const Text(
-                            'MARKET orders execute on next candle open.',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF787B86),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: feeCtrl,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'Taker Fee %',
+                              ),
+                              onChanged: (v) {
+                                final n = double.tryParse(v);
+                                if (n != null) onFeeChanged(n);
+                              },
                             ),
                           ),
-                          value: fillOnNextOpen,
-                          onChanged: onFillOnNextOpenChanged,
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextFormField(
+                              controller: slippageCtrl,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'Slippage %',
+                              ),
+                              onChanged: (v) {
+                                final n = double.tryParse(v);
+                                if (n != null) onSlippageChanged(n);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Realistic fill (next open)'),
+                        subtitle: const Text(
+                          'MARKET orders execute on next candle open.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF787B86),
+                          ),
                         ),
-                      ],
-                    ),
+                        value: fillOnNextOpen,
+                        onChanged: onFillOnNextOpenChanged,
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -1797,7 +1892,11 @@ class _TopBar extends StatelessWidget {
           ],
         );
       },
-    );
+    ).whenComplete(() {
+      cashCtrl.dispose();
+      feeCtrl.dispose();
+      slippageCtrl.dispose();
+    });
   }
 
   static const _indicatorPresets = [
@@ -2114,6 +2213,7 @@ class _BotParamEditor extends StatefulWidget {
 
 class _BotParamEditorState extends State<_BotParamEditor> {
   late Map<String, dynamic> _vals;
+  final Map<String, TextEditingController> _controllers = {};
 
   @override
   void initState() {
@@ -2122,6 +2222,12 @@ class _BotParamEditorState extends State<_BotParamEditor> {
       for (final e in widget.spec.params.entries)
         e.key: widget.values[e.key] ?? e.value.defaultValue,
     };
+    for (final e in widget.spec.params.entries) {
+      final key = e.key;
+      _controllers[key] = TextEditingController(
+        text: (_vals[key] ?? e.value.defaultValue).toString(),
+      );
+    }
   }
 
   @override
@@ -2132,12 +2238,47 @@ class _BotParamEditorState extends State<_BotParamEditor> {
         for (final e in widget.spec.params.entries)
           e.key: widget.values[e.key] ?? e.value.defaultValue,
       };
+      for (final e in widget.spec.params.entries) {
+        final key = e.key;
+        final nextText = (_vals[key] ?? e.value.defaultValue).toString();
+        final ctrl = _controllers.putIfAbsent(
+          key,
+          () => TextEditingController(text: nextText),
+        );
+        if (ctrl.text != nextText) {
+          ctrl.text = nextText;
+        }
+      }
     }
   }
 
   void _update(String key, dynamic val) {
     setState(() => _vals[key] = val);
     widget.onChanged(Map<String, dynamic>.from(_vals));
+  }
+
+  dynamic _parseBySpec(ParamSpec p, String raw) {
+    final txt = raw.trim();
+    if (txt.isEmpty) return null;
+    if (p.type == 'int') return int.tryParse(txt);
+    if (p.type == 'float') return double.tryParse(txt);
+    return txt;
+  }
+
+  String _boundsHint(ParamSpec p) {
+    final parts = <String>[];
+    if (p.min != null) parts.add('min ${p.min}');
+    if (p.max != null) parts.add('max ${p.max}');
+    if (p.step != null) parts.add('step ${p.step}');
+    return parts.join(' · ');
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
+    super.dispose();
   }
 
   @override
@@ -2148,11 +2289,16 @@ class _BotParamEditorState extends State<_BotParamEditor> {
       children: widget.spec.params.entries.map((e) {
         final key = e.key;
         final p = e.value;
-        final cur = _vals[key] ?? p.defaultValue;
         final isInt = p.type == 'int';
+        final ctrl = _controllers.putIfAbsent(
+          key,
+          () => TextEditingController(
+            text: (_vals[key] ?? p.defaultValue).toString(),
+          ),
+        );
 
         return SizedBox(
-          width: 130,
+          width: 190,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -2161,44 +2307,37 @@ class _BotParamEditorState extends State<_BotParamEditor> {
                 key.replaceAll('_', ' '),
                 style: const TextStyle(color: Color(0xFF787B86), fontSize: 10),
               ),
-              if (p.min != null && p.max != null) ...[
-                Slider(
-                  value: cur.toDouble().clamp(p.min!, p.max!),
-                  min: p.min!,
-                  max: p.max!,
-                  divisions: p.step != null
-                      ? ((p.max! - p.min!) / p.step!).round().clamp(1, 200)
-                      : null,
-                  label: isInt ? cur.toString() : cur.toStringAsFixed(3),
-                  onChanged: (v) => _update(
-                    key,
-                    isInt ? v.round() : double.parse(v.toStringAsFixed(4)),
-                  ),
-                  activeColor: const Color(0xFF26a69a),
+              TextFormField(
+                controller: ctrl,
+                keyboardType: p.type == 'str'
+                    ? TextInputType.text
+                    : TextInputType.numberWithOptions(
+                        decimal: !isInt,
+                        signed: true,
+                      ),
+                style: const TextStyle(
+                  color: Color(0xFFD9D9D9),
+                  fontSize: 12,
                 ),
-                Text(
-                  isInt ? '${cur.toInt()}' : cur.toStringAsFixed(3),
-                  style: const TextStyle(
-                    color: Color(0xFFD9D9D9),
-                    fontSize: 11,
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: const OutlineInputBorder(),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
+                  hintText: p.defaultValue?.toString(),
+                  helperText: _boundsHint(p).isEmpty ? null : _boundsHint(p),
+                  helperStyle: const TextStyle(
+                    color: Color(0xFF787B86),
+                    fontSize: 10,
                   ),
                 ),
-              ] else
-                TextFormField(
-                  initialValue: cur.toString(),
-                  style: const TextStyle(
-                    color: Color(0xFFD9D9D9),
-                    fontSize: 12,
-                  ),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    border: InputBorder.none,
-                  ),
-                  onChanged: (v) {
-                    final parsed = isInt ? int.tryParse(v) : double.tryParse(v);
-                    if (parsed != null) _update(key, parsed);
-                  },
-                ),
+                onChanged: (v) {
+                  final parsed = _parseBySpec(p, v);
+                  if (parsed != null) _update(key, parsed);
+                },
+              ),
             ],
           ),
         );
