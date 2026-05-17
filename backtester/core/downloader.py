@@ -20,6 +20,29 @@ _LOG = logging.getLogger("backtester.downloader")
 # Binance rate limit: 1200 requests per minute
 REQUEST_DELAY = 0.1  # 100ms between requests (safe margin)
 
+# Retry policy for transient failures (timeouts, 5xx, 429).
+MAX_RETRIES = 5
+BACKOFF_BASE_S = 1.0  # 1s, 2s, 4s, 8s, 16s
+
+
+class DownloaderError(RuntimeError):
+    """Raised when a download exhausts its retry budget — surfaces to the
+    job store as a real error instead of an empty-but-successful result."""
+
+
+def _retryable_status(code: int) -> bool:
+    return code == 429 or 500 <= code < 600
+
+
+def _sleep_for_retry(attempt: int, retry_after_hdr: Optional[str]) -> float:
+    """Honor `Retry-After` when present, else exponential backoff."""
+    if retry_after_hdr:
+        try:
+            return max(0.5, float(retry_after_hdr))
+        except ValueError:
+            pass
+    return BACKOFF_BASE_S * (2 ** attempt)
+
 
 class WeightTracker:
     """Thread-safe holder for Binance ``X-MBX-USED-WEIGHT-1M`` rate-limit weight.
@@ -105,7 +128,7 @@ class BinanceDownloader:
             self._init_db()
 
     def _init_db(self) -> None:
-        """Create candles table if not exists."""
+        """Create candles table if not exists and run timestamp migration."""
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS candles (
                 symbol VARCHAR,
@@ -123,6 +146,48 @@ class BinanceDownloader:
             CREATE INDEX IF NOT EXISTS idx_symbol_tf
             ON candles (symbol, timeframe)
         """)
+        self._migrate_microsecond_timestamps()
+
+    def _migrate_microsecond_timestamps(self) -> None:
+        """Fix any μs-stored rows left behind by older builds of the ZIP
+        downloader. Bug: Binance Vision started serving microseconds in 2025
+        CSVs and we stored them raw, mixing units in the same column.
+
+        Heuristic: any timestamp_ms >= 100_000_000_000_000 is impossibly far
+        in the future (~year 5138) and is really μs — divide by 1000.
+        DuckDB's UNIQUE constraint will reject duplicates from the rewrite,
+        so we DELETE the original row after picking a normalized survivor.
+        """
+        try:
+            offending = self.conn.execute(
+                "SELECT COUNT(*) FROM candles WHERE timestamp_ms >= 100000000000000"
+            ).fetchone()
+            count = offending[0] if offending else 0
+            if count == 0:
+                return
+            _LOG.warning(
+                "Migrating %d rows with microsecond timestamps to milliseconds",
+                count,
+            )
+            # In-place rewrite. Use a temp staging step to avoid UNIQUE collisions
+            # when a normalized row already exists from a REST download.
+            self.conn.execute("""
+                DELETE FROM candles
+                WHERE timestamp_ms >= 100000000000000
+                  AND EXISTS (
+                    SELECT 1 FROM candles c2
+                    WHERE c2.symbol     = candles.symbol
+                      AND c2.timeframe  = candles.timeframe
+                      AND c2.timestamp_ms = candles.timestamp_ms / 1000
+                  )
+            """)
+            self.conn.execute(
+                "UPDATE candles SET timestamp_ms = timestamp_ms / 1000 "
+                "WHERE timestamp_ms >= 100000000000000"
+            )
+            _LOG.info("Timestamp migration done")
+        except Exception:  # noqa: BLE001
+            _LOG.exception("Timestamp migration failed — continuing without it")
 
     def download(
         self,
@@ -160,7 +225,14 @@ class BinanceDownloader:
         current_ts = start_from_ms if start_from_ms is not None else start_ts
         while current_ts < end_ts:
             batch = self._fetch_batch(symbol, timeframe, current_ts, batch_size)
+            # Empty batch (not an error after retries) means Binance has no
+            # more candles for this range — stop cleanly, partial results
+            # are persisted.
             if not batch:
+                _LOG.info(
+                    "No more candles available for %s %s past %d — stopping",
+                    symbol, timeframe, current_ts,
+                )
                 break
 
             inserted = self._save_batch(symbol, timeframe, batch)
@@ -190,7 +262,14 @@ class BinanceDownloader:
         start_time: int,
         limit: int = 1000,
     ) -> list[list]:
-        """Fetch a batch of candles from Binance API."""
+        """Fetch a batch of candles from Binance API with retry/backoff.
+
+        Retries on transient failures (timeouts, connection errors, 5xx, 429
+        rate limits) with exponential backoff. Raises ``DownloaderError`` if
+        retries are exhausted — the previous version swallowed errors and
+        returned ``[]``, which made the download loop silently stop and report
+        success with 0 candles added.
+        """
         params: dict[str, str | int] = {
             "symbol": symbol,
             "interval": timeframe,
@@ -201,29 +280,66 @@ class BinanceDownloader:
         if self.api_key:
             headers["X-MBX-APIKEY"] = self.api_key
 
-        try:
-            # ``requests`` accepts ``Mapping[str, str | int]`` at runtime even
-            # though the type stub here narrows to ``str | bytes | None``.
-            resp = requests.get(
-                f"{self.BASE_URL}/klines",
-                params=params,  # type: ignore[arg-type]
-                headers=headers,
-                timeout=10,
-            )
+        last_err: Optional[str] = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                resp = requests.get(
+                    f"{self.BASE_URL}/klines",
+                    params=params,  # type: ignore[arg-type]
+                    headers=headers,
+                    timeout=15,
+                )
 
-            # Track API Weight (thread-safe via shared WeightTracker).
-            weight_header = resp.headers.get("X-MBX-USED-WEIGHT-1M")
-            if weight_header:
-                try:
-                    BINANCE_WEIGHT_TRACKER.set(int(weight_header))
-                except ValueError:
-                    pass
+                # Track API Weight even when we'll retry — the header is set
+                # on rate-limit responses too.
+                weight_header = resp.headers.get("X-MBX-USED-WEIGHT-1M")
+                if weight_header:
+                    try:
+                        BINANCE_WEIGHT_TRACKER.set(int(weight_header))
+                    except ValueError:
+                        pass
 
-            resp.raise_for_status()
-            return resp.json()
-        except Exception as e:
-            _LOG.error(f"Failed to fetch {symbol}: {e}")
-            return []
+                # 400 = bad symbol/interval — never retry, surface error.
+                if resp.status_code == 400:
+                    raise DownloaderError(
+                        f"Binance rejected {symbol} {timeframe}: {resp.text[:200]}"
+                    )
+
+                if _retryable_status(resp.status_code):
+                    last_err = f"HTTP {resp.status_code}"
+                    wait = _sleep_for_retry(attempt, resp.headers.get("Retry-After"))
+                    _LOG.warning(
+                        "Transient %s for %s — retry %d/%d after %.1fs",
+                        last_err, symbol, attempt + 1, MAX_RETRIES, wait,
+                    )
+                    time.sleep(wait)
+                    continue
+
+                resp.raise_for_status()
+                data = resp.json()
+                if not isinstance(data, list):
+                    raise DownloaderError(f"Unexpected response shape: {type(data).__name__}")
+                return data
+
+            except (requests.Timeout, requests.ConnectionError) as e:
+                last_err = f"{type(e).__name__}: {e}"
+                wait = _sleep_for_retry(attempt, None)
+                _LOG.warning(
+                    "%s for %s — retry %d/%d after %.1fs",
+                    last_err, symbol, attempt + 1, MAX_RETRIES, wait,
+                )
+                time.sleep(wait)
+            except DownloaderError:
+                raise  # non-retryable, surface as error
+            except Exception as e:  # noqa: BLE001
+                last_err = f"{type(e).__name__}: {e}"
+                _LOG.exception("Unexpected error fetching %s", symbol)
+                wait = _sleep_for_retry(attempt, None)
+                time.sleep(wait)
+
+        raise DownloaderError(
+            f"Failed to fetch {symbol} {timeframe} after {MAX_RETRIES} retries: {last_err}"
+        )
 
     def download_vision_zip(
         self,
@@ -232,9 +348,14 @@ class BinanceDownloader:
         year: int,
         month: int,
     ) -> int:
-        """
-        Download a monthly CSV zip from data.binance.vision and insert to DB.
+        """Download a monthly CSV zip from data.binance.vision and insert to DB.
+
         URL format: https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1h/BTCUSDT-1h-2024-01.zip
+
+        Retries on transient network failures. Returns 0 when the month
+        legitimately doesn't exist yet (404) so callers can ignore missing
+        future months when downloading a year range. Any other persistent
+        failure raises ``DownloaderError``.
         """
         if timeframe not in self.TIMEFRAMES:
             raise ValueError(f"Invalid timeframe: {timeframe}")
@@ -244,33 +365,89 @@ class BinanceDownloader:
         url = f"https://data.binance.vision/data/spot/monthly/klines/{symbol}/{timeframe}/{filename}"
 
         _LOG.info(f"Downloading ZIP: {url}")
-        try:
-            resp = requests.get(url, timeout=30)
-            if resp.status_code == 404:
-                _LOG.warning(
-                    f"Data not available for {symbol} {timeframe} {year}-{month_str}"
-                )
-                return 0
-            resp.raise_for_status()
+        last_err: Optional[str] = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                resp = requests.get(url, timeout=60)
 
-            with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
-                # The zip should contain one csv file
-                csv_filename = z.namelist()[0]
-                with z.open(csv_filename) as f:
-                    content = f.read().decode("utf-8")
+                # 404 = month not published yet (or wrong symbol). Don't retry.
+                if resp.status_code == 404:
+                    _LOG.warning(
+                        "Data not available for %s %s %s-%s",
+                        symbol, timeframe, year, month_str,
+                    )
+                    return 0
 
-            reader = csv.reader(io.StringIO(content))
-            klines = []
-            for row in reader:
-                if not row:
+                if _retryable_status(resp.status_code):
+                    last_err = f"HTTP {resp.status_code}"
+                    wait = _sleep_for_retry(attempt, resp.headers.get("Retry-After"))
+                    _LOG.warning(
+                        "Transient %s for %s — retry %d/%d after %.1fs",
+                        last_err, filename, attempt + 1, MAX_RETRIES, wait,
+                    )
+                    time.sleep(wait)
                     continue
-                klines.append(row)
 
-            return self._save_batch(symbol, timeframe, klines)
+                resp.raise_for_status()
 
-        except Exception as e:
-            _LOG.error(f"Failed to download/process ZIP for {symbol}: {e}")
-            return 0
+                # Parse ZIP + CSV inline; bad payload raises and is retried
+                # only once (the file probably is malformed at the source).
+                with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                    names = z.namelist()
+                    if not names:
+                        raise DownloaderError(f"Empty ZIP for {filename}")
+                    with z.open(names[0]) as f:
+                        content = f.read().decode("utf-8")
+
+                klines = [row for row in csv.reader(io.StringIO(content)) if row]
+                if not klines:
+                    raise DownloaderError(f"Empty CSV inside {filename}")
+
+                return self._save_batch(symbol, timeframe, klines)
+
+            except (requests.Timeout, requests.ConnectionError) as e:
+                last_err = f"{type(e).__name__}: {e}"
+                wait = _sleep_for_retry(attempt, None)
+                _LOG.warning(
+                    "%s for %s — retry %d/%d after %.1fs",
+                    last_err, filename, attempt + 1, MAX_RETRIES, wait,
+                )
+                time.sleep(wait)
+            except (zipfile.BadZipFile, UnicodeDecodeError) as e:
+                # Payload corruption — likely a partial transfer. One more try.
+                last_err = f"{type(e).__name__}: {e}"
+                _LOG.warning(
+                    "Corrupted payload for %s — retry %d/%d",
+                    filename, attempt + 1, MAX_RETRIES,
+                )
+                time.sleep(_sleep_for_retry(attempt, None))
+            except DownloaderError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                last_err = f"{type(e).__name__}: {e}"
+                _LOG.exception("Unexpected error downloading %s", filename)
+                time.sleep(_sleep_for_retry(attempt, None))
+
+        raise DownloaderError(
+            f"Failed to download {filename} after {MAX_RETRIES} retries: {last_err}"
+        )
+
+    @staticmethod
+    def _normalize_to_ms(ts: int) -> int:
+        """Coerce a Binance timestamp to milliseconds.
+
+        Binance Vision changed its monthly CSV format in 2025 from millisecond
+        to microsecond timestamps, but the REST `/klines` endpoint still
+        returns milliseconds. Without this normalization the DB ends up with a
+        mix of 13- and 16-digit timestamps for the same symbol/timeframe, and
+        the chart silently fails because Lightweight Charts gets `time` values
+        a thousand times too large.
+
+        Heuristic: anything past ~year 5138 in ms is almost certainly μs.
+        """
+        if ts >= 100_000_000_000_000:  # > ~year 5138 in ms → must be μs
+            return ts // 1000
+        return ts
 
     def _save_batch(
         self,
@@ -282,12 +459,13 @@ class BinanceDownloader:
         if not klines:
             return 0
 
-        # Transform to tuple list for executemany
+        # Transform to tuple list for executemany. Normalize timestamps so the
+        # DB never mixes ms and μs (see _normalize_to_ms).
         data = [
             (
                 symbol,
                 timeframe,
-                int(k[0]),
+                self._normalize_to_ms(int(k[0])),
                 float(k[1]),
                 float(k[2]),
                 float(k[3]),

@@ -19,7 +19,9 @@ import 'package:backtester_shell/services/ui_state_service.dart';
 enum _RunState { idle, running, paused, done }
 
 /// Speed presets: label → speed_ms value.
+/// Higher ms = slower playback (delay between candles).
 const _speedPresets = <String, int>{
+  '0.2x': 500,
   '0.5x': 200,
   '1x': 100,
   '2x': 50,
@@ -316,7 +318,15 @@ class _BacktestScreenState extends State<BacktestScreen> {
   }
 
   Future<void> _fetchInitialChartData() async {
-    if (_selectedSymbol == null || _runState == _RunState.running || !_chartCtrl.isReady) return;
+    if (_selectedSymbol == null ||
+        _runState == _RunState.running ||
+        !_chartCtrl.isReady) {
+      return;
+    }
+    // Always clear first so the user sees the chart switch immediately — and
+    // stale data from the previous symbol/timeframe is never left on screen.
+    _chartCtrl.clear();
+    _chartCtrl.setChartFormula(_selectedFormula, brickSize: _brickSize);
     try {
       final candles = await widget.apiService.getCandles(
         symbol: _selectedSymbol!,
@@ -325,13 +335,23 @@ class _BacktestScreenState extends State<BacktestScreen> {
         endMs: _parseDateToMs(_endDateIso, endOfDay: true),
         limit: 1500,
       );
-      if (mounted && candles.isNotEmpty) {
-        _chartCtrl.clear();
-        _chartCtrl.setChartFormula(_selectedFormula, brickSize: _brickSize);
-        _chartCtrl.setCandles(candles);
+      if (!mounted) return;
+      // setCandles with [] makes the chart show its "no candles in range"
+      // empty state instead of stale data.
+      _chartCtrl.setCandles(candles);
+      if (candles.isEmpty) {
+        setState(() =>
+            _statusText = 'No data for $_selectedSymbol ($_selectedTimeframe) in selected range.');
+      } else {
+        setState(() => _statusText =
+            'Loaded ${candles.length} candles — ready to run backtest.');
       }
     } catch (e) {
       debugPrint('Error fetching initial chart data: $e');
+      if (mounted) {
+        setState(() => _statusText =
+            'Failed to load $_selectedSymbol ($_selectedTimeframe): ${e.toString().split(":").first}. Try downloading the range.');
+      }
     }
   }
 
@@ -1027,8 +1047,9 @@ class _BacktestScreenState extends State<BacktestScreen> {
               ],
             ),
           ),
+        // Chart pane — Expanded so it absorbs all remaining vertical space.
+        // (We rely on the chart's own ResizeObserver to handle dimension changes.)
         Expanded(
-          flex: 3,
           child: Stack(
             children: [
               ChartWebView(
@@ -2523,20 +2544,27 @@ class _DownloadDialogState extends State<_DownloadDialog> {
             children: [
               Icon(iconData, color: badgeColor, size: 16),
               const SizedBox(width: 6),
-              Text(
-                isOk ? 'Data Quality: Clean' : 'Data Quality: Warnings',
-                style: TextStyle(
-                  color: badgeColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
+              Flexible(
+                child: Text(
+                  isOk ? 'Data Quality: Clean' : 'Data Quality: Warnings',
+                  style: TextStyle(
+                    color: badgeColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
-              Text(
-                '$total candles · $completeness%',
-                style: const TextStyle(
-                  color: Color(0xFF787B86),
-                  fontSize: 10,
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  '$total · $completeness%',
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(
+                    color: Color(0xFF787B86),
+                    fontSize: 10,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -2598,95 +2626,96 @@ class _DownloadDialogState extends State<_DownloadDialog> {
           children: [
             Expanded(
               flex: 1,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'Download History',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Download History',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _symbolCtrl,
-                    decoration: const InputDecoration(labelText: 'Symbol'),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: _tf,
-                    items: _timeframes
-                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) setState(() => _tf = v);
-                    },
-                    decoration: const InputDecoration(labelText: 'Timeframe'),
-                  ),
-                  const SizedBox(height: 12),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: true, label: Text('Bulk ZIP')),
-                      ButtonSegment(value: false, label: Text('REST API')),
-                    ],
-                    selected: {_useZip},
-                    onSelectionChanged: (Set<bool> newSelection) {
-                      setState(() => _useZip = newSelection.first);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  if (!_useZip)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _fromCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'From (YYYY-MM-DD)',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _toCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'To (YYYY-MM-DD)',
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  else
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _yearCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Year (YYYY)',
-                            ),
-                            keyboardType: TextInputType.number,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _monthCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Month (e.g. 1, 1-12, all)',
-                            ),
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _symbolCtrl,
+                      decoration: const InputDecoration(labelText: 'Symbol'),
                     ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: _download,
-                    icon: const Icon(Icons.download, size: 16),
-                    label: const Text('Start Download'),
-                  ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: _tf,
+                      items: _timeframes
+                          .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null) setState(() => _tf = v);
+                      },
+                      decoration: const InputDecoration(labelText: 'Timeframe'),
+                    ),
+                    const SizedBox(height: 12),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(value: true, label: Text('Bulk ZIP')),
+                        ButtonSegment(value: false, label: Text('REST API')),
+                      ],
+                      selected: {_useZip},
+                      onSelectionChanged: (Set<bool> newSelection) {
+                        setState(() => _useZip = newSelection.first);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    if (!_useZip)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _fromCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'From (YYYY-MM-DD)',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _toCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'To (YYYY-MM-DD)',
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _yearCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Year (YYYY)',
+                              ),
+                              keyboardType: TextInputType.number,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _monthCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Month (e.g. 1, 1-12, all)',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: _download,
+                      icon: const Icon(Icons.download, size: 16),
+                      label: const Text('Start Download'),
+                    ),
                   if (_loading && _downloadProgress > 0) ...[
                     const SizedBox(height: 16),
                     LinearProgressIndicator(
@@ -2714,6 +2743,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                     _buildQualityBadge(_qualityReport!),
                   ],
                 ],
+                ),
               ),
             ),
             const VerticalDivider(width: 24),

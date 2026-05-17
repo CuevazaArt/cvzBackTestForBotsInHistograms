@@ -11,6 +11,13 @@ python -m venv venv
 
 # Instalar dependencias
 pip install -r backtester/requirements.txt
+
+# Vendorizar la librería del gráfico (Lightweight Charts v4)
+# Sin este archivo el WebView muestra el fondo oscuro pero ninguna vela se dibuja.
+New-Item -ItemType Directory -Force -Path backtester/web/assets/js | Out-Null
+Invoke-WebRequest `
+  -Uri https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js `
+  -OutFile backtester/web/assets/js/lightweight-charts.standalone.production.js
 ```
 
 ### Linux / macOS (Bash)
@@ -22,6 +29,11 @@ source venv/bin/activate
 
 # Instalar dependencias
 pip install -r backtester/requirements.txt
+
+# Vendorizar la librería del gráfico (Lightweight Charts v4)
+mkdir -p backtester/web/assets/js
+curl -L -o backtester/web/assets/js/lightweight-charts.standalone.production.js \
+  https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js
 ```
 
 ## 2. Configurar credenciales
