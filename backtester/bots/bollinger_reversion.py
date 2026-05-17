@@ -65,7 +65,7 @@ class BollingerReversion(BotBase):
             "stop_loss_pct": {
                 "type": "float",
                 "default": 0.05,
-                "min": 0.005,
+                "min": 0.0,
                 "max": 0.5,
                 "step": 0.005,
             },

@@ -69,7 +69,7 @@ class ElphabaShort(BotBase):
             "stop_loss_pct": {
                 "type": "float",
                 "default": 0.15,
-                "min": 0.02,
+                "min": 0.0,
                 "max": 0.5,
                 "step": 0.01,
             },
@@ -89,7 +89,8 @@ class ElphabaShort(BotBase):
         n_open = sum(1 for p in portfolio.positions if p.side == "short")
 
         # ── Stop-loss: liquidate all if price too far above avg cost ──
-        if n_open > 0:
+        # stop_loss_pct <= 0 disables the protection entirely.
+        if n_open > 0 and self.stop_loss_pct > 0:
             avg_cost = float(
                 sum(p.entry_price * p.qty for p in portfolio.positions if p.side == "short")
                 / sum(p.qty for p in portfolio.positions if p.side == "short")

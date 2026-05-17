@@ -78,7 +78,7 @@ class MACDCross(BotBase):
             "stop_loss_pct": {
                 "type": "float",
                 "default": 0.05,
-                "min": 0.005,
+                "min": 0.0,
                 "max": 0.5,
                 "step": 0.005,
             },
@@ -123,8 +123,12 @@ class MACDCross(BotBase):
         self._macd = macd_val
         self._signal = macd_val * self._k_sig + self._signal * (1 - self._k_sig)
 
-        # ── Stop-loss ─────────────────────────────────────────────────
-        if self._in_position and self._entry_price is not None:
+        # ── Stop-loss (skipped when stop_loss_pct <= 0) ─────────────
+        if (
+            self._in_position
+            and self._entry_price is not None
+            and self.stop_loss_pct > 0
+        ):
             if price < self._entry_price * (1 - self.stop_loss_pct):
                 qty = self.max_sell_qty(portfolio)
                 if qty > 0:

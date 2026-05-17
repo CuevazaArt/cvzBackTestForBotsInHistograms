@@ -858,10 +858,10 @@ class BacktestEngine:
         is_short = pos.side == "short"
         exit_side = OrderSide.BUY if is_short else OrderSide.SELL
 
-        # Stop loss
+        # Stop loss (skipped when sl_pct <= 0 — user disables protection)
         sl_price = bracket.get("stop_loss_price")
         sl_pct = bracket.get("stop_loss_pct")
-        if sl_price is None and sl_pct is not None:
+        if sl_price is None and sl_pct is not None and sl_pct > 0:
             sl_price = pos.entry_price * (
                 Decimal(1) + sl_pct / Decimal(100)
                 if is_short
@@ -882,10 +882,10 @@ class BacktestEngine:
                 )
             )
 
-        # Take profit
+        # Take profit (skipped when tp_pct <= 0 — user disables protection)
         tp_price = bracket.get("take_profit_price")
         tp_pct = bracket.get("take_profit_pct")
-        if tp_price is None and tp_pct is not None:
+        if tp_price is None and tp_pct is not None and tp_pct > 0:
             tp_price = pos.entry_price * (
                 Decimal(1) - tp_pct / Decimal(100)
                 if is_short
