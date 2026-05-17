@@ -128,7 +128,7 @@ class BinanceDownloader:
             self._init_db()
 
     def _init_db(self) -> None:
-        """Create candles table if not exists."""
+        """Create candles table if not exists and run timestamp migration."""
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS candles (
                 symbol VARCHAR,
@@ -146,6 +146,48 @@ class BinanceDownloader:
             CREATE INDEX IF NOT EXISTS idx_symbol_tf
             ON candles (symbol, timeframe)
         """)
+        self._migrate_microsecond_timestamps()
+
+    def _migrate_microsecond_timestamps(self) -> None:
+        """Fix any μs-stored rows left behind by older builds of the ZIP
+        downloader. Bug: Binance Vision started serving microseconds in 2025
+        CSVs and we stored them raw, mixing units in the same column.
+
+        Heuristic: any timestamp_ms >= 100_000_000_000_000 is impossibly far
+        in the future (~year 5138) and is really μs — divide by 1000.
+        DuckDB's UNIQUE constraint will reject duplicates from the rewrite,
+        so we DELETE the original row after picking a normalized survivor.
+        """
+        try:
+            offending = self.conn.execute(
+                "SELECT COUNT(*) FROM candles WHERE timestamp_ms >= 100000000000000"
+            ).fetchone()
+            count = offending[0] if offending else 0
+            if count == 0:
+                return
+            _LOG.warning(
+                "Migrating %d rows with microsecond timestamps to milliseconds",
+                count,
+            )
+            # In-place rewrite. Use a temp staging step to avoid UNIQUE collisions
+            # when a normalized row already exists from a REST download.
+            self.conn.execute("""
+                DELETE FROM candles
+                WHERE timestamp_ms >= 100000000000000
+                  AND EXISTS (
+                    SELECT 1 FROM candles c2
+                    WHERE c2.symbol     = candles.symbol
+                      AND c2.timeframe  = candles.timeframe
+                      AND c2.timestamp_ms = candles.timestamp_ms / 1000
+                  )
+            """)
+            self.conn.execute(
+                "UPDATE candles SET timestamp_ms = timestamp_ms / 1000 "
+                "WHERE timestamp_ms >= 100000000000000"
+            )
+            _LOG.info("Timestamp migration done")
+        except Exception:  # noqa: BLE001
+            _LOG.exception("Timestamp migration failed — continuing without it")
 
     def download(
         self,
@@ -390,6 +432,23 @@ class BinanceDownloader:
             f"Failed to download {filename} after {MAX_RETRIES} retries: {last_err}"
         )
 
+    @staticmethod
+    def _normalize_to_ms(ts: int) -> int:
+        """Coerce a Binance timestamp to milliseconds.
+
+        Binance Vision changed its monthly CSV format in 2025 from millisecond
+        to microsecond timestamps, but the REST `/klines` endpoint still
+        returns milliseconds. Without this normalization the DB ends up with a
+        mix of 13- and 16-digit timestamps for the same symbol/timeframe, and
+        the chart silently fails because Lightweight Charts gets `time` values
+        a thousand times too large.
+
+        Heuristic: anything past ~year 5138 in ms is almost certainly μs.
+        """
+        if ts >= 100_000_000_000_000:  # > ~year 5138 in ms → must be μs
+            return ts // 1000
+        return ts
+
     def _save_batch(
         self,
         symbol: str,
@@ -400,12 +459,13 @@ class BinanceDownloader:
         if not klines:
             return 0
 
-        # Transform to tuple list for executemany
+        # Transform to tuple list for executemany. Normalize timestamps so the
+        # DB never mixes ms and μs (see _normalize_to_ms).
         data = [
             (
                 symbol,
                 timeframe,
-                int(k[0]),
+                self._normalize_to_ms(int(k[0])),
                 float(k[1]),
                 float(k[2]),
                 float(k[3]),
