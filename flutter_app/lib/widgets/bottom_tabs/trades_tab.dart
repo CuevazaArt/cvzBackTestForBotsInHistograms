@@ -14,7 +14,7 @@ class TradesTab extends StatelessWidget {
     }
 
     const colWidths = [130.0, 130.0, 90.0, 90.0, 70.0, 80.0, 70.0, 100.0];
-    const headers   = ['Entry time', 'Exit time', 'Entry $', 'Exit $', 'Qty', 'PnL', 'PnL %', 'Reason'];
+    const headers   = ['Entry time', 'Exit time', 'Entry \$', 'Exit \$', 'Qty', 'PnL', 'PnL %', 'Reason'];
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,

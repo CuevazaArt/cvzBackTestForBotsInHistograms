@@ -57,10 +57,23 @@ def start_download(
     )
 
     def _run() -> None:
-        ctx.jobs.update(job.id, status="running")
+        ctx.jobs.update(job.id, status="running", progress=0.0, message="Connecting to Binance…")
         try:
+            # Stream per-batch progress back into the job registry so the UI
+            # poller sees a moving progress bar — the download endpoint is
+            # the primary entry point of the tool, so live feedback matters
+            # more here than anywhere else.
+            def _on_progress(pct: float, added: int, msg: str) -> None:
+                ctx.jobs.update(
+                    job.id,
+                    progress=pct,
+                    message=msg,
+                    result={"candles_added": added},
+                )
+
             count = ctx.downloader.download(
                 req.symbol.upper(), req.timeframe, req.date_from, req.date_to,
+                progress_callback=_on_progress,
             )
             ctx.jobs.update(
                 job.id, status="done", progress=1.0,

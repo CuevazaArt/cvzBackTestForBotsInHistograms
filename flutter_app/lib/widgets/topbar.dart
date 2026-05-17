@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/backtest_state.dart';
+import 'download_history_dialog.dart';
 
 class AppTopBar extends ConsumerWidget implements PreferredSizeWidget {
   final VoidCallback onRun;
@@ -40,7 +41,27 @@ class AppTopBar extends ConsumerWidget implements PreferredSizeWidget {
 
           const Spacer(),
 
-          // Run button
+          // ── Download history button (always visible) ────────────────
+          // The download flow is the primary entry point for the tool — no
+          // local candles means no backtest can run — so this is intentionally
+          // surfaced at the top level and is not gated by any other action.
+          SizedBox(
+            height: 30,
+            child: OutlinedButton.icon(
+              onPressed: () => DownloadHistoryDialog.show(context),
+              icon: const Icon(Icons.cloud_download_outlined, size: 16),
+              label: const Text('Download history'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFD1D4DC),
+                side: const BorderSide(color: Color(0xFF2A2E39)),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                textStyle: const TextStyle(fontSize: 12),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // ── Run button ──────────────────────────────────────────────
           SizedBox(
             height: 30,
             child: isRunning

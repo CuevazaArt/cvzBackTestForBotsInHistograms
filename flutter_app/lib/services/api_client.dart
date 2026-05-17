@@ -65,8 +65,11 @@ class ApiClient {
         (j) => (j as Map<String, dynamic>)['job_id'] as String,
       );
 
+  /// Poll a background-job status (download / experiment / ...).
+  /// Backend exposes job status under /api/jobs/{id}, not under
+  /// /api/candles/download/{id} (which was a stale assumption).
   Future<Map<String, dynamic>> fetchJobStatus(String jobId) =>
-      _get('/api/candles/download/$jobId', (j) => (j as Map<String, dynamic>));
+      _get('/api/jobs/$jobId', (j) => (j as Map<String, dynamic>));
 
   // ── Backtest ──────────────────────────────────────────────────────────────
 
