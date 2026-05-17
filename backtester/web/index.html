@@ -213,6 +213,12 @@
     const _rawCandles    = [];
     const _equityData    = [];
     const _tradeMarkers  = [];
+    // Trade-lookup map for hover tooltips. Keyed by both entry_time and
+    // exit_time so hovering on either arrow surfaces the same trade. Value is
+    // the raw trade payload streamed by the engine (pnl, pnl_pct, reason,
+    // mfe_pct, mae_pct, duration_bars, fee_usdt, qty, bot_id, etc.).
+    const _tradeByTime   = {};
+    let   $tradeTooltip  = null;
     let   currentFormula = 'ohlc';
     let   currentBrickSize = 10;
     let   _haPrev = null;
@@ -261,10 +267,92 @@
     setTimeout(resizeAll, 500);
 
     // ─────────────────────────────────────────────────────────────
-    // 4. TRADE-LINE OVERLAY (canvas)
+    // 4. TRADE-LINE OVERLAY (canvas) + TRADE HOVER TOOLTIP
     // ─────────────────────────────────────────────────────────────
+    // Floating tooltip that surfaces full trade context (PnL, reason,
+    // MFE/MAE, duration, fees) when the crosshair lands on a trade marker.
+    // Appended to <body> rather than the chart container so the tooltip can
+    // escape the chart's clipping bounds near the edges.
+    $tradeTooltip = document.createElement('div');
+    $tradeTooltip.id = 'trade-tooltip';
+    $tradeTooltip.style.cssText = [
+      'position:fixed', 'pointer-events:none', 'z-index:9999',
+      'background:rgba(19,23,34,0.96)', 'color:#d1d4dc',
+      'border:1px solid #2a2e39', 'border-radius:4px',
+      'padding:6px 8px', 'font-size:11px',
+      'font-family:system-ui,-apple-system,sans-serif',
+      'box-shadow:0 4px 12px rgba(0,0,0,0.45)',
+      'min-width:200px', 'display:none',
+    ].join(';');
+    document.body.appendChild($tradeTooltip);
+
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => _redrawCanvas());
-    chart.subscribeCrosshairMove(() => _redrawCanvas());
+    chart.subscribeCrosshairMove((param) => {
+      _redrawCanvas();
+      _updateTradeTooltip(param);
+    });
+
+    function _fmt(n, digits) {
+      return (typeof n === 'number' && isFinite(n))
+        ? n.toFixed(digits == null ? 2 : digits)
+        : '—';
+    }
+    function _fmtPct(n) {
+      return (typeof n === 'number' && isFinite(n)) ? n.toFixed(2) + '%' : '—';
+    }
+
+    function _updateTradeTooltip(param) {
+      if (!$tradeTooltip) return;
+      if (!param || !param.point || param.time == null) {
+        $tradeTooltip.style.display = 'none';
+        return;
+      }
+      const t = _tradeByTime[param.time];
+      if (!t) {
+        $tradeTooltip.style.display = 'none';
+        return;
+      }
+      const isEntry = param.time === t.entry_time;
+      const pnlColor = (t.pnl >= 0) ? '#26a69a' : '#ef5350';
+      const rowOptional = (label, value) =>
+        value == null ? '' :
+        '<span style="color:#787b86">' + label + '</span><span>' + value + '</span>';
+
+      $tradeTooltip.innerHTML =
+        '<div style="font-weight:600;margin-bottom:4px;color:' + pnlColor + '">' +
+          (isEntry ? '▲ Entry' : '▼ Exit') + ' · ' + (t.bot_id || 'bot') +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:10px">' +
+          '<span style="color:#787b86">PnL</span>' +
+          '<span style="color:' + pnlColor + ';font-weight:600">$' + _fmt(t.pnl) +
+            ' <span style="opacity:0.7">(' + _fmtPct(t.pnl_pct) + ')</span></span>' +
+          '<span style="color:#787b86">Entry → Exit</span>' +
+          '<span>$' + _fmt(t.entry_price) + ' → $' + _fmt(t.exit_price) + '</span>' +
+          rowOptional('Qty', t.qty != null ? _fmt(t.qty, 4) : null) +
+          rowOptional('Duration', t.duration_bars != null ? t.duration_bars + ' bars' : null) +
+          rowOptional('MFE', t.mfe_pct != null ? _fmtPct(t.mfe_pct) : null) +
+          rowOptional('MAE', t.mae_pct != null ? _fmtPct(t.mae_pct) : null) +
+          rowOptional('Fee', t.fee_usdt != null ? '$' + _fmt(t.fee_usdt, 4) : null) +
+          rowOptional('Reason', t.reason || null) +
+        '</div>';
+
+      // Position near cursor, offset to the side, clamp inside viewport.
+      const chartRect = $mainPane.getBoundingClientRect();
+      let x = chartRect.left + param.point.x + 18;
+      let y = chartRect.top  + param.point.y + 18;
+      $tradeTooltip.style.display = 'block';
+      $tradeTooltip.style.left = x + 'px';
+      $tradeTooltip.style.top  = y + 'px';
+      const tip = $tradeTooltip.getBoundingClientRect();
+      if (tip.right > window.innerWidth - 4) {
+        x = chartRect.left + param.point.x - tip.width - 18;
+        $tradeTooltip.style.left = Math.max(4, x) + 'px';
+      }
+      if (tip.bottom > window.innerHeight - 4) {
+        y = chartRect.top + param.point.y - tip.height - 18;
+        $tradeTooltip.style.top = Math.max(4, y) + 'px';
+      }
+    }
 
     function _redrawCanvas() {
       ctx.clearRect(0, 0, $canvas.width, $canvas.height);
@@ -539,6 +627,11 @@
         entryPrice: data.entry_price, exitPrice: data.exit_price,
         pnl: data.pnl,
       });
+      // Index the full payload under both timestamps so the hover tooltip
+      // can find the trade no matter which arrow the user is over.
+      if (data.entry_time != null) _tradeByTime[data.entry_time] = data;
+      if (data.exit_time  != null) _tradeByTime[data.exit_time]  = data;
+
       const existing = candleSeries.markers() || [];
       candleSeries.setMarkers([
         ...existing,
@@ -552,6 +645,8 @@
       _rawCandles.length = 0;
       _equityData.length = 0;
       _tradeMarkers.length = 0;
+      for (const k in _tradeByTime) delete _tradeByTime[k];
+      if ($tradeTooltip) $tradeTooltip.style.display = 'none';
       _haPrev = null; _renkoLast = null;
 
       candleSeries.setData([]);

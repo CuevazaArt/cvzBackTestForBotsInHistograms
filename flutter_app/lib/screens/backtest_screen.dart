@@ -181,6 +181,17 @@ class _BacktestScreenState extends State<BacktestScreen> {
   final List<TradeRow> _trades = [];
   late final _ChartDispatcher _dispatcher = _ChartDispatcher(_chartCtrl);
 
+  // ── Live HUD state ─────────────────────────────────────────────
+  // Cleared on each run. Driven by `equity`, `trade`, and `progress`
+  // events so the user can see how the run is going without scrolling
+  // to the results panel at the bottom.
+  double? _liveEquity;
+  double? _peakEquity;
+  double _liveDrawdownPct = 0.0;
+  double? _lastTradePnl;
+  DateTime? _runStartedAt;
+  String? _liveEta;
+
   StreamSubscription<WsEvent>? _wsSub;
 
   @override
@@ -378,16 +389,43 @@ class _BacktestScreenState extends State<BacktestScreen> {
         _dispatcher.addCandle(ev.data);
       case WsEventType.trade:
         _dispatcher.addTrade(ev.data);
+        final pnl = (ev.data['pnl'] as num?)?.toDouble();
         if (mounted) {
-          setState(() => _trades.add(TradeRow.fromWs(ev.data)));
+          setState(() {
+            _trades.add(TradeRow.fromWs(ev.data));
+            if (pnl != null) _lastTradePnl = pnl;
+          });
         }
       case WsEventType.equity:
         _dispatcher.addEquity(ev.data);
+        // Drive the live HUD off the aggregate equity series only — per-bot
+        // ticks would jitter the drawdown reading on multi-bot runs.
+        final botId = ev.data['bot_id'] as String? ?? 'total';
+        if (botId == 'total') {
+          final v = (ev.data['value'] as num?)?.toDouble();
+          if (v != null && mounted) {
+            setState(() {
+              _liveEquity = v;
+              if (_peakEquity == null || v > _peakEquity!) _peakEquity = v;
+              _liveDrawdownPct = _peakEquity == null || _peakEquity == 0
+                  ? 0.0
+                  : ((_peakEquity! - v) / _peakEquity!) * 100.0;
+            });
+          }
+        }
       case WsEventType.progress:
         if (mounted) {
           final pct = (ev.data['percent'] as num).toDouble();
+          String? eta;
+          if (_runStartedAt != null && pct > 0.5) {
+            final elapsed = DateTime.now().difference(_runStartedAt!).inMilliseconds;
+            final total = elapsed / (pct / 100.0);
+            final remaining = ((total - elapsed) / 1000.0).round();
+            eta = _formatEta(remaining);
+          }
           setState(() {
             _progress = pct;
+            _liveEta = eta;
             _statusText = 'Running backtest… ${pct.toStringAsFixed(0)}%';
           });
         }
@@ -495,6 +533,15 @@ class _BacktestScreenState extends State<BacktestScreen> {
       _wsError = null;
       _trades.clear();
       _statusText = 'Connecting to engine…';
+      // Reset live HUD so the previous run's numbers don't bleed into
+      // the new one. peakEquity seeds at the configured starting cash
+      // so drawdown reads correctly from the very first equity tick.
+      _liveEquity = _initialCash;
+      _peakEquity = _initialCash;
+      _liveDrawdownPct = 0.0;
+      _lastTradePnl = null;
+      _runStartedAt = DateTime.now();
+      _liveEta = null;
     });
     _dispatcher.reset();
     _chartCtrl.clear();
@@ -1057,6 +1104,26 @@ class _BacktestScreenState extends State<BacktestScreen> {
                 chartUrl: widget.chartUrl,
                 onReady: _fetchInitialChartData,
               ),
+              // Live HUD: shows equity / DD / last trade PnL / ETA while the
+              // run is in flight (and stays visible briefly while the result
+              // panel finishes painting so the user can see the final values).
+              if (_runState == _RunState.running ||
+                  _runState == _RunState.paused ||
+                  _runState == _RunState.done)
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: _LiveHud(
+                    initialCash: _initialCash,
+                    equity: _liveEquity,
+                    drawdownPct: _liveDrawdownPct,
+                    lastTradePnl: _lastTradePnl,
+                    progressPct: _progress,
+                    eta: _liveEta,
+                    isPaused: _runState == _RunState.paused,
+                    isDone: _runState == _RunState.done,
+                  ),
+                ),
               // Status bar overlay
               if (_runState != _RunState.idle || !_chartCtrl.isReady)
                 Positioned(
@@ -1129,6 +1196,173 @@ class _BacktestScreenState extends State<BacktestScreen> {
       // After dialog closes, refresh catalog (downloads may have completed).
       _loadCatalog();
     });
+  }
+
+  /// Compact human ETA: "12s", "3m 04s", "1h 12m".
+  static String _formatEta(int seconds) {
+    if (seconds <= 0) return '0s';
+    if (seconds < 60) return '${seconds}s';
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    if (m < 60) return '${m}m ${s.toString().padLeft(2, '0')}s';
+    final h = m ~/ 60;
+    final mm = m % 60;
+    return '${h}h ${mm.toString().padLeft(2, '0')}m';
+  }
+}
+
+// ── Live HUD overlay ───────────────────────────────────────────
+
+/// Compact panel pinned to the top-left of the chart while a run is
+/// running, paused, or just-finished. Driven by:
+///
+///  * `equity` events (`bot_id == 'total'`) → live equity + drawdown %
+///  * `trade` events → last realised PnL
+///  * `progress` events → ETA + percent
+///
+/// The widget is purely presentational — all numbers come in as
+/// constructor params so it stays cheap to rebuild every WS tick.
+class _LiveHud extends StatelessWidget {
+  final double initialCash;
+  final double? equity;
+  final double drawdownPct;
+  final double? lastTradePnl;
+  final double progressPct;
+  final String? eta;
+  final bool isPaused;
+  final bool isDone;
+
+  const _LiveHud({
+    required this.initialCash,
+    required this.equity,
+    required this.drawdownPct,
+    required this.lastTradePnl,
+    required this.progressPct,
+    required this.eta,
+    required this.isPaused,
+    required this.isDone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final eq = equity ?? initialCash;
+    final retPct = ((eq - initialCash) / initialCash) * 100.0;
+    final retColor = retPct >= 0 ? const Color(0xFF26A69A) : const Color(0xFFEF5350);
+    final ddColor  = drawdownPct > 0.01 ? const Color(0xFFEF5350) : const Color(0xFF6E7079);
+    final pnlColor = (lastTradePnl ?? 0) >= 0
+        ? const Color(0xFF26A69A)
+        : const Color(0xFFEF5350);
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xCC131722),
+          border: Border.all(color: const Color(0xFF2A2E39), width: 1),
+          borderRadius: BorderRadius.circular(4),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x66000000),
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: DefaultTextStyle.merge(
+          style: const TextStyle(
+            fontSize: 11,
+            color: Color(0xFFD1D4DC),
+            fontFamily: 'monospace',
+            height: 1.35,
+          ),
+          child: IntrinsicWidth(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: isDone
+                            ? const Color(0xFF26A69A)
+                            : (isPaused
+                                ? const Color(0xFFFFB300)
+                                : const Color(0xFF2962FF)),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isDone ? 'DONE' : (isPaused ? 'PAUSED' : 'LIVE'),
+                      style: const TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                        color: Color(0xFFB2B5BE),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${progressPct.toStringAsFixed(0)}%',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF787B86),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                _row('Equity', '\$${_fmt(eq)}',
+                    valueStyle: TextStyle(color: retColor, fontWeight: FontWeight.w600)),
+                _row('Return', '${retPct >= 0 ? '+' : ''}${retPct.toStringAsFixed(2)}%',
+                    valueStyle: TextStyle(color: retColor)),
+                _row('Drawdown', '${drawdownPct.toStringAsFixed(2)}%',
+                    valueStyle: TextStyle(color: ddColor)),
+                if (lastTradePnl != null)
+                  _row('Last PnL',
+                      '${lastTradePnl! >= 0 ? '+' : ''}\$${_fmt(lastTradePnl!)}',
+                      valueStyle: TextStyle(color: pnlColor)),
+                if (eta != null && !isDone)
+                  _row('ETA', eta!,
+                      valueStyle: const TextStyle(color: Color(0xFFB2B5BE))),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _row(String label, String value, {TextStyle? valueStyle}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 64,
+            child: Text(label,
+                style: const TextStyle(color: Color(0xFF787B86), fontSize: 10)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(value,
+                style: valueStyle ??
+                    const TextStyle(color: Color(0xFFD1D4DC), fontSize: 11)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _fmt(double v) {
+    final av = v.abs();
+    if (av >= 1_000_000) return '${(v / 1_000_000).toStringAsFixed(2)}M';
+    if (av >= 10_000) return v.toStringAsFixed(0);
+    return v.toStringAsFixed(2);
   }
 }
 
