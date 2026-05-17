@@ -402,6 +402,12 @@ class _BacktestScreenState extends State<BacktestScreen> {
             if (pnl != null) _lastTradePnl = pnl;
           });
         }
+      case WsEventType.botState:
+        // Bot internal state for the chart hover panel. Volume is already
+        // throttled at the engine to the candle cadence, so we forward
+        // directly without buffering (no need for a separate dispatcher
+        // bucket — a few hundred bytes per Nth bar is negligible).
+        _chartCtrl.addBotState(ev.data);
       case WsEventType.equity:
         _dispatcher.addEquity(ev.data);
         // Drive the live HUD off the aggregate equity series only — per-bot
