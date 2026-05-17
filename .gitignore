@@ -31,6 +31,12 @@ flutter_app/build/
 flutter_app/windows/flutter/ephemeral/
 flutter_app/.idea/
 flutter_app/pubspec.lock
+# Runtime UI state + user-generated presets (per-machine, not source).
+flutter_app/ui_state.json
+flutter_app/presets/
+
+# Claude Code worktree/session metadata
+.claude/
 
 # Env / secrets
 .env

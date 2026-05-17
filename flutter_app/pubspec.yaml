@@ -9,7 +9,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_inappwebview: ^6.1.5
+  # Switched from flutter_inappwebview to webview_windows — the inappwebview
+  # 6.x package ships with broken Windows includes (missing plugin_c_api.h
+  # and composition.desktop.interop.h), and webview_windows is a thin
+  # WebView2 wrapper that's known to compile cleanly with the rest of the
+  # toolchain. The chart UI only needs loadUrl + evaluateJavaScript +
+  # postMessage callbacks, which webview_windows supports natively.
+  webview_windows: ^0.4.0
   http: ^1.2.2
   web_socket_channel: ^3.0.1
   flutter_riverpod: ^2.5.1

@@ -7,7 +7,7 @@ import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import requests
 
@@ -64,6 +64,7 @@ class BinanceDownloader:
         date_from: str,
         date_to: str,
         batch_size: int = 1000,
+        progress_callback: Optional[Callable[[float, int, str], None]] = None,
     ) -> int:
         """Download candles from Binance and store them in SQLite.
 
@@ -73,6 +74,9 @@ class BinanceDownloader:
             date_from:  "YYYY-MM-DD" inclusive start
             date_to:    "YYYY-MM-DD" inclusive end (last ms of day)
             batch_size: candles per HTTP request (Binance max 1000)
+            progress_callback: optional ``(progress_pct, candles_added, message)``
+                callback invoked after each batch. ``progress_pct`` is in [0, 1].
+                Use it to forward live status to a job registry or UI.
 
         Returns:
             Number of new candles inserted (duplicates are skipped).
@@ -102,6 +106,12 @@ class BinanceDownloader:
 
             last_ts = int(batch[-1][0])
             if last_ts >= end_ts:
+                # Emit a final 100% tick so the UI doesn't end at e.g. 99.7%.
+                if progress_callback is not None:
+                    progress_callback(
+                        1.0, candles_added,
+                        f"{symbol} {timeframe} — {candles_added} candles",
+                    )
                 break
 
             tf_ms = self.TIMEFRAMES[timeframe] * 60 * 1000
@@ -115,6 +125,11 @@ class BinanceDownloader:
                 "%s %s — %d candles downloaded (%.1f%%)",
                 symbol, timeframe, candles_added, progress * 100,
             )
+            if progress_callback is not None:
+                progress_callback(
+                    progress, candles_added,
+                    f"{symbol} {timeframe} — {candles_added} candles ({progress * 100:.0f}%)",
+                )
 
         return candles_added
 
