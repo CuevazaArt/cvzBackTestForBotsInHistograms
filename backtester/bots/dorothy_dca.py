@@ -29,13 +29,13 @@ class DorothyDCA(BotBase):
         margin_drop_factor: float = 0.004,
         max_positions: int = 3,
         stop_loss_pct: float = 0.15,
-        risk_per_trade_pct: float = 5.0,
+        quote_order_qty: float = 7.0,
     ) -> None:
         self.profit_factor = profit_factor
         self.margin_drop_factor = margin_drop_factor
         self.max_positions = max_positions
         self.stop_loss_pct = stop_loss_pct
-        self.risk_per_trade_pct = risk_per_trade_pct
+        self.quote_order_qty = quote_order_qty
 
         self._last_buy_price: float | None = None
         self._sell_target: float | None = None
@@ -72,11 +72,11 @@ class DorothyDCA(BotBase):
                 "max": 0.5,
                 "step": 0.01,
             },
-            "risk_per_trade_pct": {
+            "quote_order_qty": {
                 "type": "float",
-                "default": 5.0,
+                "default": 7.0,
                 "min": 1.0,
-                "max": 20.0,
+                "max": 1000.0,
                 "step": 1.0,
             },
         }
@@ -130,7 +130,8 @@ class DorothyDCA(BotBase):
                     should_buy = True
 
             if should_buy:
-                qty = self.calc_qty(candle.close, portfolio, self.risk_per_trade_pct)
+                actual_usdt = min(float(portfolio.cash), self.quote_order_qty)
+                qty = actual_usdt / price if price > 0 else 0.0
                 if qty > 0:
                     orders.append(
                         {"side": "BUY", "qty": float(qty), "reason": "DCA_BUY"}

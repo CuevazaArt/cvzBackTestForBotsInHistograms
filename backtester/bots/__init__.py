@@ -2,36 +2,18 @@
 
 from typing import Any, Callable
 
-from backtester.bots.bollinger_reversion import BollingerReversion
 from backtester.bots.bot_base import BotBase
-from backtester.bots.donchian_breakout import DonchianBreakout
 from backtester.bots.dorothy_dca import DorothyDCA
-from backtester.bots.dsl import DSLBot
-from backtester.bots.ema_cross import EMACross
-from backtester.bots.grid_trading import GridTrading
-from backtester.bots.macd_cross import MACDCross
-from backtester.bots.rsi_reversion import RSIReversion
+from backtester.bots.elphaba_short import ElphabaShort
 
 BOT_REGISTRY: dict[str, Callable[..., Any]] = {
-    "BollingerReversion": BollingerReversion,
-    "DonchianBreakout": DonchianBreakout,
     "DorothyDCA": DorothyDCA,
-    "DSL": DSLBot,
-    "EMACross": EMACross,
-    "GridTrading": GridTrading,
-    "MACDCross": MACDCross,
-    "RSIReversion": RSIReversion,
+    "ElphabaShort": ElphabaShort,
 }
 
 __all__ = [
     "BOT_REGISTRY",
-    "BollingerReversion",
     "BotBase",
-    "DonchianBreakout",
     "DorothyDCA",
-    "DSLBot",
-    "EMACross",
-    "GridTrading",
-    "MACDCross",
-    "RSIReversion",
+    "ElphabaShort",
 ]

@@ -12,15 +12,9 @@ walk_forward``).
 
 from backtester.bots import (
     BOT_REGISTRY,
-    BollingerReversion,
     BotBase,
     DorothyDCA,
-    DSLBot,
-    DonchianBreakout,
-    EMACross,
-    GridTrading,
-    MACDCross,
-    RSIReversion,
+    ElphabaShort,
 )
 from backtester.analysis import run_stress_battery
 from backtester.core import (
@@ -49,14 +43,8 @@ __all__ = [
     # Bots
     "BotBase",
     "BOT_REGISTRY",
-    "EMACross",
-    "RSIReversion",
-    "MACDCross",
-    "BollingerReversion",
     "DorothyDCA",
-    "DSLBot",
-    "DonchianBreakout",
-    "GridTrading",
+    "ElphabaShort",
     # Data + infra
     "BinanceDownloader",
     "CredentialManager",

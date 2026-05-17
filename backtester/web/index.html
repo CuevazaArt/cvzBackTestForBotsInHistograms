@@ -174,7 +174,7 @@
     }
 
     // Series ------------------------------------------------------
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
       upColor: '#26a69a',   downColor: '#ef5350',
       wickUpColor: '#26a69a', wickDownColor: '#ef5350',
       borderVisible: false,
@@ -183,7 +183,7 @@
       scaleMargins: { top: 0.05, bottom: 0.25 },
     });
 
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
       color: '#26a69a',
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
@@ -193,10 +193,13 @@
       visible: false,
     });
 
-    const equitySeries = chart.addLineSeries({
+    const equitySeries = chart.addSeries(LightweightCharts.LineSeries, {
       color: '#2196F3', lineWidth: 1,
       priceScaleId: 'equity', title: 'Equity',
     });
+
+    let _markerData = [];
+    let _markersPrimitive = LightweightCharts.createSeriesMarkers(candleSeries, _markerData);
     chart.priceScale('equity').applyOptions({
       scaleMargins: { top: 0.82, bottom: 0 },
       visible: true,
@@ -467,7 +470,7 @@
       (keys || []).forEach((key, i) => {
         if (_overlaySeries[key]) return;
         const dashed = key.includes('_middle');
-        _overlaySeries[key] = chart.addLineSeries({
+        _overlaySeries[key] = chart.addSeries(LightweightCharts.LineSeries, {
           color: OVERLAY_COLORS[i % OVERLAY_COLORS.length],
           lineWidth: dashed ? 1 : 2,
           lineStyle: dashed ? 1 : 0,
@@ -484,13 +487,13 @@
       keys.forEach((key, i) => {
         if (_oscSeries[key]) return;
         if (key.endsWith('_hist')) {
-          _oscSeries[key] = oscChart.addHistogramSeries({
+          _oscSeries[key] = oscChart.addSeries(LightweightCharts.HistogramSeries, {
             color: 'rgba(38,166,154,0.6)',
             priceScaleId: 'right',
             title: '',
           });
         } else {
-          _oscSeries[key] = oscChart.addLineSeries({
+          _oscSeries[key] = oscChart.addSeries(LightweightCharts.LineSeries, {
             color: OSC_COLORS[i % OSC_COLORS.length],
             lineWidth: 1,
             priceScaleId: 'right',
@@ -504,7 +507,7 @@
       (botIds || []).filter((id) => id !== 'total').forEach((id, i) => {
         if (_botEquitySeries[id]) return;
         const color = BOT_COLORS[(i + 1) % BOT_COLORS.length];
-        _botEquitySeries[id] = chart.addLineSeries({
+        _botEquitySeries[id] = chart.addSeries(LightweightCharts.LineSeries, {
           color,
           lineWidth: 1,
           lineStyle: 1,
@@ -632,12 +635,12 @@
       if (data.entry_time != null) _tradeByTime[data.entry_time] = data;
       if (data.exit_time  != null) _tradeByTime[data.exit_time]  = data;
 
-      const existing = candleSeries.markers() || [];
-      candleSeries.setMarkers([
-        ...existing,
+      _markerData.push(
         { time: data.entry_time, position: 'belowBar', color: buyCol, shape: 'arrowUp',   text: 'B' },
         { time: data.exit_time,  position: 'aboveBar', color: selCol, shape: 'arrowDown', text: 'S' },
-      ]);
+      );
+      _markerData.sort((a, b) => a.time - b.time);
+      _markersPrimitive.setMarkers(_markerData);
       _redrawCanvas();
     };
 
@@ -645,6 +648,8 @@
       _rawCandles.length = 0;
       _equityData.length = 0;
       _tradeMarkers.length = 0;
+      _markerData.length = 0;
+      if (_markersPrimitive) _markersPrimitive.setMarkers([]);
       for (const k in _tradeByTime) delete _tradeByTime[k];
       if ($tradeTooltip) $tradeTooltip.style.display = 'none';
       _haPrev = null; _renkoLast = null;
