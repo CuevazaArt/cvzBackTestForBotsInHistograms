@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,11 +40,38 @@ from backtester.api.ws import router as ws_router
 _LOG = logging.getLogger("backtester.api.server")
 
 
+def _ensure_chart_library() -> None:
+    """Best-effort vendor of Lightweight Charts for /static chart page."""
+    js_path = (
+        Path(__file__).resolve().parents[1]
+        / "web"
+        / "assets"
+        / "js"
+        / "lightweight-charts.standalone.production.js"
+    )
+    if js_path.exists():
+        return
+
+    js_path.parent.mkdir(parents=True, exist_ok=True)
+    url = (
+        "https://unpkg.com/lightweight-charts@4.2.3/dist/"
+        "lightweight-charts.standalone.production.js"
+    )
+    try:
+        with urlopen(url, timeout=15) as resp:  # nosec B310
+            body = resp.read()
+        js_path.write_bytes(body)
+        _LOG.info("Vendored chart library: %s (%d bytes)", js_path, len(body))
+    except (OSError, URLError, TimeoutError) as exc:
+        _LOG.warning("Could not vendor chart library at startup: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.settings = load_api_settings()
     is_test = getattr(app.state, "is_test", False)
     app.state.ctx = AppContext.build(duckdb_read_only=is_test)
+    _ensure_chart_library()
     _LOG.info(
         "AppContext initialized: %s | auth=%s",
         app.state.ctx.base_dir,

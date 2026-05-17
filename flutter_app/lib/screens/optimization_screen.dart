@@ -1256,8 +1256,10 @@ class _DropdownChip<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final effectiveValue =
+        value != null && items.contains(value) ? value : null;
     return DropdownButton<T>(
-      value: value,
+      value: effectiveValue,
       hint: Text(hint, style: const TextStyle(color: Color(0xFF787B86), fontSize: 13)),
       items: items.map((e) => DropdownMenuItem(value: e, child: Text(e.toString(), style: const TextStyle(fontSize: 13)))).toList(),
       onChanged: onChanged,

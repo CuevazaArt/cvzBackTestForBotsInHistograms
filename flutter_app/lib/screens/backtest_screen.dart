@@ -289,10 +289,16 @@ class _BacktestScreenState extends State<BacktestScreen> {
           _symbols = syms;
           _bots = bots;
           _catalogError = null;
+          final symbolNames = syms.map((s) => s.symbol).toSet();
+          if (_selectedSymbol != null && !symbolNames.contains(_selectedSymbol)) {
+            _selectedSymbol = null;
+          }
           if (_symbols.isNotEmpty && _selectedSymbol == null) {
             _selectedSymbol = _symbols.first.symbol;
           }
           final availableBots = bots.map((b) => b.name).toList()..sort();
+          _selectedBots =
+              _selectedBots.where(availableBots.contains).toList(growable: false);
           if (availableBots.isNotEmpty && _selectedBots.isEmpty) {
             _selectedBots = [availableBots.first];
             _fetchBotParams(availableBots.first);
@@ -1479,10 +1485,10 @@ class _TopBar extends StatelessWidget {
         child: Row(
           children: [
             _DropdownChip<String>(
-              value: selectedSymbol,
+              value: distinctSymbols.isEmpty ? null : selectedSymbol,
               hint: 'Symbol',
               items: distinctSymbols,
-              onChanged: onSymbolChanged,
+              onChanged: distinctSymbols.isEmpty ? null : onSymbolChanged,
             ),
             const SizedBox(width: 8),
             _DropdownChip<String>(
@@ -2049,19 +2055,23 @@ class _DropdownChip<T> extends StatelessWidget {
   final T? value;
   final String hint;
   final List<T> items;
-  final ValueChanged<T?> onChanged;
+  final ValueChanged<T?>? onChanged;
 
   const _DropdownChip({
     required this.value,
     required this.hint,
     required this.items,
-    required this.onChanged,
+    this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Flutter asserts when value is set but missing from items (e.g. saved
+    // symbol before catalog load or empty DB).
+    final effectiveValue =
+        value != null && items.contains(value) ? value : null;
     return DropdownButton<T>(
-      value: value,
+      value: effectiveValue,
       hint: Text(
         hint,
         style: const TextStyle(color: Color(0xFF787B86), fontSize: 13),
