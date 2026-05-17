@@ -6,26 +6,205 @@
   <title>CVZ Chart</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #1a1a2e; overflow: hidden; }
+    html, body { width: 100%; height: 100%; background: #1a1a2e; overflow: hidden; }
     #chart { width: 100vw; height: 100vh; }
+    #err {
+      display: none; position: absolute; top: 8px; left: 8px;
+      color: #ff6b6b; font-family: monospace; font-size: 12px;
+      background: rgba(0,0,0,0.7); padding: 8px; border-radius: 4px;
+      max-width: 80vw;
+    }
   </style>
 </head>
 <body>
   <div id="chart"></div>
+  <div id="err"></div>
   <script src="lightweight-charts.standalone.production.js"></script>
   <script>
-    // Chart initialization — will be populated in Phase 6
-    window.__chartReady = false;
-    window.__post = function(msg) {
-      if (window.chrome && window.chrome.webview) {
-        window.chrome.webview.postMessage(msg);
-      }
-    };
+    (function () {
+      'use strict';
 
-    document.addEventListener('DOMContentLoaded', function() {
+      // ─── Bridge helpers ───────────────────────────────────────────
+      window.__chartReady = false;
+      window.__post = function (msg) {
+        try {
+          if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
+            window.chrome.webview.postMessage(msg);
+          }
+        } catch (_) { /* swallow */ }
+      };
+
+      function showError(text) {
+        var el = document.getElementById('err');
+        el.style.display = 'block';
+        el.textContent = text;
+        window.__post('chart:error:' + text);
+      }
+
+      // ─── Library readiness check ──────────────────────────────────
+      if (typeof LightweightCharts === 'undefined') {
+        showError('LightweightCharts library failed to load.');
+        return;
+      }
+      window.__post('chart:lib-version:' + (LightweightCharts.version ? LightweightCharts.version() : 'unknown'));
+
+      // ─── Create chart (v5 API) ────────────────────────────────────
+      var chartEl = document.getElementById('chart');
+      var chart = LightweightCharts.createChart(chartEl, {
+        layout: {
+          background: { type: 'solid', color: '#1a1a2e' },
+          textColor: '#d1d5db',
+          fontFamily: 'system-ui, sans-serif',
+        },
+        grid: {
+          vertLines: { color: '#2a2a3e' },
+          horzLines: { color: '#2a2a3e' },
+        },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        rightPriceScale: { borderColor: '#3a3a4e' },
+        timeScale: { borderColor: '#3a3a4e', timeVisible: true, secondsVisible: false },
+      });
+
+      var candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+        upColor: '#22c55e',
+        downColor: '#ef4444',
+        borderUpColor: '#16a34a',
+        borderDownColor: '#dc2626',
+        wickUpColor: '#16a34a',
+        wickDownColor: '#dc2626',
+      });
+
+      // Markers primitive (v5 way — `setMarkers` on series no longer exists).
+      var markersPrimitive = LightweightCharts.createSeriesMarkers(candleSeries, []);
+      var _markers = [];
+
+      // Overlay line series (indicators) keyed by id.
+      var _overlays = {};
+
+      // Equity curve as a separate line series in its own price scale.
+      var equitySeries = null;
+
+      // ─── Resize handling ──────────────────────────────────────────
+      function fitToContainer() {
+        chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+      }
+      window.addEventListener('resize', fitToContainer);
+      fitToContainer();
+
+      // ─── Public API exposed to Dart ───────────────────────────────
+
+      // Replace all candles in a single batch.
+      window.setCandles = function (candles) {
+        try {
+          candleSeries.setData(candles.map(function (c) {
+            return { time: Math.floor(c.t / 1000), open: c.o, high: c.h, low: c.l, close: c.c };
+          }));
+          window.__post('chart:setCandles:' + candles.length);
+        } catch (e) { showError('setCandles: ' + e.message); }
+      };
+
+      // Append/update a single candle (replay mode).
+      window.upsertCandle = function (c) {
+        try {
+          candleSeries.update({
+            time: Math.floor(c.t / 1000),
+            open: c.o, high: c.h, low: c.l, close: c.c,
+          });
+        } catch (e) { showError('upsertCandle: ' + e.message); }
+      };
+
+      // Add a trade marker (dedup by time+botId).
+      window.addMarker = function (m) {
+        try {
+          var dedupKey = m.time + '_' + (m.botId || '');
+          if (_markers.some(function (x) { return x._key === dedupKey; })) return;
+          var marker = {
+            _key: dedupKey,
+            time: Math.floor(m.time / 1000),
+            position: m.position || 'belowBar',
+            color: m.color || '#22c55e',
+            shape: m.shape || 'arrowUp',
+            text: m.text || '',
+          };
+          _markers.push(marker);
+          _markers.sort(function (a, b) { return a.time - b.time; });
+          markersPrimitive.setMarkers(_markers);
+        } catch (e) { showError('addMarker: ' + e.message); }
+      };
+
+      // Indicator overlay (line series). Replace data for that key.
+      window.setIndicator = function (key, points, color) {
+        try {
+          if (!_overlays[key]) {
+            _overlays[key] = chart.addSeries(LightweightCharts.LineSeries, {
+              color: color || '#fbbf24',
+              lineWidth: 2,
+              priceLineVisible: false,
+              lastValueVisible: false,
+            });
+          }
+          _overlays[key].setData(points.map(function (p) {
+            return { time: Math.floor(p.t / 1000), value: p.v };
+          }));
+        } catch (e) { showError('setIndicator: ' + e.message); }
+      };
+
+      window.removeIndicator = function (key) {
+        try {
+          if (_overlays[key]) {
+            chart.removeSeries(_overlays[key]);
+            delete _overlays[key];
+          }
+        } catch (e) { showError('removeIndicator: ' + e.message); }
+      };
+
+      // Equity curve.
+      window.setEquityCurve = function (points) {
+        try {
+          if (!equitySeries) {
+            equitySeries = chart.addSeries(LightweightCharts.LineSeries, {
+              color: '#60a5fa',
+              lineWidth: 2,
+              priceLineVisible: false,
+              lastValueVisible: false,
+              priceScaleId: 'equity',
+            });
+            chart.priceScale('equity').applyOptions({
+              scaleMargins: { top: 0.7, bottom: 0 },
+            });
+          }
+          equitySeries.setData(points.map(function (p) {
+            return { time: Math.floor(p.t / 1000), value: p.v };
+          }));
+        } catch (e) { showError('setEquityCurve: ' + e.message); }
+      };
+
+      // Clear everything (used on new run).
+      window.clearChart = function () {
+        try {
+          candleSeries.setData([]);
+          _markers = [];
+          markersPrimitive.setMarkers(_markers);
+          Object.keys(_overlays).forEach(function (k) {
+            try { chart.removeSeries(_overlays[k]); } catch (_) {}
+            delete _overlays[k];
+          });
+          if (equitySeries) {
+            try { chart.removeSeries(equitySeries); } catch (_) {}
+            equitySeries = null;
+          }
+          window.__post('chart:cleared');
+        } catch (e) { showError('clearChart: ' + e.message); }
+      };
+
+      window.fitContent = function () {
+        try { chart.timeScale().fitContent(); } catch (_) {}
+      };
+
+      // Mark ready — Dart side polls or listens for this message.
       window.__chartReady = true;
       window.__post('chart:ready');
-    });
+    })();
   </script>
 </body>
 </html>

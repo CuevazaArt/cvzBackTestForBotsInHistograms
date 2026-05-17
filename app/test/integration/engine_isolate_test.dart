@@ -91,7 +91,7 @@ void main() {
         bots: [BotRegistry.create('ema_cross')],
         candles: candles,
         controller: controller,
-        perCandle: (i, _, __) async {
+        perCandle: (i, c, pf) async {
           if (i == 5) controller.cancel();
         },
       );

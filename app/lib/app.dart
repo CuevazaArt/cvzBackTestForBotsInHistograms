@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'screens/home_screen.dart';
 
 class CvzBacktesterApp extends StatelessWidget {
   const CvzBacktesterApp({super.key});
@@ -15,11 +16,7 @@ class CvzBacktesterApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const Scaffold(
-        body: Center(
-          child: Text('CVZ Backtester — Phase 0 scaffold complete'),
-        ),
-      ),
+      home: const HomeScreen(),
     );
   }
 }
