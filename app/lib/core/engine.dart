@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'models/candle.dart';
 import 'models/order.dart';
 import 'models/portfolio.dart';
@@ -7,6 +9,7 @@ import 'models/backtest_result.dart';
 import 'config.dart';
 import 'order_matcher.dart';
 import 'bracket_manager.dart';
+import 'run_controller.dart';
 import '../bots/bot_base.dart';
 
 class BacktestEngine {
@@ -25,10 +28,7 @@ class BacktestEngine {
   int _nextOrderId() => ++_orderIdSeq;
   int _nextTradeId() => ++_tradeIdSeq;
 
-  /// Runs [bots] over [candles] and returns the final BacktestResult.
-  ///
-  /// If [perCandle] is provided, it's invoked after each bar with
-  /// the current bar index — used by the streaming layer to emit events.
+  /// Synchronous run. See [runAsync] for the controller-aware variant.
   BacktestResult run({
     required List<BotBase> bots,
     required List<Candle> candles,
@@ -111,6 +111,119 @@ class BacktestEngine {
           exitTsMs: lastCandle.timestampMs,
           reason: TriggerReason.manual,
         );
+      }
+    }
+
+    return _aggregateResult(
+      bots: bots,
+      candles: candles,
+      portfolios: portfolios,
+      equityCurve: aggregateEquity,
+    );
+  }
+
+  /// Async run with cooperative pause/step/cancel via [controller] and
+  /// per-candle hook. Yields control between bars so the isolate event
+  /// loop can deliver commands. Returns null if cancelled mid-run.
+  Future<BacktestResult?> runAsync({
+    required List<BotBase> bots,
+    required List<Candle> candles,
+    required RunController controller,
+    FutureOr<void> Function(int index, Candle candle, Portfolio portfolio)?
+        perCandle,
+    FutureOr<void> Function(Trade trade)? onTrade,
+  }) async {
+    if (candles.isEmpty || bots.isEmpty) {
+      return _emptyResult(candles);
+    }
+
+    final capitalPerBot = config.initialCash / bots.length;
+    final portfolios = <String, Portfolio>{
+      for (final b in bots) b.id: Portfolio(cash: capitalPerBot),
+    };
+    for (final bot in bots) {
+      bot.prepareIndicators(candles);
+    }
+    _peakEquity = config.initialCash;
+    _haltedByCircuit = false;
+    final aggregateEquity = <double>[];
+
+    for (int i = 0; i < candles.length; i++) {
+      if (controller.isCancelled) return null;
+      await controller.waitIfPaused();
+      if (controller.isCancelled) return null;
+
+      final candle = candles[i];
+
+      for (final pf in portfolios.values) {
+        for (final pos in pf.positions) {
+          pos.updateExcursion(candle.close);
+        }
+        for (final po in pf.pendingOrders) {
+          OrderMatcher.updateTrailingAnchor(po, candle.high, candle.low);
+        }
+      }
+
+      final tradeCountBefore = portfolios.values
+          .fold(0, (s, pf) => s + pf.trades.length);
+
+      for (final entry in portfolios.entries) {
+        _processPendingOrders(entry.value, candle);
+      }
+
+      final aggregateCurrent = portfolios.values
+          .fold(0.0, (s, pf) => s + pf.equity(candle.close));
+      if (aggregateCurrent > _peakEquity) _peakEquity = aggregateCurrent;
+      final ddPct = (_peakEquity - aggregateCurrent) / _peakEquity * 100;
+      if (config.maxDrawdownHaltPct != null &&
+          ddPct >= config.maxDrawdownHaltPct!) {
+        _haltedByCircuit = true;
+      }
+
+      if (!_haltedByCircuit) {
+        for (final bot in bots) {
+          final pf = portfolios[bot.id]!;
+          final orders = bot.onCandle(candle, pf);
+          for (final req in orders) {
+            _routeOrder(req, pf, candle);
+          }
+        }
+      }
+
+      aggregateEquity.add(aggregateCurrent);
+
+      // Emit any trades that were filled this bar (pending + market both go
+      // through _closePartial which appends to pf.trades).
+      if (onTrade != null) {
+        for (final pf in portfolios.values) {
+          if (pf.trades.length > tradeCountBefore) {
+            for (final t in pf.trades.skip(tradeCountBefore)) {
+              await onTrade(t);
+            }
+          }
+        }
+      }
+
+      if (perCandle != null) {
+        await perCandle(i, candle, portfolios.values.first);
+      }
+
+      await controller.maybeSleep();
+    }
+
+    // Force-close at final candle if not cancelled.
+    if (!controller.isCancelled) {
+      final lastCandle = candles.last;
+      for (final pf in portfolios.values) {
+        for (final pos in List<Position>.from(pf.positions)) {
+          _closePosition(
+            pf: pf,
+            position: pos,
+            exitPrice: lastCandle.close,
+            exitTsMs: lastCandle.timestampMs,
+            reason: TriggerReason.manual,
+          );
+        }
       }
     }
 
