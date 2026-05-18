@@ -114,13 +114,13 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                 return ListView(
                   children: [
                     for (final entry in snap.data!.entries)
-                      Card(
-                        child: ListTile(
-                          leading: const Icon(Icons.candlestick_chart),
-                          title: Text(entry.key),
-                          subtitle: Text(entry.value.join(', ')),
+                      for (final tf in entry.value)
+                        _SeriesTile(
+                          symbol: entry.key,
+                          timeframe: tf,
+                          db: db,
+                          onDeleted: () => setState(() {}),
                         ),
-                      ),
                   ],
                 );
               },
@@ -199,5 +199,74 @@ class _StatusBox extends StatelessWidget {
           ),
         ),
     };
+  }
+}
+
+class _SeriesTile extends StatefulWidget {
+  final String symbol;
+  final String timeframe;
+  final dynamic db;
+  final VoidCallback onDeleted;
+  const _SeriesTile({
+    required this.symbol,
+    required this.timeframe,
+    required this.db,
+    required this.onDeleted,
+  });
+
+  @override
+  State<_SeriesTile> createState() => _SeriesTileState();
+}
+
+class _SeriesTileState extends State<_SeriesTile> {
+  int? _count;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCount();
+  }
+
+  Future<void> _loadCount() async {
+    final count = await widget.db.candles.countCandles(widget.symbol, widget.timeframe);
+    if (mounted) setState(() => _count = count);
+  }
+
+  Future<void> _delete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete series?'),
+        content: Text('Remove all ${widget.symbol} ${widget.timeframe} candles?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await widget.db.candles.deleteSymbol(widget.symbol, widget.timeframe);
+      widget.onDeleted();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.candlestick_chart),
+        title: Text('${widget.symbol}  ${widget.timeframe}'),
+        subtitle: Text(_count != null ? '$_count candles' : 'loading...'),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete_outline, color: Colors.red),
+          tooltip: 'Delete series',
+          onPressed: _delete,
+        ),
+      ),
+    );
   }
 }
