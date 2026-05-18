@@ -4,10 +4,12 @@ import 'package:intl/intl.dart';
 import '../../analysis/metrics.dart';
 import '../../core/models/backtest_result.dart';
 import '../../core/models/candle.dart';
+import '../../core/models/trade.dart';
 import '../../state/backtest_state.dart';
 
 class ResultsBar extends StatelessWidget {
   final BacktestStatus status;
+  final String timeframe;
   final String markersMode;
   final bool indicatorsVisible;
   final bool equityVisible;
@@ -18,6 +20,7 @@ class ResultsBar extends StatelessWidget {
   const ResultsBar({
     super.key,
     required this.status,
+    required this.timeframe,
     required this.markersMode,
     required this.indicatorsVisible,
     required this.equityVisible,
@@ -54,6 +57,7 @@ class ResultsBar extends StatelessWidget {
           ),
         BacktestDone(:final result) => _DoneBar(
             result: result,
+            timeframe: timeframe,
             markersMode: markersMode,
             indicatorsVisible: indicatorsVisible,
             equityVisible: equityVisible,
@@ -260,6 +264,7 @@ class _CandleInfo extends StatelessWidget {
 
 class _DoneBar extends StatelessWidget {
   final BacktestResult result;
+  final String timeframe;
   final String markersMode;
   final bool indicatorsVisible;
   final bool equityVisible;
@@ -269,6 +274,7 @@ class _DoneBar extends StatelessWidget {
 
   const _DoneBar({
     required this.result,
+    required this.timeframe,
     required this.markersMode,
     required this.indicatorsVisible,
     required this.equityVisible,
@@ -279,7 +285,7 @@ class _DoneBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final m = MetricsCalculator.compute(result, timeframe: '1h');
+    final m = MetricsCalculator.compute(result, timeframe: timeframe);
     final retColor = result.returnPct >= 0 ? Colors.green : Colors.red;
 
     return Row(
@@ -334,6 +340,13 @@ class _DoneBar extends StatelessWidget {
             ('MAE', '${m.avgMae.toStringAsFixed(2)}%'),
           ]),
         ),
+        // Trades table button
+        IconButton(
+          icon: const Icon(Icons.table_rows_outlined, size: 18),
+          tooltip: 'Trade log',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _showTradesDialog(context, result),
+        ),
         _ChartToggles(
           markersMode: markersMode,
           indicatorsVisible: indicatorsVisible,
@@ -343,6 +356,13 @@ class _DoneBar extends StatelessWidget {
           onEquityVisibleChanged: onEquityVisibleChanged,
         ),
       ],
+    );
+  }
+
+  void _showTradesDialog(BuildContext context, BacktestResult result) {
+    showDialog(
+      context: context,
+      builder: (_) => TradesTableDialog(trades: result.trades),
     );
   }
 }
@@ -393,6 +413,204 @@ class _ErrorBar extends StatelessWidget {
               overflow: TextOverflow.ellipsis),
         ),
       ],
+    );
+  }
+}
+
+// ─── Sortable Trades Table Dialog ──────────────────────────────────────────
+
+enum _TradeSort { id, entryTime, exitTime, pnl, pnlPct, side, duration }
+
+class TradesTableDialog extends StatefulWidget {
+  final List<Trade> trades;
+  const TradesTableDialog({super.key, required this.trades});
+  @override
+  State<TradesTableDialog> createState() => _TradesTableDialogState();
+}
+
+class _TradesTableDialogState extends State<TradesTableDialog> {
+  _TradeSort _sortBy = _TradeSort.id;
+  bool _ascending = true;
+  final _tf = DateFormat('MM-dd HH:mm');
+
+  List<Trade> get _sorted {
+    final list = List<Trade>.from(widget.trades);
+    list.sort((a, b) {
+      int cmp;
+      switch (_sortBy) {
+        case _TradeSort.id:
+          cmp = a.id.compareTo(b.id);
+        case _TradeSort.entryTime:
+          cmp = a.entryTimestampMs.compareTo(b.entryTimestampMs);
+        case _TradeSort.exitTime:
+          cmp = a.exitTimestampMs.compareTo(b.exitTimestampMs);
+        case _TradeSort.pnl:
+          cmp = a.pnl.compareTo(b.pnl);
+        case _TradeSort.pnlPct:
+          cmp = a.pnlPct.compareTo(b.pnlPct);
+        case _TradeSort.side:
+          cmp = a.side.name.compareTo(b.side.name);
+        case _TradeSort.duration:
+          cmp = a.duration.compareTo(b.duration);
+      }
+      return _ascending ? cmp : -cmp;
+    });
+    return list;
+  }
+
+  void _onSort(_TradeSort col) {
+    setState(() {
+      if (_sortBy == col) {
+        _ascending = !_ascending;
+      } else {
+        _sortBy = col;
+        _ascending = col == _TradeSort.id || col == _TradeSort.entryTime;
+      }
+    });
+  }
+
+  Widget _header(String label, _TradeSort col, {double? width}) {
+    final active = _sortBy == col;
+    return InkWell(
+      onTap: () => _onSort(col),
+      child: SizedBox(
+        width: width,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: TextStyle(
+              fontSize: 11,
+              fontWeight: active ? FontWeight.bold : FontWeight.w600,
+              color: active ? Theme.of(context).colorScheme.primary : null,
+            )),
+            if (active)
+              Icon(_ascending ? Icons.arrow_upward : Icons.arrow_downward, size: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final trades = _sorted;
+    final wins = trades.where((t) => t.isWin).length;
+    final totalPnl = trades.fold(0.0, (s, t) => s + t.pnl);
+
+    return Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 900, maxHeight: 600),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text('Trade Log', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(width: 12),
+                  Text(
+                    '${trades.length} trades  |  $wins W / ${trades.length - wins} L  |  PnL: ${totalPnl.toStringAsFixed(2)}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // Column headers
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(width: 36, child: _header('#', _TradeSort.id)),
+                    SizedBox(width: 48, child: _header('Side', _TradeSort.side)),
+                    SizedBox(width: 90, child: _header('Entry', _TradeSort.entryTime)),
+                    SizedBox(width: 90, child: _header('Exit', _TradeSort.exitTime)),
+                    const SizedBox(width: 80, child: Text('Entry \$', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600))),
+                    const SizedBox(width: 80, child: Text('Exit \$', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600))),
+                    SizedBox(width: 80, child: _header('PnL', _TradeSort.pnl)),
+                    SizedBox(width: 60, child: _header('PnL%', _TradeSort.pnlPct)),
+                    const SizedBox(width: 50, child: Text('MFE%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600))),
+                    const SizedBox(width: 50, child: Text('MAE%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600))),
+                    SizedBox(width: 70, child: _header('Dur', _TradeSort.duration)),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              // Scrollable trade rows
+              Expanded(
+                child: ListView.builder(
+                  itemCount: trades.length,
+                  itemExtent: 26,
+                  itemBuilder: (context, i) {
+                    final t = trades[i];
+                    final entryDt = DateTime.fromMillisecondsSinceEpoch(t.entryTimestampMs, isUtc: true);
+                    final exitDt = DateTime.fromMillisecondsSinceEpoch(t.exitTimestampMs, isUtc: true);
+                    final pnlColor = t.isWin ? Colors.green : Colors.red;
+                    final dur = t.duration;
+                    final durStr = dur.inHours > 0
+                        ? '${dur.inHours}h${dur.inMinutes.remainder(60)}m'
+                        : '${dur.inMinutes}m';
+
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      color: i.isEven ? Colors.transparent : Theme.of(context).colorScheme.surfaceContainerLow,
+                      child: Row(
+                        children: [
+                          SizedBox(width: 36, child: Text('${t.id}', style: const TextStyle(fontSize: 10, color: Colors.grey))),
+                          SizedBox(
+                            width: 48,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: t.side.name == 'long' ? Colors.green.withAlpha(20) : Colors.red.withAlpha(20),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                              child: Text(
+                                t.side.name.toUpperCase(),
+                                style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: t.side.name == 'long' ? Colors.green : Colors.red),
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: 90, child: Text(_tf.format(entryDt), style: const TextStyle(fontSize: 10, fontFamily: 'monospace'))),
+                          SizedBox(width: 90, child: Text(_tf.format(exitDt), style: const TextStyle(fontSize: 10, fontFamily: 'monospace'))),
+                          SizedBox(width: 80, child: Text(t.entryPrice.toStringAsFixed(2), style: const TextStyle(fontSize: 10, fontFamily: 'monospace'))),
+                          SizedBox(width: 80, child: Text(t.exitPrice.toStringAsFixed(2), style: const TextStyle(fontSize: 10, fontFamily: 'monospace'))),
+                          SizedBox(
+                            width: 80,
+                            child: Text(
+                              '${t.pnl >= 0 ? "+" : ""}${t.pnl.toStringAsFixed(2)}',
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: pnlColor, fontFamily: 'monospace'),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 60,
+                            child: Text(
+                              '${t.pnlPct >= 0 ? "+" : ""}${t.pnlPct.toStringAsFixed(1)}%',
+                              style: TextStyle(fontSize: 10, color: pnlColor),
+                            ),
+                          ),
+                          SizedBox(width: 50, child: Text('${t.mfe.toStringAsFixed(1)}%', style: const TextStyle(fontSize: 10))),
+                          SizedBox(width: 50, child: Text('${t.mae.toStringAsFixed(1)}%', style: const TextStyle(fontSize: 10))),
+                          SizedBox(width: 70, child: Text(durStr, style: const TextStyle(fontSize: 10, color: Colors.grey))),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

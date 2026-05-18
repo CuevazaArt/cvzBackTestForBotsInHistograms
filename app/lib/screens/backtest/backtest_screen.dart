@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../bots/registry.dart';
 import '../../core/config.dart';
 import '../../core/models/candle.dart';
+import '../../indicators/indicator.dart';
 import '../../indicators/registry.dart';
 import '../../services/engine_messages.dart';
 import '../../state/backtest_state.dart';
@@ -40,6 +41,11 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
 
   List<Candle>? _lastCandles;
 
+  // Progressive indicator state — kept alive across candles during a run
+  final Map<String, Indicator> _liveIndicators = {};
+  final Map<String, String> _liveIndicatorColors = {};
+  int _lastRenderedIndex = -1;
+
   @override
   void initState() {
     super.initState();
@@ -51,6 +57,57 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
   void dispose() {
     _chartCtrl.dispose();
     super.dispose();
+  }
+
+  void _initLiveIndicators() {
+    _liveIndicators.clear();
+    _liveIndicatorColors.clear();
+    _lastRenderedIndex = -1;
+
+    if (_selectedBot == 'ema_cross') {
+      _liveIndicators['EMA Fast'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['fastPeriod'] ?? 12});
+      _liveIndicatorColors['EMA Fast'] = '#fbbf24';
+      _liveIndicators['EMA Slow'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['slowPeriod'] ?? 26});
+      _liveIndicatorColors['EMA Slow'] = '#60a5fa';
+    } else if (_selectedBot == 'macd_cross') {
+      _liveIndicators['EMA Fast'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['fastPeriod'] ?? 12});
+      _liveIndicatorColors['EMA Fast'] = '#fbbf24';
+      _liveIndicators['EMA Slow'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['slowPeriod'] ?? 26});
+      _liveIndicatorColors['EMA Slow'] = '#60a5fa';
+    } else if (_selectedBot == 'bollinger_reversion') {
+      _liveIndicators['BB Mid'] = IndicatorRegistry.create(
+          'sma', {'period': _botParams['period'] ?? 20});
+      _liveIndicatorColors['BB Mid'] = '#a78bfa';
+    } else if (_selectedBot == 'elphaba_short') {
+      _liveIndicators['EMA'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['emaPeriod'] ?? 50});
+      _liveIndicatorColors['EMA'] = '#60a5fa';
+    }
+  }
+
+  void _pushProgressiveUpdate(Candle candle, double equity) {
+    // 1) Upsert the candle on the chart
+    _chartCtrl.upsertCandle(candle);
+
+    // 2) Update each live indicator and push the point
+    for (final entry in _liveIndicators.entries) {
+      entry.value.update(candle);
+      if (entry.value.isReady && entry.value.value != null) {
+        _chartCtrl.upsertIndicatorPoint(
+          entry.key,
+          candle.timestampMs,
+          entry.value.value!,
+          color: _liveIndicatorColors[entry.key] ?? '#fbbf24',
+        );
+      }
+    }
+
+    // 3) Upsert the equity point
+    _chartCtrl.upsertEquityPoint(candle.timestampMs, equity);
   }
 
   Future<void> _onStart() async {
@@ -66,8 +123,9 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
 
     _lastCandles = candles;
     await _chartCtrl.clear();
-    await _chartCtrl.setCandles(candles);
-    await _chartCtrl.fitContent();
+
+    // Initialize live indicators for progressive computation
+    _initLiveIndicators();
 
     // Reset chart toggle state on new run
     setState(() {
@@ -89,7 +147,6 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
     );
 
     if (_stepMode) {
-      await Future.delayed(const Duration(milliseconds: 100));
       ctrl.pause();
     }
   }
@@ -108,49 +165,6 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
   void _autoSave(BacktestDone done) {
     final db = ref.read(databaseProvider);
     db.results.saveResult(done.result, config: _configMeta);
-  }
-
-  void _pushIndicatorOverlays(BacktestDone done) {
-    final candles = _lastCandles;
-    if (candles == null || candles.isEmpty) return;
-
-    if (_selectedBot == 'ema_cross') {
-      _computeAndPushIndicator('EMA Fast', 'ema',
-          {'period': _botParams['fastPeriod'] ?? 12}, candles, '#fbbf24');
-      _computeAndPushIndicator('EMA Slow', 'ema',
-          {'period': _botParams['slowPeriod'] ?? 26}, candles, '#60a5fa');
-    } else if (_selectedBot == 'macd_cross') {
-      _computeAndPushIndicator('EMA Fast', 'ema',
-          {'period': _botParams['fastPeriod'] ?? 12}, candles, '#fbbf24');
-      _computeAndPushIndicator('EMA Slow', 'ema',
-          {'period': _botParams['slowPeriod'] ?? 26}, candles, '#60a5fa');
-    } else if (_selectedBot == 'bollinger_reversion') {
-      _computeAndPushIndicator('BB Mid', 'sma',
-          {'period': _botParams['period'] ?? 20}, candles, '#a78bfa');
-    } else if (_selectedBot == 'elphaba_short') {
-      _computeAndPushIndicator('EMA', 'ema',
-          {'period': _botParams['emaPeriod'] ?? 50}, candles, '#60a5fa');
-    }
-
-    _chartCtrl.setEquityCurve([
-      for (int i = 0; i < done.result.equityCurve.length; i++)
-        (t: done.result.startTimestampMs + i * 60000, v: done.result.equityCurve[i]),
-    ]);
-  }
-
-  void _computeAndPushIndicator(String key, String type,
-      Map<String, dynamic> params, List<Candle> candles, String color) {
-    final indicator = IndicatorRegistry.create(type, params);
-    final points = <({int t, double v})>[];
-    for (final c in candles) {
-      indicator.update(c);
-      if (indicator.isReady && indicator.value != null) {
-        points.add((t: c.timestampMs, v: indicator.value!));
-      }
-    }
-    if (points.isNotEmpty) {
-      _chartCtrl.setIndicator(key, points, color: color);
-    }
   }
 
   void _onMarkersModeChanged(String mode) {
@@ -175,15 +189,29 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
 
     ref.listen<BacktestStatus>(backtestControllerProvider, (prev, next) {
       if (next is BacktestRunning && prev is BacktestRunning) {
+        // Progressive candle rendering
+        final candle = next.currentCandle;
+        if (candle != null && next.processed > _lastRenderedIndex) {
+          _lastRenderedIndex = next.processed;
+          _pushProgressiveUpdate(candle, next.lastEquity ?? _initialCash);
+        }
+        // Progressive trade markers
         if (next.trades.length > prev.trades.length) {
           for (final t in next.trades.skip(prev.trades.length)) {
             _chartCtrl.addMarker(ChartMarker.entry(t));
             _chartCtrl.addMarker(ChartMarker.exit(t));
           }
         }
+      } else if (next is BacktestRunning && prev is! BacktestRunning) {
+        // First running state — render initial candle if available
+        final candle = next.currentCandle;
+        if (candle != null && next.processed > _lastRenderedIndex) {
+          _lastRenderedIndex = next.processed;
+          _pushProgressiveUpdate(candle, next.lastEquity ?? _initialCash);
+        }
       } else if (next is BacktestDone) {
         _autoSave(next);
-        _pushIndicatorOverlays(next);
+        _chartCtrl.fitContent();
       }
     });
 
@@ -276,6 +304,7 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
             ),
             child: ResultsBar(
               status: status,
+              timeframe: _selectedTimeframe,
               markersMode: _markersMode,
               indicatorsVisible: _indicatorsVisible,
               equityVisible: _equityVisible,

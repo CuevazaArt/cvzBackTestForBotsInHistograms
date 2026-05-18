@@ -110,12 +110,15 @@ class CandlesDao extends DatabaseAccessor<AppDatabase>
     if (candles.isEmpty) return;
     final file = File(p.join(dirPath, '${symbol}_$timeframe.csv'));
     final sink = file.openWrite();
-    sink.writeln('timestamp_ms,open,high,low,close,volume');
-    for (final c in candles) {
-      sink.writeln('${c.timestampMs},${c.open},${c.high},${c.low},${c.close},${c.volume}');
+    try {
+      sink.writeln('timestamp_ms,open,high,low,close,volume');
+      for (final c in candles) {
+        sink.writeln('${c.timestampMs},${c.open},${c.high},${c.low},${c.close},${c.volume}');
+      }
+      await sink.flush();
+    } finally {
+      await sink.close();
     }
-    await sink.flush();
-    await sink.close();
   }
 
   Future<int> importCsv(File file) async {
