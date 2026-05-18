@@ -185,11 +185,12 @@ class _HistoryTabState extends State<_HistoryTab> {
                   r.returnPct >= 0 ? Icons.trending_up : Icons.trending_down,
                   color: returnColor,
                 ),
-                title: Text(r.runId, overflow: TextOverflow.ellipsis),
+                title: Text(r.displayLabel, overflow: TextOverflow.ellipsis),
                 subtitle: Text(
                   '${r.createdAt.toLocal().toString().substring(0, 16)} — '
                   '${r.totalTrades} trades, ${r.winRate.toStringAsFixed(1)}% WR',
                 ),
+                isThreeLine: r.botName != null,
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

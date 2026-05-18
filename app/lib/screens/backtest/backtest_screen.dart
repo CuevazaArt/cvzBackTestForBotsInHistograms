@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../bots/registry.dart';
 import '../../core/config.dart';
+import '../../core/models/candle.dart';
+import '../../indicators/registry.dart';
 import '../../services/engine_messages.dart';
 import '../../state/backtest_state.dart';
 import '../../state/providers.dart';
@@ -12,8 +14,6 @@ import 'bot_config_panel.dart';
 import 'run_controls.dart';
 import 'results_view.dart';
 
-/// Orchestrator screen — composes 4 focused widgets and wires them to state.
-/// Total LOC kept under 200, unlike the legacy backtest_screen.dart (3,212 LOC).
 class BacktestScreen extends ConsumerStatefulWidget {
   const BacktestScreen({super.key});
 
@@ -24,7 +24,6 @@ class BacktestScreen extends ConsumerStatefulWidget {
 class _BacktestScreenState extends ConsumerState<BacktestScreen> {
   final ChartController _chartCtrl = ChartController();
 
-  // User-selectable params (kept in this stateful widget for simplicity).
   String _selectedSymbol = 'BTCUSDT';
   String _selectedTimeframe = '1h';
   String _selectedBot = 'ema_cross';
@@ -33,6 +32,8 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
   double _takerFeePct = 0.1;
   double _slippagePct = 0.05;
   int _speedMs = 0;
+
+  List<Candle>? _lastCandles;
 
   @override
   void initState() {
@@ -58,6 +59,7 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
       return;
     }
 
+    _lastCandles = candles;
     await _chartCtrl.clear();
     await _chartCtrl.setCandles(candles);
     await _chartCtrl.fitContent();
@@ -75,12 +77,83 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
     );
   }
 
+  Map<String, dynamic> get _configMeta => {
+    'bot': _selectedBot,
+    'bot_display': BotRegistry.info(_selectedBot).displayName,
+    'params': _botParams,
+    'symbol': _selectedSymbol,
+    'timeframe': _selectedTimeframe,
+    'initial_cash': _initialCash,
+    'taker_fee_pct': _takerFeePct,
+    'slippage_pct': _slippagePct,
+  };
+
+  void _autoSave(BacktestDone done) {
+    final db = ref.read(databaseProvider);
+    db.results.saveResult(done.result, config: _configMeta);
+  }
+
+  void _pushIndicatorOverlays(BacktestDone done) {
+    final candles = _lastCandles;
+    if (candles == null || candles.isEmpty) return;
+
+    final bot = BotRegistry.create(_selectedBot, _botParams);
+    final specs = bot.paramSpec();
+
+    final overlays = <String, String>{};
+    for (final s in specs) {
+      if (s.name.contains('Period') || s.name.contains('period')) {
+        final paramVal = _botParams[s.name] ?? s.defaultValue;
+        if (paramVal is num && paramVal > 0) {
+          overlays[s.name] = 'ema';
+        }
+      }
+    }
+
+    if (_selectedBot == 'ema_cross') {
+      _computeAndPushIndicator('EMA Fast', 'ema',
+          {'period': _botParams['fastPeriod'] ?? 12}, candles, '#fbbf24');
+      _computeAndPushIndicator('EMA Slow', 'ema',
+          {'period': _botParams['slowPeriod'] ?? 26}, candles, '#60a5fa');
+    } else if (_selectedBot == 'macd_cross') {
+      _computeAndPushIndicator('EMA Fast', 'ema',
+          {'period': _botParams['fastPeriod'] ?? 12}, candles, '#fbbf24');
+      _computeAndPushIndicator('EMA Slow', 'ema',
+          {'period': _botParams['slowPeriod'] ?? 26}, candles, '#60a5fa');
+    } else if (_selectedBot == 'bollinger_reversion') {
+      _computeAndPushIndicator('BB Mid', 'sma',
+          {'period': _botParams['period'] ?? 20}, candles, '#a78bfa');
+    } else if (_selectedBot == 'elphaba_short') {
+      _computeAndPushIndicator('EMA', 'ema',
+          {'period': _botParams['emaPeriod'] ?? 50}, candles, '#60a5fa');
+    }
+
+    _chartCtrl.setEquityCurve([
+      for (int i = 0; i < done.result.equityCurve.length; i++)
+        (t: done.result.startTimestampMs + i * 60000, v: done.result.equityCurve[i]),
+    ]);
+  }
+
+  void _computeAndPushIndicator(String key, String type,
+      Map<String, dynamic> params, List<Candle> candles, String color) {
+    final indicator = IndicatorRegistry.create(type, params);
+    final points = <({int t, double v})>[];
+    for (final c in candles) {
+      indicator.update(c);
+      if (indicator.isReady && indicator.value != null) {
+        points.add((t: c.timestampMs, v: indicator.value!));
+      }
+    }
+    if (points.isNotEmpty) {
+      _chartCtrl.setIndicator(key, points, color: color);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(backtestControllerProvider);
     final ctrl = ref.read(backtestControllerProvider.notifier);
 
-    // When trades come in, push them to the chart as markers.
     ref.listen<BacktestStatus>(backtestControllerProvider, (prev, next) {
       if (next is BacktestRunning && prev is BacktestRunning) {
         if (next.trades.length > prev.trades.length) {
@@ -90,10 +163,8 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
           }
         }
       } else if (next is BacktestDone) {
-        _chartCtrl.setEquityCurve([
-          for (int i = 0; i < next.result.equityCurve.length; i++)
-            (t: next.result.startTimestampMs + i * 60000, v: next.result.equityCurve[i]),
-        ]);
+        _autoSave(next);
+        _pushIndicatorOverlays(next);
       }
     });
 
@@ -102,7 +173,6 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Left column: configuration + controls + results
           SizedBox(
             width: 340,
             child: ListView(
@@ -148,7 +218,6 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          // Right column: chart
           Expanded(
             child: Card(
               clipBehavior: Clip.antiAlias,

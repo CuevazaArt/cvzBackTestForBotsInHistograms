@@ -178,6 +178,22 @@ class _StatusBox extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Downloading $symbol $timeframe — $fetched / ${total ?? "?"} candles'),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    if ((status as DownloadRunning).candlesPerSec > 0)
+                      Text(
+                        '${(status as DownloadRunning).candlesPerSec.toStringAsFixed(0)} candles/s',
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    const Spacer(),
+                    if ((status as DownloadRunning).eta.isNotEmpty)
+                      Text(
+                        'ETA: ${(status as DownloadRunning).eta}',
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 LinearProgressIndicator(value: total != null && total > 0 ? fetched / total : null),
               ],
