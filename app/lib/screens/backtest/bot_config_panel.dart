@@ -6,7 +6,7 @@ import '../../bots/registry.dart';
 import '../../data/daos/presets_dao.dart';
 import '../../state/providers.dart';
 
-class BotConfigPanel extends ConsumerWidget {
+class BotConfigToolbar extends ConsumerWidget {
   final String symbol;
   final String timeframe;
   final String selectedBot;
@@ -22,7 +22,7 @@ class BotConfigPanel extends ConsumerWidget {
   final ValueChanged<double> onFeeChanged;
   final ValueChanged<double> onSlippageChanged;
 
-  const BotConfigPanel({
+  const BotConfigToolbar({
     super.key,
     required this.symbol,
     required this.timeframe,
@@ -46,125 +46,283 @@ class BotConfigPanel extends ConsumerWidget {
     final defaults = BotRegistry.info(selectedBot).defaultParams;
     final mergedParams = {...defaults, ...botParams};
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
+    return FutureBuilder<Map<String, List<String>>>(
+      future: db.candles.availableSymbols(),
+      builder: (context, snap) {
+        final symbols = snap.hasData
+            ? (snap.data!.keys.toList()..sort())
+            : <String>[];
+        final tfs = (snap.hasData && snap.data![symbol] != null)
+            ? (List<String>.from(snap.data![symbol]!)..sort())
+            : <String>['1h'];
+
+        return Row(
           children: [
-            Text('Configuration',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            FutureBuilder<Map<String, List<String>>>(
-              future: db.candles.availableSymbols(),
-              builder: (context, snap) {
-                final symbols = snap.hasData
-                    ? (snap.data!.keys.toList()..sort())
-                    : <String>[];
-                final tfs = (snap.hasData && snap.data![symbol] != null)
-                    ? (List<String>.from(snap.data![symbol]!)..sort())
-                    : <String>['1h'];
-                return Column(
-                  children: [
-                    DropdownButtonFormField<String>(
-                      initialValue: symbols.contains(symbol) ? symbol : null,
-                      decoration: const InputDecoration(
-                          labelText: 'Symbol', border: OutlineInputBorder()),
-                      items: symbols
-                          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                          .toList(),
-                      onChanged: (v) => v != null ? onSymbolChanged(v) : null,
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      initialValue: tfs.contains(timeframe) ? timeframe : tfs.first,
-                      decoration: const InputDecoration(
-                          labelText: 'Timeframe', border: OutlineInputBorder()),
-                      items: tfs
-                          .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                          .toList(),
-                      onChanged: (v) => v != null ? onTimeframeChanged(v) : null,
-                    ),
-                  ],
-                );
-              },
+            _CompactDropdown(
+              value: symbols.contains(symbol) ? symbol : null,
+              items: symbols,
+              tooltip: 'Symbol',
+              width: 110,
+              onChanged: onSymbolChanged,
             ),
-            const Divider(height: 24),
-            DropdownButtonFormField<String>(
-              initialValue: selectedBot,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                  labelText: 'Bot', border: OutlineInputBorder()),
-              items: BotRegistry.all
-                  .map((b) =>
-                      DropdownMenuItem(value: b.id, child: Text(b.displayName, overflow: TextOverflow.ellipsis)))
-                  .toList(),
-              onChanged: (v) => v != null ? onBotChanged(v) : null,
+            const SizedBox(width: 4),
+            _CompactDropdown(
+              value: tfs.contains(timeframe) ? timeframe : tfs.first,
+              items: tfs,
+              tooltip: 'Timeframe',
+              width: 64,
+              onChanged: onTimeframeChanged,
             ),
-            const SizedBox(height: 4),
-            Text(
-              BotRegistry.info(selectedBot).description,
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            const SizedBox(width: 4),
+            _CompactDropdown(
+              value: selectedBot,
+              items: BotRegistry.all.map((b) => b.id).toList(),
+              labels: {for (final b in BotRegistry.all) b.id: b.displayName},
+              tooltip: 'Bot',
+              width: 140,
+              onChanged: onBotChanged,
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.save_outlined, size: 16),
-                    label: const Text('Save Preset', style: TextStyle(fontSize: 12)),
-                    onPressed: () => _savePreset(context, ref),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.folder_open_outlined, size: 16),
-                    label: const Text('Load Preset', style: TextStyle(fontSize: 12)),
-                    onPressed: () => _loadPreset(context, ref),
-                  ),
-                ),
-              ],
+            const SizedBox(width: 4),
+            _ParamsMenuButton(
+              params: mergedParams,
+              onChanged: onBotParamsChanged,
             ),
-            const Divider(height: 24),
-            Text('Bot Parameters',
-                style: Theme.of(context).textTheme.labelMedium),
-            const SizedBox(height: 8),
-            for (final entry in mergedParams.entries)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _ParamField(
-                  label: entry.key,
-                  value: entry.value,
-                  onChanged: (v) {
-                    final updated = {...mergedParams, entry.key: v};
-                    onBotParamsChanged(updated);
-                  },
-                ),
-              ),
-            const Divider(height: 24),
-            _NumberField(
-              label: 'Initial cash',
-              value: initialCash,
-              onChanged: onInitialCashChanged,
-              suffix: 'USDT',
-            ),
-            const SizedBox(height: 8),
-            _NumberField(
-              label: 'Taker fee %',
-              value: feePct,
-              onChanged: onFeeChanged,
-            ),
-            const SizedBox(height: 8),
-            _NumberField(
-              label: 'Slippage %',
-              value: slippagePct,
-              onChanged: onSlippageChanged,
+            const _Sep(),
+            _MiniField(tooltip: 'Cash', value: initialCash, width: 72, onChanged: onInitialCashChanged),
+            const SizedBox(width: 4),
+            _MiniField(tooltip: 'Fee %', value: feePct, width: 52, onChanged: onFeeChanged),
+            const SizedBox(width: 4),
+            _MiniField(tooltip: 'Slip %', value: slippagePct, width: 52, onChanged: onSlippageChanged),
+            const SizedBox(width: 4),
+            _PresetButtons(
+              selectedBot: selectedBot,
+              botParams: botParams,
+              onParamsChanged: onBotParamsChanged,
             ),
           ],
+        );
+      },
+    );
+  }
+}
+
+class _CompactDropdown extends StatelessWidget {
+  final String? value;
+  final List<String> items;
+  final Map<String, String>? labels;
+  final String tooltip;
+  final double width;
+  final ValueChanged<String> onChanged;
+
+  const _CompactDropdown({
+    required this.value,
+    required this.items,
+    required this.tooltip,
+    required this.width,
+    required this.onChanged,
+    this.labels,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        width: width,
+        height: 32,
+        child: DropdownButtonFormField<String>(
+          initialValue: value,
+          isDense: true,
+          isExpanded: true,
+          decoration: InputDecoration(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            border: const OutlineInputBorder(),
+            hintText: tooltip,
+            hintStyle: const TextStyle(fontSize: 11),
+          ),
+          style: const TextStyle(fontSize: 12),
+          items: items.map((v) => DropdownMenuItem(
+            value: v,
+            child: Text(
+              labels?[v] ?? v,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12),
+            ),
+          )).toList(),
+          onChanged: (v) => v != null ? onChanged(v) : null,
         ),
       ),
+    );
+  }
+}
+
+class _ParamsMenuButton extends StatelessWidget {
+  final Map<String, dynamic> params;
+  final ValueChanged<Map<String, dynamic>> onChanged;
+  const _ParamsMenuButton({required this.params, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.tune, size: 18),
+      tooltip: 'Bot parameters',
+      visualDensity: VisualDensity.compact,
+      onPressed: () => _showParamsSheet(context),
+    );
+  }
+
+  void _showParamsSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => _ParamsSheet(params: params, onChanged: onChanged),
+    );
+  }
+}
+
+class _ParamsSheet extends StatefulWidget {
+  final Map<String, dynamic> params;
+  final ValueChanged<Map<String, dynamic>> onChanged;
+  const _ParamsSheet({required this.params, required this.onChanged});
+  @override
+  State<_ParamsSheet> createState() => _ParamsSheetState();
+}
+
+class _ParamsSheetState extends State<_ParamsSheet> {
+  late Map<String, dynamic> _local;
+
+  @override
+  void initState() {
+    super.initState();
+    _local = Map<String, dynamic>.from(widget.params);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Bot Parameters', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              for (final entry in _local.entries)
+                SizedBox(
+                  width: 150,
+                  child: entry.value is bool
+                      ? CheckboxListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(entry.key, style: const TextStyle(fontSize: 12)),
+                          value: entry.value as bool,
+                          onChanged: (v) {
+                            setState(() => _local[entry.key] = v ?? false);
+                            widget.onChanged(Map.from(_local));
+                          },
+                        )
+                      : TextFormField(
+                          initialValue: entry.value.toString(),
+                          decoration: InputDecoration(
+                            labelText: entry.key,
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          style: const TextStyle(fontSize: 12),
+                          onChanged: (v) {
+                            final parsed = entry.value is int
+                                ? int.tryParse(v)
+                                : double.tryParse(v);
+                            if (parsed != null) {
+                              _local[entry.key] = parsed;
+                              widget.onChanged(Map.from(_local));
+                            }
+                          },
+                        ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniField extends StatelessWidget {
+  final String tooltip;
+  final double value;
+  final double width;
+  final ValueChanged<double> onChanged;
+  const _MiniField({required this.tooltip, required this.value, required this.width, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        width: width,
+        height: 32,
+        child: TextFormField(
+          initialValue: value % 1 == 0 ? value.toInt().toString() : value.toString(),
+          decoration: InputDecoration(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            border: const OutlineInputBorder(),
+            hintText: tooltip,
+            hintStyle: const TextStyle(fontSize: 10),
+          ),
+          style: const TextStyle(fontSize: 11),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onChanged: (v) {
+            final parsed = double.tryParse(v);
+            if (parsed != null) onChanged(parsed);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _Sep extends StatelessWidget {
+  const _Sep();
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 6),
+    child: SizedBox(height: 20, child: VerticalDivider(width: 1, color: Theme.of(context).dividerColor)),
+  );
+}
+
+class _PresetButtons extends ConsumerWidget {
+  final String selectedBot;
+  final Map<String, dynamic> botParams;
+  final ValueChanged<Map<String, dynamic>> onParamsChanged;
+
+  const _PresetButtons({
+    required this.selectedBot,
+    required this.botParams,
+    required this.onParamsChanged,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.save_outlined, size: 16),
+          tooltip: 'Save preset',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _savePreset(context, ref),
+        ),
+        IconButton(
+          icon: const Icon(Icons.folder_open_outlined, size: 16),
+          tooltip: 'Load preset',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _loadPreset(context, ref),
+        ),
+      ],
     );
   }
 
@@ -219,13 +377,12 @@ class BotConfigPanel extends ConsumerWidget {
         builder: (context, snap) {
           final presets = snap.data ?? [];
           return AlertDialog(
-            title: Text('Load Preset — ${BotRegistry.info(selectedBot).displayName}'),
+            title: Text('Load Preset'),
             content: SizedBox(
               width: 400,
               height: 300,
               child: presets.isEmpty
-                  ? const Center(child: Text('No presets saved for this bot.',
-                      style: TextStyle(color: Colors.grey)))
+                  ? const Center(child: Text('No presets saved.', style: TextStyle(color: Colors.grey)))
                   : ListView(
                       children: [
                         for (final p in presets)
@@ -241,11 +398,8 @@ class BotConfigPanel extends ConsumerWidget {
                                   onPressed: () {
                                     final params = Map<String, dynamic>.from(
                                         jsonDecode(p.paramsYaml) as Map);
-                                    onBotParamsChanged(params);
+                                    onParamsChanged(params);
                                     Navigator.pop(ctx);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Loaded preset "${p.name}"')),
-                                    );
                                   },
                                 ),
                                 IconButton(
@@ -271,81 +425,6 @@ class BotConfigPanel extends ConsumerWidget {
           );
         },
       ),
-    );
-  }
-}
-
-class _ParamField extends StatelessWidget {
-  final String label;
-  final dynamic value;
-  final ValueChanged<dynamic> onChanged;
-  const _ParamField({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (value is bool) {
-      return SwitchListTile(
-        dense: true,
-        contentPadding: EdgeInsets.zero,
-        title: Text(label, style: const TextStyle(fontSize: 13)),
-        value: value as bool,
-        onChanged: onChanged,
-      );
-    }
-    return TextFormField(
-      initialValue: value.toString(),
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        isDense: true,
-      ),
-      onChanged: (v) {
-        final asInt = int.tryParse(v);
-        if (asInt != null && value is int) {
-          onChanged(asInt);
-          return;
-        }
-        final asDouble = double.tryParse(v);
-        if (asDouble != null) {
-          onChanged(asDouble);
-        }
-      },
-    );
-  }
-}
-
-class _NumberField extends StatelessWidget {
-  final String label;
-  final double value;
-  final ValueChanged<double> onChanged;
-  final String? suffix;
-  const _NumberField({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-    this.suffix,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      initialValue: value.toString(),
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        suffixText: suffix,
-        isDense: true,
-      ),
-      onChanged: (v) {
-        final parsed = double.tryParse(v);
-        if (parsed != null) onChanged(parsed);
-      },
     );
   }
 }

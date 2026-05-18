@@ -24,6 +24,9 @@ backtester/results/
 *.duckdb
 backtester/web/assets/js/lightweight-charts.standalone.production.js
 
+# Candle backup CSVs — tracked intentionally (do NOT ignore)
+!data/candles/
+
 # Flutter
 flutter_app/.dart_tool/
 flutter_app/.flutter-plugins

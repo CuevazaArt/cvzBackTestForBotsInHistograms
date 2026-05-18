@@ -1,7 +1,5 @@
 """Trading bots for backtesting."""
 
-from typing import Any, Callable
-
 from backtester.bots.bot_base import BotBase
 from backtester.bots.bollinger_reversion import BollingerReversion
 from backtester.bots.bot_template import ExampleTemplateBot

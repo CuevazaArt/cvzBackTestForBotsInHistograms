@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../bots/registry.dart';
 import '../../core/config.dart';
 import '../../core/models/candle.dart';
+import '../../indicators/indicator.dart';
 import '../../indicators/registry.dart';
 import '../../services/engine_messages.dart';
 import '../../state/backtest_state.dart';
@@ -32,8 +33,18 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
   double _takerFeePct = 0.1;
   double _slippagePct = 0.05;
   int _speedMs = 0;
+  bool _stepMode = false;
+
+  String _markersMode = 'full';
+  bool _indicatorsVisible = true;
+  bool _equityVisible = true;
 
   List<Candle>? _lastCandles;
+
+  // Progressive indicator state — kept alive across candles during a run
+  final Map<String, Indicator> _liveIndicators = {};
+  final Map<String, String> _liveIndicatorColors = {};
+  int _lastRenderedIndex = -1;
 
   @override
   void initState() {
@@ -46,6 +57,57 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
   void dispose() {
     _chartCtrl.dispose();
     super.dispose();
+  }
+
+  void _initLiveIndicators() {
+    _liveIndicators.clear();
+    _liveIndicatorColors.clear();
+    _lastRenderedIndex = -1;
+
+    if (_selectedBot == 'ema_cross') {
+      _liveIndicators['EMA Fast'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['fastPeriod'] ?? 12});
+      _liveIndicatorColors['EMA Fast'] = '#fbbf24';
+      _liveIndicators['EMA Slow'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['slowPeriod'] ?? 26});
+      _liveIndicatorColors['EMA Slow'] = '#60a5fa';
+    } else if (_selectedBot == 'macd_cross') {
+      _liveIndicators['EMA Fast'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['fastPeriod'] ?? 12});
+      _liveIndicatorColors['EMA Fast'] = '#fbbf24';
+      _liveIndicators['EMA Slow'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['slowPeriod'] ?? 26});
+      _liveIndicatorColors['EMA Slow'] = '#60a5fa';
+    } else if (_selectedBot == 'bollinger_reversion') {
+      _liveIndicators['BB Mid'] = IndicatorRegistry.create(
+          'sma', {'period': _botParams['period'] ?? 20});
+      _liveIndicatorColors['BB Mid'] = '#a78bfa';
+    } else if (_selectedBot == 'elphaba_short') {
+      _liveIndicators['EMA'] = IndicatorRegistry.create(
+          'ema', {'period': _botParams['emaPeriod'] ?? 50});
+      _liveIndicatorColors['EMA'] = '#60a5fa';
+    }
+  }
+
+  void _pushProgressiveUpdate(Candle candle, double equity) {
+    // 1) Upsert the candle on the chart
+    _chartCtrl.upsertCandle(candle);
+
+    // 2) Update each live indicator and push the point
+    for (final entry in _liveIndicators.entries) {
+      entry.value.update(candle);
+      if (entry.value.isReady && entry.value.value != null) {
+        _chartCtrl.upsertIndicatorPoint(
+          entry.key,
+          candle.timestampMs,
+          entry.value.value!,
+          color: _liveIndicatorColors[entry.key] ?? '#fbbf24',
+        );
+      }
+    }
+
+    // 3) Upsert the equity point
+    _chartCtrl.upsertEquityPoint(candle.timestampMs, equity);
   }
 
   Future<void> _onStart() async {
@@ -61,8 +123,16 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
 
     _lastCandles = candles;
     await _chartCtrl.clear();
-    await _chartCtrl.setCandles(candles);
-    await _chartCtrl.fitContent();
+
+    // Initialize live indicators for progressive computation
+    _initLiveIndicators();
+
+    // Reset chart toggle state on new run
+    setState(() {
+      _markersMode = 'full';
+      _indicatorsVisible = true;
+      _equityVisible = true;
+    });
 
     final ctrl = ref.read(backtestControllerProvider.notifier);
     await ctrl.start(
@@ -75,6 +145,10 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
       ),
       initialSpeedMs: _speedMs,
     );
+
+    if (_stepMode) {
+      ctrl.pause();
+    }
   }
 
   Map<String, dynamic> get _configMeta => {
@@ -93,60 +167,19 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
     db.results.saveResult(done.result, config: _configMeta);
   }
 
-  void _pushIndicatorOverlays(BacktestDone done) {
-    final candles = _lastCandles;
-    if (candles == null || candles.isEmpty) return;
-
-    final bot = BotRegistry.create(_selectedBot, _botParams);
-    final specs = bot.paramSpec();
-
-    final overlays = <String, String>{};
-    for (final s in specs) {
-      if (s.name.contains('Period') || s.name.contains('period')) {
-        final paramVal = _botParams[s.name] ?? s.defaultValue;
-        if (paramVal is num && paramVal > 0) {
-          overlays[s.name] = 'ema';
-        }
-      }
-    }
-
-    if (_selectedBot == 'ema_cross') {
-      _computeAndPushIndicator('EMA Fast', 'ema',
-          {'period': _botParams['fastPeriod'] ?? 12}, candles, '#fbbf24');
-      _computeAndPushIndicator('EMA Slow', 'ema',
-          {'period': _botParams['slowPeriod'] ?? 26}, candles, '#60a5fa');
-    } else if (_selectedBot == 'macd_cross') {
-      _computeAndPushIndicator('EMA Fast', 'ema',
-          {'period': _botParams['fastPeriod'] ?? 12}, candles, '#fbbf24');
-      _computeAndPushIndicator('EMA Slow', 'ema',
-          {'period': _botParams['slowPeriod'] ?? 26}, candles, '#60a5fa');
-    } else if (_selectedBot == 'bollinger_reversion') {
-      _computeAndPushIndicator('BB Mid', 'sma',
-          {'period': _botParams['period'] ?? 20}, candles, '#a78bfa');
-    } else if (_selectedBot == 'elphaba_short') {
-      _computeAndPushIndicator('EMA', 'ema',
-          {'period': _botParams['emaPeriod'] ?? 50}, candles, '#60a5fa');
-    }
-
-    _chartCtrl.setEquityCurve([
-      for (int i = 0; i < done.result.equityCurve.length; i++)
-        (t: done.result.startTimestampMs + i * 60000, v: done.result.equityCurve[i]),
-    ]);
+  void _onMarkersModeChanged(String mode) {
+    setState(() => _markersMode = mode);
+    _chartCtrl.setMarkersMode(mode);
   }
 
-  void _computeAndPushIndicator(String key, String type,
-      Map<String, dynamic> params, List<Candle> candles, String color) {
-    final indicator = IndicatorRegistry.create(type, params);
-    final points = <({int t, double v})>[];
-    for (final c in candles) {
-      indicator.update(c);
-      if (indicator.isReady && indicator.value != null) {
-        points.add((t: c.timestampMs, v: indicator.value!));
-      }
-    }
-    if (points.isNotEmpty) {
-      _chartCtrl.setIndicator(key, points, color: color);
-    }
+  void _onIndicatorsVisibleChanged(bool visible) {
+    setState(() => _indicatorsVisible = visible);
+    _chartCtrl.setIndicatorsVisible(visible);
+  }
+
+  void _onEquityVisibleChanged(bool visible) {
+    setState(() => _equityVisible = visible);
+    _chartCtrl.setEquityVisible(visible);
   }
 
   @override
@@ -156,80 +189,177 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
 
     ref.listen<BacktestStatus>(backtestControllerProvider, (prev, next) {
       if (next is BacktestRunning && prev is BacktestRunning) {
+        // Progressive candle rendering
+        final candle = next.currentCandle;
+        if (candle != null && next.processed > _lastRenderedIndex) {
+          _lastRenderedIndex = next.processed;
+          _pushProgressiveUpdate(candle, next.lastEquity ?? _initialCash);
+        }
+        // Progressive trade markers
         if (next.trades.length > prev.trades.length) {
           for (final t in next.trades.skip(prev.trades.length)) {
             _chartCtrl.addMarker(ChartMarker.entry(t));
             _chartCtrl.addMarker(ChartMarker.exit(t));
           }
         }
+      } else if (next is BacktestRunning && prev is! BacktestRunning) {
+        // First running state — render initial candle if available
+        final candle = next.currentCandle;
+        if (candle != null && next.processed > _lastRenderedIndex) {
+          _lastRenderedIndex = next.processed;
+          _pushProgressiveUpdate(candle, next.lastEquity ?? _initialCash);
+        }
       } else if (next is BacktestDone) {
         _autoSave(next);
-        _pushIndicatorOverlays(next);
+        _chartCtrl.fitContent();
       }
     });
 
     return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.all(8),
+      child: Column(
         children: [
-          SizedBox(
-            width: 340,
-            child: ListView(
-              children: [
-                BotConfigPanel(
-                  symbol: _selectedSymbol,
-                  timeframe: _selectedTimeframe,
-                  selectedBot: _selectedBot,
-                  botParams: _botParams,
-                  initialCash: _initialCash,
-                  feePct: _takerFeePct,
-                  slippagePct: _slippagePct,
-                  onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
-                  onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
-                  onBotChanged: (v) {
-                    setState(() {
-                      _selectedBot = v;
-                      _botParams = Map<String, dynamic>.from(BotRegistry.info(v).defaultParams);
-                    });
-                  },
-                  onBotParamsChanged: (v) => setState(() => _botParams = v),
-                  onInitialCashChanged: (v) => setState(() => _initialCash = v),
-                  onFeeChanged: (v) => setState(() => _takerFeePct = v),
-                  onSlippageChanged: (v) => setState(() => _slippagePct = v),
-                ),
-                const SizedBox(height: 12),
-                RunControls(
-                  status: status,
-                  speedMs: _speedMs,
-                  onStart: _onStart,
-                  onPause: ctrl.pause,
-                  onResume: ctrl.resume,
-                  onStep: ctrl.step,
-                  onCancel: ctrl.cancel,
-                  onSpeedChanged: (v) {
-                    setState(() => _speedMs = v);
-                    ctrl.setSpeed(v);
-                  },
-                ),
-                const SizedBox(height: 12),
-                ResultsView(status: status),
-              ],
+          // ─── Top bar: config + controls ───────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  BotConfigToolbar(
+                    symbol: _selectedSymbol,
+                    timeframe: _selectedTimeframe,
+                    selectedBot: _selectedBot,
+                    botParams: _botParams,
+                    initialCash: _initialCash,
+                    feePct: _takerFeePct,
+                    slippagePct: _slippagePct,
+                    onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
+                    onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
+                    onBotChanged: (v) {
+                      setState(() {
+                        _selectedBot = v;
+                        _botParams = Map<String, dynamic>.from(BotRegistry.info(v).defaultParams);
+                      });
+                    },
+                    onBotParamsChanged: (v) => setState(() => _botParams = v),
+                    onInitialCashChanged: (v) => setState(() => _initialCash = v),
+                    onFeeChanged: (v) => setState(() => _takerFeePct = v),
+                    onSlippageChanged: (v) => setState(() => _slippagePct = v),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: SizedBox(height: 20, child: VerticalDivider(width: 1, color: Theme.of(context).dividerColor)),
+                  ),
+                  RunControlsInline(
+                    status: status,
+                    speedMs: _speedMs,
+                    stepMode: _stepMode,
+                    onStart: _onStart,
+                    onPause: ctrl.pause,
+                    onResume: ctrl.resume,
+                    onStep: ctrl.step,
+                    onCancel: ctrl.cancel,
+                    onSpeedChanged: (v) {
+                      setState(() => _speedMs = v);
+                      ctrl.setSpeed(v);
+                    },
+                    onStepModeChanged: (v) => setState(() => _stepMode = v),
+                  ),
+                  if (status is BacktestRunning) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: SizedBox(height: 20, child: VerticalDivider(width: 1, color: Theme.of(context).dividerColor)),
+                    ),
+                    _LiveBadge(status: status),
+                  ],
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 12),
+          // ─── Chart (takes all remaining space) ────────────────
           Expanded(
-            child: Card(
-              clipBehavior: Clip.antiAlias,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.symmetric(
+                  horizontal: BorderSide(color: Theme.of(context).dividerColor),
+                ),
+              ),
               child: ChartWidget(
                 controller: _chartCtrl,
-                onDiagnostic: (msg) =>
-                    debugPrint('[chart] $msg'),
+                onDiagnostic: (msg) => debugPrint('[chart] $msg'),
               ),
+            ),
+          ),
+          // ─── Bottom bar: metrics + chart toggles ──────────────
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: ResultsBar(
+              status: status,
+              timeframe: _selectedTimeframe,
+              markersMode: _markersMode,
+              indicatorsVisible: _indicatorsVisible,
+              equityVisible: _equityVisible,
+              onMarkersModeChanged: _onMarkersModeChanged,
+              onIndicatorsVisibleChanged: _onIndicatorsVisibleChanged,
+              onEquityVisibleChanged: _onEquityVisibleChanged,
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LiveBadge extends StatelessWidget {
+  final BacktestRunning status;
+  const _LiveBadge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '${status.percent.toStringAsFixed(0)}%',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '${status.trades.length} trades',
+          style: const TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+        if (status.lastEquity != null) ...[
+          const SizedBox(width: 8),
+          Text(
+            '${status.lastEquity!.toStringAsFixed(0)} USDT',
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+        ],
+        if (status.paused) ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.orange.withAlpha(30),
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: const Text('PAUSED', style: TextStyle(fontSize: 9, color: Colors.orange, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ],
     );
   }
 }
