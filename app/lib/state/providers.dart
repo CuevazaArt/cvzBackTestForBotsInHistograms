@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/models/backtest_result.dart';
 import '../data/database.dart';
 import '../data/downloader.dart';
 
@@ -18,3 +19,6 @@ final downloaderProvider = Provider<BinanceDownloader>((ref) {
 
 /// Theme mode provider.
 final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.dark);
+
+/// Viewed result from history (used by Analysis screen when no live result).
+final viewedResultProvider = StateProvider<BacktestResult?>((ref) => null);

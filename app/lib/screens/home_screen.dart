@@ -7,6 +7,7 @@ import 'optimization_screen.dart';
 import 'download_screen.dart';
 import 'settings_screen.dart';
 import '../widgets/command_palette.dart';
+import '../widgets/dsl_editor_dialog.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -32,6 +33,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         CommandPaletteAction(label: 'Go to Optimize', icon: Icons.tune, onTap: () => setState(() => _index = 2)),
         CommandPaletteAction(label: 'Go to Data', icon: Icons.download, onTap: () => setState(() => _index = 3)),
         CommandPaletteAction(label: 'Go to Settings', icon: Icons.settings, onTap: () => setState(() => _index = 4)),
+        CommandPaletteAction(label: 'DSL Bot Editor', icon: Icons.code, onTap: () => showDSLEditor(context)),
       ];
 
   @override
