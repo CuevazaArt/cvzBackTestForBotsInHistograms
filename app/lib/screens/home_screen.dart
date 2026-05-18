@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'backtest/backtest_screen.dart';
 import 'analysis_screen.dart';
+import 'optimization_screen.dart';
 import 'download_screen.dart';
 import 'settings_screen.dart';
 
@@ -19,6 +20,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _destinations = const [
     _Dest(Icons.play_arrow_outlined, Icons.play_arrow, 'Backtest'),
     _Dest(Icons.analytics_outlined, Icons.analytics, 'Analysis'),
+    _Dest(Icons.tune_outlined, Icons.tune, 'Optimize'),
     _Dest(Icons.download_outlined, Icons.download, 'Data'),
     _Dest(Icons.settings_outlined, Icons.settings, 'Settings'),
   ];
@@ -48,6 +50,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               children: const [
                 BacktestScreen(),
                 AnalysisScreen(),
+                OptimizationScreen(),
                 DownloadScreen(),
                 SettingsScreen(),
               ],
