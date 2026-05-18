@@ -107,6 +107,11 @@ class DownloadController extends StateNotifier<DownloadStatus> {
         await dao.insertBatch(symbol, timeframe, batch);
         totalInserted += batch.length;
       }
+      // Auto-export to CSV backup
+      try {
+        final backupDir = _ref.read(candleBackupDirProvider);
+        await dao.exportCsv(symbol, timeframe, backupDir);
+      } catch (_) {}
       state = DownloadDone(symbol, timeframe, totalInserted);
     } on DownloadCancelled {
       state = const DownloadIdle();

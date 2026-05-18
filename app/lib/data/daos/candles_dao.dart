@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:drift/drift.dart';
+import 'package:path/path.dart' as p;
 import '../database.dart';
 import '../../core/models/candle.dart';
 
@@ -101,6 +103,58 @@ class CandlesDao extends DatabaseAccessor<AppDatabase>
             db.candlesTable.timeframe.equals(timeframe),
       );
     return await q.map((r) => r.read(count)!).getSingle();
+  }
+
+  Future<void> exportCsv(String symbol, String timeframe, String dirPath) async {
+    final candles = await queryRange(symbol, timeframe);
+    if (candles.isEmpty) return;
+    final file = File(p.join(dirPath, '${symbol}_$timeframe.csv'));
+    final sink = file.openWrite();
+    sink.writeln('timestamp_ms,open,high,low,close,volume');
+    for (final c in candles) {
+      sink.writeln('${c.timestampMs},${c.open},${c.high},${c.low},${c.close},${c.volume}');
+    }
+    await sink.flush();
+    await sink.close();
+  }
+
+  Future<int> importCsv(File file) async {
+    final name = p.basenameWithoutExtension(file.path);
+    final parts = name.split('_');
+    if (parts.length < 2) return 0;
+    final timeframe = parts.last;
+    final symbol = parts.sublist(0, parts.length - 1).join('_');
+
+    final lines = await file.readAsLines();
+    if (lines.length <= 1) return 0;
+
+    final candles = <Candle>[];
+    for (final line in lines.skip(1)) {
+      final cols = line.split(',');
+      if (cols.length < 6) continue;
+      final ts = int.tryParse(cols[0]);
+      final o = double.tryParse(cols[1]);
+      final h = double.tryParse(cols[2]);
+      final l = double.tryParse(cols[3]);
+      final c = double.tryParse(cols[4]);
+      final v = double.tryParse(cols[5]);
+      if (ts == null || o == null || h == null || l == null || c == null || v == null) continue;
+      candles.add(Candle(timestampMs: ts, open: o, high: h, low: l, close: c, volume: v));
+    }
+    if (candles.isEmpty) return 0;
+    return insertBatch(symbol, timeframe, candles);
+  }
+
+  Future<int> importAllCsvs(String dirPath) async {
+    final dir = Directory(dirPath);
+    if (!await dir.exists()) return 0;
+    int total = 0;
+    await for (final entity in dir.list()) {
+      if (entity is File && entity.path.endsWith('.csv')) {
+        total += await importCsv(entity);
+      }
+    }
+    return total;
   }
 
   Candle _rowToCandle(CandlesTableData row) => Candle(

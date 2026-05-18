@@ -32,6 +32,11 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
   double _takerFeePct = 0.1;
   double _slippagePct = 0.05;
   int _speedMs = 0;
+  bool _stepMode = false;
+
+  String _markersMode = 'full';
+  bool _indicatorsVisible = true;
+  bool _equityVisible = true;
 
   List<Candle>? _lastCandles;
 
@@ -64,6 +69,13 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
     await _chartCtrl.setCandles(candles);
     await _chartCtrl.fitContent();
 
+    // Reset chart toggle state on new run
+    setState(() {
+      _markersMode = 'full';
+      _indicatorsVisible = true;
+      _equityVisible = true;
+    });
+
     final ctrl = ref.read(backtestControllerProvider.notifier);
     await ctrl.start(
       candles: candles,
@@ -75,6 +87,11 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
       ),
       initialSpeedMs: _speedMs,
     );
+
+    if (_stepMode) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      ctrl.pause();
+    }
   }
 
   Map<String, dynamic> get _configMeta => {
@@ -96,19 +113,6 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
   void _pushIndicatorOverlays(BacktestDone done) {
     final candles = _lastCandles;
     if (candles == null || candles.isEmpty) return;
-
-    final bot = BotRegistry.create(_selectedBot, _botParams);
-    final specs = bot.paramSpec();
-
-    final overlays = <String, String>{};
-    for (final s in specs) {
-      if (s.name.contains('Period') || s.name.contains('period')) {
-        final paramVal = _botParams[s.name] ?? s.defaultValue;
-        if (paramVal is num && paramVal > 0) {
-          overlays[s.name] = 'ema';
-        }
-      }
-    }
 
     if (_selectedBot == 'ema_cross') {
       _computeAndPushIndicator('EMA Fast', 'ema',
@@ -149,6 +153,21 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
     }
   }
 
+  void _onMarkersModeChanged(String mode) {
+    setState(() => _markersMode = mode);
+    _chartCtrl.setMarkersMode(mode);
+  }
+
+  void _onIndicatorsVisibleChanged(bool visible) {
+    setState(() => _indicatorsVisible = visible);
+    _chartCtrl.setIndicatorsVisible(visible);
+  }
+
+  void _onEquityVisibleChanged(bool visible) {
+    setState(() => _equityVisible = visible);
+    _chartCtrl.setEquityVisible(visible);
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(backtestControllerProvider);
@@ -169,67 +188,149 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
     });
 
     return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.all(8),
+      child: Column(
         children: [
-          SizedBox(
-            width: 340,
-            child: ListView(
-              children: [
-                BotConfigPanel(
-                  symbol: _selectedSymbol,
-                  timeframe: _selectedTimeframe,
-                  selectedBot: _selectedBot,
-                  botParams: _botParams,
-                  initialCash: _initialCash,
-                  feePct: _takerFeePct,
-                  slippagePct: _slippagePct,
-                  onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
-                  onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
-                  onBotChanged: (v) {
-                    setState(() {
-                      _selectedBot = v;
-                      _botParams = Map<String, dynamic>.from(BotRegistry.info(v).defaultParams);
-                    });
-                  },
-                  onBotParamsChanged: (v) => setState(() => _botParams = v),
-                  onInitialCashChanged: (v) => setState(() => _initialCash = v),
-                  onFeeChanged: (v) => setState(() => _takerFeePct = v),
-                  onSlippageChanged: (v) => setState(() => _slippagePct = v),
-                ),
-                const SizedBox(height: 12),
-                RunControls(
-                  status: status,
-                  speedMs: _speedMs,
-                  onStart: _onStart,
-                  onPause: ctrl.pause,
-                  onResume: ctrl.resume,
-                  onStep: ctrl.step,
-                  onCancel: ctrl.cancel,
-                  onSpeedChanged: (v) {
-                    setState(() => _speedMs = v);
-                    ctrl.setSpeed(v);
-                  },
-                ),
-                const SizedBox(height: 12),
-                ResultsView(status: status),
-              ],
+          // ─── Top bar: config + controls ───────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  BotConfigToolbar(
+                    symbol: _selectedSymbol,
+                    timeframe: _selectedTimeframe,
+                    selectedBot: _selectedBot,
+                    botParams: _botParams,
+                    initialCash: _initialCash,
+                    feePct: _takerFeePct,
+                    slippagePct: _slippagePct,
+                    onSymbolChanged: (v) => setState(() => _selectedSymbol = v),
+                    onTimeframeChanged: (v) => setState(() => _selectedTimeframe = v),
+                    onBotChanged: (v) {
+                      setState(() {
+                        _selectedBot = v;
+                        _botParams = Map<String, dynamic>.from(BotRegistry.info(v).defaultParams);
+                      });
+                    },
+                    onBotParamsChanged: (v) => setState(() => _botParams = v),
+                    onInitialCashChanged: (v) => setState(() => _initialCash = v),
+                    onFeeChanged: (v) => setState(() => _takerFeePct = v),
+                    onSlippageChanged: (v) => setState(() => _slippagePct = v),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: SizedBox(height: 20, child: VerticalDivider(width: 1, color: Theme.of(context).dividerColor)),
+                  ),
+                  RunControlsInline(
+                    status: status,
+                    speedMs: _speedMs,
+                    stepMode: _stepMode,
+                    onStart: _onStart,
+                    onPause: ctrl.pause,
+                    onResume: ctrl.resume,
+                    onStep: ctrl.step,
+                    onCancel: ctrl.cancel,
+                    onSpeedChanged: (v) {
+                      setState(() => _speedMs = v);
+                      ctrl.setSpeed(v);
+                    },
+                    onStepModeChanged: (v) => setState(() => _stepMode = v),
+                  ),
+                  if (status is BacktestRunning) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: SizedBox(height: 20, child: VerticalDivider(width: 1, color: Theme.of(context).dividerColor)),
+                    ),
+                    _LiveBadge(status: status),
+                  ],
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 12),
+          // ─── Chart (takes all remaining space) ────────────────
           Expanded(
-            child: Card(
-              clipBehavior: Clip.antiAlias,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.symmetric(
+                  horizontal: BorderSide(color: Theme.of(context).dividerColor),
+                ),
+              ),
               child: ChartWidget(
                 controller: _chartCtrl,
-                onDiagnostic: (msg) =>
-                    debugPrint('[chart] $msg'),
+                onDiagnostic: (msg) => debugPrint('[chart] $msg'),
               ),
+            ),
+          ),
+          // ─── Bottom bar: metrics + chart toggles ──────────────
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: ResultsBar(
+              status: status,
+              markersMode: _markersMode,
+              indicatorsVisible: _indicatorsVisible,
+              equityVisible: _equityVisible,
+              onMarkersModeChanged: _onMarkersModeChanged,
+              onIndicatorsVisibleChanged: _onIndicatorsVisibleChanged,
+              onEquityVisibleChanged: _onEquityVisibleChanged,
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LiveBadge extends StatelessWidget {
+  final BacktestRunning status;
+  const _LiveBadge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '${status.percent.toStringAsFixed(0)}%',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '${status.trades.length} trades',
+          style: const TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+        if (status.lastEquity != null) ...[
+          const SizedBox(width: 8),
+          Text(
+            '${status.lastEquity!.toStringAsFixed(0)} USDT',
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+        ],
+        if (status.paused) ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.orange.withAlpha(30),
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: const Text('PAUSED', style: TextStyle(fontSize: 9, color: Colors.orange, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ],
     );
   }
 }

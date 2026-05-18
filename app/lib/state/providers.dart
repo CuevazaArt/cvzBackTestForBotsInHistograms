@@ -22,3 +22,8 @@ final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.dark);
 
 /// Viewed result from history (used by Analysis screen when no live result).
 final viewedResultProvider = StateProvider<BacktestResult?>((ref) => null);
+
+/// Path to candle CSV backup directory (set once in main.dart).
+final candleBackupDirProvider = Provider<String>((ref) {
+  throw UnimplementedError('Override candleBackupDirProvider in main.dart');
+});

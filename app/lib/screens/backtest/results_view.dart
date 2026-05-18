@@ -1,167 +1,398 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
 import '../../analysis/metrics.dart';
 import '../../core/models/backtest_result.dart';
+import '../../core/models/candle.dart';
 import '../../state/backtest_state.dart';
 
-class ResultsView extends StatelessWidget {
+class ResultsBar extends StatelessWidget {
   final BacktestStatus status;
-  const ResultsView({super.key, required this.status});
+  final String markersMode;
+  final bool indicatorsVisible;
+  final bool equityVisible;
+  final ValueChanged<String> onMarkersModeChanged;
+  final ValueChanged<bool> onIndicatorsVisibleChanged;
+  final ValueChanged<bool> onEquityVisibleChanged;
+
+  const ResultsBar({
+    super.key,
+    required this.status,
+    required this.markersMode,
+    required this.indicatorsVisible,
+    required this.equityVisible,
+    required this.onMarkersModeChanged,
+    required this.onIndicatorsVisibleChanged,
+    required this.onEquityVisibleChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: switch (status) {
-          BacktestIdle() => const _EmptyState(message: 'Configure and start a backtest.'),
-          BacktestRunning(:final trades, :final lastEquity, :final percent) =>
-            _RunningView(tradeCount: trades.length, equity: lastEquity, percent: percent),
-          BacktestDone(:final result) => _DoneView(result: result),
-          BacktestErrorState(:final message) => _ErrorView(message: message),
-        },
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
       ),
+      child: switch (status) {
+        BacktestIdle() => _IdleBar(
+            markersMode: markersMode,
+            indicatorsVisible: indicatorsVisible,
+            equityVisible: equityVisible,
+            onMarkersModeChanged: onMarkersModeChanged,
+            onIndicatorsVisibleChanged: onIndicatorsVisibleChanged,
+            onEquityVisibleChanged: onEquityVisibleChanged,
+          ),
+        BacktestRunning() => _RunningBar(
+            status: status as BacktestRunning,
+            markersMode: markersMode,
+            indicatorsVisible: indicatorsVisible,
+            equityVisible: equityVisible,
+            onMarkersModeChanged: onMarkersModeChanged,
+            onIndicatorsVisibleChanged: onIndicatorsVisibleChanged,
+            onEquityVisibleChanged: onEquityVisibleChanged,
+          ),
+        BacktestDone(:final result) => _DoneBar(
+            result: result,
+            markersMode: markersMode,
+            indicatorsVisible: indicatorsVisible,
+            equityVisible: equityVisible,
+            onMarkersModeChanged: onMarkersModeChanged,
+            onIndicatorsVisibleChanged: onIndicatorsVisibleChanged,
+            onEquityVisibleChanged: onEquityVisibleChanged,
+          ),
+        BacktestErrorState(:final message) => _ErrorBar(message: message),
+      },
     );
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  final String message;
-  const _EmptyState({required this.message});
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Text(message, style: const TextStyle(color: Colors.grey)),
-      );
-}
+class _ChartToggles extends StatelessWidget {
+  final String markersMode;
+  final bool indicatorsVisible;
+  final bool equityVisible;
+  final ValueChanged<String> onMarkersModeChanged;
+  final ValueChanged<bool> onIndicatorsVisibleChanged;
+  final ValueChanged<bool> onEquityVisibleChanged;
 
-class _RunningView extends StatelessWidget {
-  final int tradeCount;
-  final double? equity;
-  final double percent;
-  const _RunningView({required this.tradeCount, required this.equity, required this.percent});
-
-  @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('Live', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(value: percent / 100),
-          const SizedBox(height: 8),
-          _Metric(label: 'Progress', value: '${percent.toStringAsFixed(1)}%'),
-          _Metric(label: 'Trades', value: '$tradeCount'),
-          _Metric(label: 'Equity', value: equity != null ? '${equity!.toStringAsFixed(2)} USDT' : '—'),
-        ],
-      );
-}
-
-class _DoneView extends StatelessWidget {
-  final BacktestResult result;
-  const _DoneView({required this.result});
+  const _ChartToggles({
+    required this.markersMode,
+    required this.indicatorsVisible,
+    required this.equityVisible,
+    required this.onMarkersModeChanged,
+    required this.onIndicatorsVisibleChanged,
+    required this.onEquityVisibleChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final m = MetricsCalculator.compute(result, timeframe: '1h');
-    final theme = Theme.of(context);
-    final returnColor = result.returnPct >= 0 ? Colors.green : Colors.red;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Text('Result', style: theme.textTheme.titleMedium),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: returnColor.withAlpha(30),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                '${result.returnPct >= 0 ? "+" : ""}${result.returnPct.toStringAsFixed(2)}%',
-                style: TextStyle(color: returnColor, fontWeight: FontWeight.bold),
-              ),
-            ),
+        PopupMenuButton<String>(
+          tooltip: 'Marker labels',
+          initialValue: markersMode,
+          onSelected: onMarkersModeChanged,
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'full', child: Text('Full labels')),
+            PopupMenuItem(value: 'minimal', child: Text('Arrows only')),
+            PopupMenuItem(value: 'off', child: Text('Hidden')),
           ],
+          child: Chip(
+            avatar: Icon(
+              markersMode == 'off' ? Icons.label_off : Icons.label,
+              size: 14,
+            ),
+            label: Text(
+              markersMode == 'full' ? 'Labels' : markersMode == 'minimal' ? 'Arrows' : 'Off',
+              style: const TextStyle(fontSize: 10),
+            ),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            labelPadding: const EdgeInsets.only(right: 4),
+          ),
         ),
-        const Divider(),
-        _SectionHeader(title: 'Performance'),
-        _Metric(label: 'Final equity', value: '${result.finalEquity.toStringAsFixed(2)} USDT'),
-        _Metric(label: 'Trades', value: '${result.totalTrades}'),
-        _Metric(label: 'Win rate', value: '${result.winRate.toStringAsFixed(1)}%'),
-        _Metric(
-          label: 'Profit factor',
-          value: result.profitFactor.isFinite ? result.profitFactor.toStringAsFixed(2) : '∞',
+        const SizedBox(width: 4),
+        FilterChip(
+          label: const Text('Ind', style: TextStyle(fontSize: 10)),
+          avatar: const Icon(Icons.show_chart, size: 14),
+          selected: indicatorsVisible,
+          onSelected: onIndicatorsVisibleChanged,
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          labelPadding: const EdgeInsets.only(right: 4),
         ),
-        _Metric(label: 'Expectancy', value: m.expectancy.toStringAsFixed(2)),
-        _Metric(label: 'Total fees', value: '${result.totalFees.toStringAsFixed(2)} USDT'),
-        const SizedBox(height: 8),
-        _SectionHeader(title: 'Risk'),
-        _Metric(label: 'Max drawdown', value: '${m.maxDrawdownPct.toStringAsFixed(2)}%'),
-        _Metric(label: 'Sharpe', value: m.sharpe.toStringAsFixed(2)),
-        _Metric(label: 'Sortino', value: m.sortino.toStringAsFixed(2)),
-        _Metric(label: 'Calmar', value: m.calmar.toStringAsFixed(2)),
-        _Metric(label: 'Ulcer index', value: m.ulcerIndex.toStringAsFixed(2)),
-        _Metric(label: 'Recovery', value: m.recoveryFactor.toStringAsFixed(2)),
-        const SizedBox(height: 8),
-        _SectionHeader(title: 'Streaks & MFE/MAE'),
-        _Metric(label: 'Win streak', value: '${m.longestWinStreak}'),
-        _Metric(label: 'Loss streak', value: '${m.longestLossStreak}'),
-        _Metric(label: 'Avg win', value: m.avgWin.toStringAsFixed(2)),
-        _Metric(label: 'Avg loss', value: m.avgLoss.toStringAsFixed(2)),
-        _Metric(label: 'Avg MFE', value: '${m.avgMfe.toStringAsFixed(2)}%'),
-        _Metric(label: 'Avg MAE', value: '${m.avgMae.toStringAsFixed(2)}%'),
+        const SizedBox(width: 4),
+        FilterChip(
+          label: const Text('Eq', style: TextStyle(fontSize: 10)),
+          avatar: const Icon(Icons.area_chart, size: 14),
+          selected: equityVisible,
+          onSelected: onEquityVisibleChanged,
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          labelPadding: const EdgeInsets.only(right: 4),
+        ),
       ],
     );
   }
 }
 
-class _ErrorView extends StatelessWidget {
-  final String message;
-  const _ErrorView({required this.message});
+class _IdleBar extends StatelessWidget {
+  final String markersMode;
+  final bool indicatorsVisible;
+  final bool equityVisible;
+  final ValueChanged<String> onMarkersModeChanged;
+  final ValueChanged<bool> onIndicatorsVisibleChanged;
+  final ValueChanged<bool> onEquityVisibleChanged;
+
+  const _IdleBar({
+    required this.markersMode,
+    required this.indicatorsVisible,
+    required this.equityVisible,
+    required this.onMarkersModeChanged,
+    required this.onIndicatorsVisibleChanged,
+    required this.onEquityVisibleChanged,
+  });
+
   @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Row(
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Expanded(
+          child: Text('Configure and start a backtest',
+              style: TextStyle(color: Colors.grey, fontSize: 12)),
+        ),
+        _ChartToggles(
+          markersMode: markersMode,
+          indicatorsVisible: indicatorsVisible,
+          equityVisible: equityVisible,
+          onMarkersModeChanged: onMarkersModeChanged,
+          onIndicatorsVisibleChanged: onIndicatorsVisibleChanged,
+          onEquityVisibleChanged: onEquityVisibleChanged,
+        ),
+      ],
+    );
+  }
+}
+
+class _RunningBar extends StatelessWidget {
+  final BacktestRunning status;
+  final String markersMode;
+  final bool indicatorsVisible;
+  final bool equityVisible;
+  final ValueChanged<String> onMarkersModeChanged;
+  final ValueChanged<bool> onIndicatorsVisibleChanged;
+  final ValueChanged<bool> onEquityVisibleChanged;
+
+  const _RunningBar({
+    required this.status,
+    required this.markersMode,
+    required this.indicatorsVisible,
+    required this.equityVisible,
+    required this.onMarkersModeChanged,
+    required this.onIndicatorsVisibleChanged,
+    required this.onEquityVisibleChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final candle = status.currentCandle;
+    final tf = DateFormat('yyyy-MM-dd HH:mm');
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 120,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.error_outline, color: Colors.red),
-              SizedBox(width: 8),
-              Text('Backtest failed', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              LinearProgressIndicator(value: status.percent / 100),
+              const SizedBox(height: 2),
+              Text(
+                '${status.percent.toStringAsFixed(1)}%  |  ${status.trades.length} trades  |  ${status.lastEquity?.toStringAsFixed(0) ?? "-"}',
+                style: const TextStyle(fontSize: 10, color: Colors.grey),
+              ),
             ],
           ),
-          const SizedBox(height: 8),
-          SelectableText(message, style: const TextStyle(fontSize: 12)),
-        ],
-      );
-}
-
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  const _SectionHeader({required this.title});
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Text(title, style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
-      );
-}
-
-class _Metric extends StatelessWidget {
-  final String label;
-  final String value;
-  const _Metric({required this.label, required this.value});
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
-            Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-          ],
         ),
-      );
+        if (status.paused && candle != null) ...[
+          const SizedBox(width: 12),
+          _CandleInfo(candle: candle, index: status.processed, tf: tf),
+        ],
+        const Spacer(),
+        _ChartToggles(
+          markersMode: markersMode,
+          indicatorsVisible: indicatorsVisible,
+          equityVisible: equityVisible,
+          onMarkersModeChanged: onMarkersModeChanged,
+          onIndicatorsVisibleChanged: onIndicatorsVisibleChanged,
+          onEquityVisibleChanged: onEquityVisibleChanged,
+        ),
+      ],
+    );
+  }
+}
+
+class _CandleInfo extends StatelessWidget {
+  final Candle candle;
+  final int index;
+  final DateFormat tf;
+  const _CandleInfo({required this.candle, required this.index, required this.tf});
+
+  @override
+  Widget build(BuildContext context) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(candle.timestampMs, isUtc: true);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.blue.withAlpha(20),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.blue.withAlpha(50)),
+      ),
+      child: Text(
+        'Bar #$index  |  ${tf.format(dt)}  |  O:${candle.open.toStringAsFixed(1)} H:${candle.high.toStringAsFixed(1)} L:${candle.low.toStringAsFixed(1)} C:${candle.close.toStringAsFixed(1)} V:${candle.volume.toStringAsFixed(0)}',
+        style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+      ),
+    );
+  }
+}
+
+class _DoneBar extends StatelessWidget {
+  final BacktestResult result;
+  final String markersMode;
+  final bool indicatorsVisible;
+  final bool equityVisible;
+  final ValueChanged<String> onMarkersModeChanged;
+  final ValueChanged<bool> onIndicatorsVisibleChanged;
+  final ValueChanged<bool> onEquityVisibleChanged;
+
+  const _DoneBar({
+    required this.result,
+    required this.markersMode,
+    required this.indicatorsVisible,
+    required this.equityVisible,
+    required this.onMarkersModeChanged,
+    required this.onIndicatorsVisibleChanged,
+    required this.onEquityVisibleChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final m = MetricsCalculator.compute(result, timeframe: '1h');
+    final retColor = result.returnPct >= 0 ? Colors.green : Colors.red;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Return badge
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: retColor.withAlpha(30),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            '${result.returnPct >= 0 ? "+" : ""}${result.returnPct.toStringAsFixed(2)}%',
+            style: TextStyle(color: retColor, fontWeight: FontWeight.bold, fontSize: 13),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Performance column
+        Expanded(
+          child: _MetricCol(items: [
+            ('Equity', result.finalEquity.toStringAsFixed(0)),
+            ('Trades', '${result.totalTrades} (${result.winRate.toStringAsFixed(0)}%W)'),
+            ('PF', result.profitFactor.isFinite ? result.profitFactor.toStringAsFixed(2) : '-'),
+            ('Expect', m.expectancy.toStringAsFixed(2)),
+          ]),
+        ),
+        // Risk column
+        Expanded(
+          child: _MetricCol(items: [
+            ('MaxDD', '${m.maxDrawdownPct.toStringAsFixed(1)}%'),
+            ('Sharpe', m.sharpe.toStringAsFixed(2)),
+            ('Sortino', m.sortino.toStringAsFixed(2)),
+            ('Calmar', m.calmar.toStringAsFixed(2)),
+          ]),
+        ),
+        // Streaks column
+        Expanded(
+          child: _MetricCol(items: [
+            ('WinStr', '${m.longestWinStreak}'),
+            ('LossStr', '${m.longestLossStreak}'),
+            ('AvgW', m.avgWin.toStringAsFixed(2)),
+            ('AvgL', m.avgLoss.toStringAsFixed(2)),
+          ]),
+        ),
+        // Fees & MFE/MAE column
+        Expanded(
+          child: _MetricCol(items: [
+            ('Fees', result.totalFees.toStringAsFixed(1)),
+            ('Ulcer', m.ulcerIndex.toStringAsFixed(2)),
+            ('MFE', '${m.avgMfe.toStringAsFixed(2)}%'),
+            ('MAE', '${m.avgMae.toStringAsFixed(2)}%'),
+          ]),
+        ),
+        _ChartToggles(
+          markersMode: markersMode,
+          indicatorsVisible: indicatorsVisible,
+          equityVisible: equityVisible,
+          onMarkersModeChanged: onMarkersModeChanged,
+          onIndicatorsVisibleChanged: onIndicatorsVisibleChanged,
+          onEquityVisibleChanged: onEquityVisibleChanged,
+        ),
+      ],
+    );
+  }
+}
+
+class _MetricCol extends StatelessWidget {
+  final List<(String, String)> items;
+  const _MetricCol({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final (label, value) in items)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 48,
+                  child: Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
+                ),
+                Flexible(
+                  child: Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 10)),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ErrorBar extends StatelessWidget {
+  final String message;
+  const _ErrorBar({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.error_outline, color: Colors.red, size: 16),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text('Error: $message',
+              style: const TextStyle(color: Colors.red, fontSize: 11),
+              overflow: TextOverflow.ellipsis),
+        ),
+      ],
+    );
+  }
 }
