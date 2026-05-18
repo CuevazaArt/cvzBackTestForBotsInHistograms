@@ -1,11 +1,16 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../analysis/metrics.dart';
 import '../analysis/monte_carlo.dart';
 import '../analysis/stress.dart';
 import '../core/models/backtest_result.dart';
+import '../services/export_service.dart';
 import '../state/backtest_state.dart';
+import '../widgets/equity_curve.dart';
+import '../widgets/trades_table.dart';
 
 class AnalysisScreen extends ConsumerWidget {
   const AnalysisScreen({super.key});
@@ -23,23 +28,107 @@ class AnalysisScreen extends ConsumerWidget {
     }
 
     return DefaultTabController(
-      length: 3,
+      length: 5,
       child: Column(
         children: [
-          const TabBar(tabs: [
-            Tab(text: 'Metrics'),
-            Tab(text: 'Monte Carlo'),
-            Tab(text: 'Stress Test'),
-          ]),
+          Row(
+            children: [
+              const Expanded(
+                child: TabBar(tabs: [
+                  Tab(text: 'Metrics'),
+                  Tab(text: 'Equity'),
+                  Tab(text: 'Trades'),
+                  Tab(text: 'Monte Carlo'),
+                  Tab(text: 'Stress Test'),
+                ]),
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.file_download),
+                tooltip: 'Export',
+                onSelected: (v) => _export(context, result, v),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'csv', child: Text('Copy trades CSV')),
+                  PopupMenuItem(value: 'json', child: Text('Copy result JSON')),
+                ],
+              ),
+            ],
+          ),
           Expanded(
             child: TabBarView(
               children: [
                 _MetricsTab(result: result),
+                _EquityTab(result: result),
+                _TradesTab(result: result),
                 _MonteCarloTab(result: result),
                 _StressTab(result: result),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  static void _export(BuildContext context, BacktestResult result, String format) {
+    final text = format == 'csv'
+        ? ExportService.tradesToCsv(result.trades)
+        : const JsonEncoder.withIndent('  ').convert(
+            jsonDecode(ExportService.resultToJson(result)));
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${format.toUpperCase()} copied to clipboard')),
+    );
+  }
+}
+
+class _EquityTab extends StatelessWidget {
+  final BacktestResult result;
+  const _EquityTab({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Equity Curve', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Expanded(
+            child: EquityCurveWidget(
+              equityCurve: result.equityCurve,
+              initialCash: result.initialCash,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TradesTab extends StatelessWidget {
+  final BacktestResult result;
+  const _TradesTab({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('${result.totalTrades} trades', style: Theme.of(context).textTheme.titleMedium),
+              const Spacer(),
+              Text(
+                '${result.wins} W / ${result.totalTrades - result.wins} L',
+                style: const TextStyle(color: Colors.grey),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(child: TradesTable(trades: result.trades)),
         ],
       ),
     );
