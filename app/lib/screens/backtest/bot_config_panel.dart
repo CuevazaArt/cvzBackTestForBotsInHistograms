@@ -85,11 +85,12 @@ class BotConfigPanel extends ConsumerWidget {
             const Divider(height: 24),
             DropdownButtonFormField<String>(
               initialValue: selectedBot,
+              isExpanded: true,
               decoration: const InputDecoration(
                   labelText: 'Bot', border: OutlineInputBorder()),
               items: BotRegistry.all
                   .map((b) =>
-                      DropdownMenuItem(value: b.id, child: Text(b.displayName)))
+                      DropdownMenuItem(value: b.id, child: Text(b.displayName, overflow: TextOverflow.ellipsis)))
                   .toList(),
               onChanged: (v) => v != null ? onBotChanged(v) : null,
             ),

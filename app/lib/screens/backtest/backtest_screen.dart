@@ -105,7 +105,7 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
           // Left column: configuration + controls + results
           SizedBox(
             width: 340,
-            child: Column(
+            child: ListView(
               children: [
                 BotConfigPanel(
                   symbol: _selectedSymbol,
@@ -141,7 +141,7 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
                   },
                 ),
                 const SizedBox(height: 12),
-                Expanded(child: ResultsView(status: status)),
+                ResultsView(status: status),
               ],
             ),
           ),
