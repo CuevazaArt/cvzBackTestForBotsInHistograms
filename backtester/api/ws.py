@@ -121,7 +121,10 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                         bot = bot_cls(**b.params)
                         bots_instances.append(bot)
                     except Exception as e:
-                        _send("error", {"message": f"Error initializing bot {b.name}: {e}"})
+                        _send(
+                            "error",
+                            {"message": f"Error initializing bot {b.name}: {e}"},
+                        )
                         has_error = True
                         break
 
@@ -194,7 +197,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     "taker_fee_pct": req.taker_fee_pct,
                     "slippage_pct": req.slippage_pct,
                     "fill_on_next_open": req.fill_on_next_open,
-                    "indicators": [{"name": i.name, **i.to_kwargs()} for i in req.indicators],
+                    "indicators": [
+                        {"name": i.name, **i.to_kwargs()} for i in req.indicators
+                    ],
                     "formula": req.formula,
                     "speed_ms": speed_ms,
                 }

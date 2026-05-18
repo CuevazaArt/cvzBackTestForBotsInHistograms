@@ -41,7 +41,7 @@ def _sleep_for_retry(attempt: int, retry_after_hdr: Optional[str]) -> float:
             return max(0.5, float(retry_after_hdr))
         except ValueError:
             pass
-    return BACKOFF_BASE_S * (2 ** attempt)
+    return BACKOFF_BASE_S * (2**attempt)
 
 
 class WeightTracker:
@@ -116,7 +116,9 @@ class BinanceDownloader:
         "1d": 1440,
     }
 
-    def __init__(self, db_path: Path, api_key: Optional[str] = None, read_only: bool = False) -> None:
+    def __init__(
+        self, db_path: Path, api_key: Optional[str] = None, read_only: bool = False
+    ) -> None:
         self.db_path = Path(db_path)
         if self.db_path.suffix == ".db":
             self.db_path = self.db_path.with_suffix(".duckdb")
@@ -231,7 +233,9 @@ class BinanceDownloader:
             if not batch:
                 _LOG.info(
                     "No more candles available for %s %s past %d — stopping",
-                    symbol, timeframe, current_ts,
+                    symbol,
+                    timeframe,
+                    current_ts,
                 )
                 break
 
@@ -310,7 +314,11 @@ class BinanceDownloader:
                     wait = _sleep_for_retry(attempt, resp.headers.get("Retry-After"))
                     _LOG.warning(
                         "Transient %s for %s — retry %d/%d after %.1fs",
-                        last_err, symbol, attempt + 1, MAX_RETRIES, wait,
+                        last_err,
+                        symbol,
+                        attempt + 1,
+                        MAX_RETRIES,
+                        wait,
                     )
                     time.sleep(wait)
                     continue
@@ -318,7 +326,9 @@ class BinanceDownloader:
                 resp.raise_for_status()
                 data = resp.json()
                 if not isinstance(data, list):
-                    raise DownloaderError(f"Unexpected response shape: {type(data).__name__}")
+                    raise DownloaderError(
+                        f"Unexpected response shape: {type(data).__name__}"
+                    )
                 return data
 
             except (requests.Timeout, requests.ConnectionError) as e:
@@ -326,7 +336,11 @@ class BinanceDownloader:
                 wait = _sleep_for_retry(attempt, None)
                 _LOG.warning(
                     "%s for %s — retry %d/%d after %.1fs",
-                    last_err, symbol, attempt + 1, MAX_RETRIES, wait,
+                    last_err,
+                    symbol,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    wait,
                 )
                 time.sleep(wait)
             except DownloaderError:
@@ -374,7 +388,10 @@ class BinanceDownloader:
                 if resp.status_code == 404:
                     _LOG.warning(
                         "Data not available for %s %s %s-%s",
-                        symbol, timeframe, year, month_str,
+                        symbol,
+                        timeframe,
+                        year,
+                        month_str,
                     )
                     return 0
 
@@ -383,7 +400,11 @@ class BinanceDownloader:
                     wait = _sleep_for_retry(attempt, resp.headers.get("Retry-After"))
                     _LOG.warning(
                         "Transient %s for %s — retry %d/%d after %.1fs",
-                        last_err, filename, attempt + 1, MAX_RETRIES, wait,
+                        last_err,
+                        filename,
+                        attempt + 1,
+                        MAX_RETRIES,
+                        wait,
                     )
                     time.sleep(wait)
                     continue
@@ -410,7 +431,11 @@ class BinanceDownloader:
                 wait = _sleep_for_retry(attempt, None)
                 _LOG.warning(
                     "%s for %s — retry %d/%d after %.1fs",
-                    last_err, filename, attempt + 1, MAX_RETRIES, wait,
+                    last_err,
+                    filename,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    wait,
                 )
                 time.sleep(wait)
             except (zipfile.BadZipFile, UnicodeDecodeError) as e:
@@ -418,7 +443,9 @@ class BinanceDownloader:
                 last_err = f"{type(e).__name__}: {e}"
                 _LOG.warning(
                     "Corrupted payload for %s — retry %d/%d",
-                    filename, attempt + 1, MAX_RETRIES,
+                    filename,
+                    attempt + 1,
+                    MAX_RETRIES,
                 )
                 time.sleep(_sleep_for_retry(attempt, None))
             except DownloaderError:

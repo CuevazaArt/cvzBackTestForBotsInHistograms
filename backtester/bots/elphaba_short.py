@@ -10,7 +10,6 @@ Strategy:
 """
 
 from typing import Any
-from decimal import Decimal
 
 from backtester.bots.bot_base import BotBase
 from backtester.core.engine import Candle, Portfolio
@@ -92,14 +91,23 @@ class ElphabaShort(BotBase):
         # stop_loss_pct <= 0 disables the protection entirely.
         if n_open > 0 and self.stop_loss_pct > 0:
             avg_cost = float(
-                sum(p.entry_price * p.qty for p in portfolio.positions if p.side == "short")
+                sum(
+                    p.entry_price * p.qty
+                    for p in portfolio.positions
+                    if p.side == "short"
+                )
                 / sum(p.qty for p in portfolio.positions if p.side == "short")
             )
             if price > avg_cost * (1 + self.stop_loss_pct):
                 qty = sum(p.qty for p in portfolio.positions if p.side == "short")
                 if qty > 0:
                     orders.append(
-                        {"side": "BUY", "action": "close_short", "qty": float(qty), "reason": "STOP_LOSS"}
+                        {
+                            "side": "BUY",
+                            "action": "close_short",
+                            "qty": float(qty),
+                            "reason": "STOP_LOSS",
+                        }
                     )
                 self._last_sell_price = None
                 self._buy_target = None
@@ -111,7 +119,12 @@ class ElphabaShort(BotBase):
                 qty = sum(p.qty for p in portfolio.positions if p.side == "short")
                 if qty > 0:
                     orders.append(
-                        {"side": "BUY", "action": "close_short", "qty": float(qty), "reason": "TAKE_PROFIT"}
+                        {
+                            "side": "BUY",
+                            "action": "close_short",
+                            "qty": float(qty),
+                            "reason": "TAKE_PROFIT",
+                        }
                     )
                 self._last_sell_price = None
                 self._buy_target = None
@@ -134,10 +147,15 @@ class ElphabaShort(BotBase):
 
             if should_sell:
                 actual_usdt = min(float(portfolio.cash), self.quote_order_qty)
-                qty = actual_usdt / price if price > 0 else 0.0
-                if qty > 0:
+                sell_qty = actual_usdt / price if price > 0 else 0.0
+                if sell_qty > 0:
                     orders.append(
-                        {"side": "SELL", "action": "open_short", "qty": float(qty), "reason": "DCA_SHORT"}
+                        {
+                            "side": "SELL",
+                            "action": "open_short",
+                            "qty": sell_qty,
+                            "reason": "DCA_SHORT",
+                        }
                     )
                     self._last_sell_price = price
                     # Buy target is always relative to latest sell price

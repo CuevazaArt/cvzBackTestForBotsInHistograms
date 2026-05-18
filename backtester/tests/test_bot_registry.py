@@ -77,6 +77,8 @@ def test_registry_bot_runs_on_synthetic_candles():
     )
     for name in sorted(EXPECTED_BOT_NAMES):
         bot = instantiate_bot(name)
-        res = engine.run([bot], candles, symbol="BTCUSDT", timeframe="1h", bot_names=[name])
+        res = engine.run(
+            [bot], candles, symbol="BTCUSDT", timeframe="1h", bot_names=[name]
+        )
         assert res.candles_processed == len(candles)
         assert res.final_equity > 0

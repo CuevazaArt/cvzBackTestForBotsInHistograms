@@ -132,11 +132,9 @@ class DorothyDCA(BotBase):
 
             if should_buy:
                 actual_usdt = min(float(portfolio.cash), self.quote_order_qty)
-                qty = actual_usdt / price if price > 0 else 0.0
-                if qty > 0:
-                    orders.append(
-                        {"side": "BUY", "qty": float(qty), "reason": "DCA_BUY"}
-                    )
+                buy_qty = actual_usdt / price if price > 0 else 0.0
+                if buy_qty > 0:
+                    orders.append({"side": "BUY", "qty": buy_qty, "reason": "DCA_BUY"})
                     self._last_buy_price = price
                     # Sell target is always relative to latest buy price
                     self._sell_target = price * (1 + self.profit_factor)

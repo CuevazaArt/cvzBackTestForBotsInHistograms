@@ -738,7 +738,7 @@
       // Deduplicate markers: don't add multiple B or S markers on the same timestamp
       const hasEntry = _markerData.some(m => m.time === data.entry_time && m.shape === 'arrowUp');
       const hasExit  = _markerData.some(m => m.time === data.exit_time && m.shape === 'arrowDown');
-      
+
       let added = false;
       if (!hasEntry && data.entry_time != null) {
         _markerData.push({ time: data.entry_time, position: 'belowBar', color: buyCol, shape: 'arrowUp', text: 'B' });
@@ -748,7 +748,7 @@
         _markerData.push({ time: data.exit_time, position: 'aboveBar', color: selCol, shape: 'arrowDown', text: 'S' });
         added = true;
       }
-      
+
       if (added) {
         _markerData.sort((a, b) => a.time - b.time);
         _markersPrimitive.setMarkers(_markerData);

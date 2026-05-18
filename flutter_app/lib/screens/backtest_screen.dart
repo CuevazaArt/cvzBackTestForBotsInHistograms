@@ -211,7 +211,7 @@ class _BacktestScreenState extends State<BacktestScreen> {
       _startDateIso = saved['start_date'] as String?;
       _endDateIso = saved['end_date'] as String?;
       _brickSize = (saved['brick_size'] as num?)?.toDouble() ?? 10.0;
-      
+
       if (saved['bots_params'] != null) {
         final bp = saved['bots_params'] as Map;
         for (final k in bp.keys) {

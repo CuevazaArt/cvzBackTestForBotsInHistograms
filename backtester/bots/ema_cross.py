@@ -144,8 +144,12 @@ class EMACross(BotBase):
         )
         self.last_state = {
             "phase": "live",
-            "fast_ema": round(self._fast_ema, 4) if self._fast_ema is not None else None,
-            "slow_ema": round(self._slow_ema, 4) if self._slow_ema is not None else None,
+            "fast_ema": round(self._fast_ema, 4)
+            if self._fast_ema is not None
+            else None,
+            "slow_ema": round(self._slow_ema, 4)
+            if self._slow_ema is not None
+            else None,
             "spread_pct": round(spread_pct, 4),
             "in_position": self._in_position,
             "decision": "hold",

@@ -7,10 +7,10 @@ import 'package:backtester_shell/services/api_service.dart';
 
 class MockApiService extends ApiService {
   MockApiService() : super(baseUrl: 'http://localhost');
-  
+
   @override
   Future<List<String>> getSymbols() async => ['BTCUSDT'];
-  
+
   @override
   Future<List<Map<String, dynamic>>> getCandles({
     required String symbol,
@@ -51,7 +51,7 @@ class MockWsService extends WsService {
         'oscillator_keys': [],
         'bot_ids': ['bot1']
       }));
-      
+
       await Future.delayed(const Duration(milliseconds: 10));
       _events.add(WsEvent(WsEventType.candle, {
         'time': 1735689600,
@@ -61,7 +61,7 @@ class MockWsService extends WsService {
         'close': 102.0,
         'volume': 1000.0
       }));
-      
+
       await Future.delayed(const Duration(milliseconds: 10));
       _events.add(WsEvent(WsEventType.result, {
         'symbol': symbol,
@@ -114,7 +114,7 @@ void main() {
 
     // Wait for the WsEventType.start and candle events
     await tester.pump(const Duration(milliseconds: 15));
-    
+
     // Wait for the WsEventType.result event
     await tester.pump(const Duration(milliseconds: 15));
     await tester.pumpAndSettle();
