@@ -6,6 +6,7 @@ import 'analysis_screen.dart';
 import 'optimization_screen.dart';
 import 'download_screen.dart';
 import 'settings_screen.dart';
+import '../widgets/command_palette.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -25,38 +26,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _Dest(Icons.settings_outlined, Icons.settings, 'Settings'),
   ];
 
+  List<CommandPaletteAction> get _actions => [
+        CommandPaletteAction(label: 'Go to Backtest', icon: Icons.play_arrow, onTap: () => setState(() => _index = 0)),
+        CommandPaletteAction(label: 'Go to Analysis', icon: Icons.analytics, onTap: () => setState(() => _index = 1)),
+        CommandPaletteAction(label: 'Go to Optimize', icon: Icons.tune, onTap: () => setState(() => _index = 2)),
+        CommandPaletteAction(label: 'Go to Data', icon: Icons.download, onTap: () => setState(() => _index = 3)),
+        CommandPaletteAction(label: 'Go to Settings', icon: Icons.settings, onTap: () => setState(() => _index = 4)),
+      ];
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Row(
-        children: [
-          NavigationRail(
-            selectedIndex: _index,
-            onDestinationSelected: (i) => setState(() => _index = i),
-            labelType: NavigationRailLabelType.all,
-            destinations: [
-              for (final d in _destinations)
-                NavigationRailDestination(
-                  icon: Icon(d.icon),
-                  selectedIcon: Icon(d.selectedIcon),
-                  label: Text(d.label),
-                ),
-            ],
-          ),
-          const VerticalDivider(width: 1),
-          Expanded(
-            child: IndexedStack(
-              index: _index,
-              children: const [
-                BacktestScreen(),
-                AnalysisScreen(),
-                OptimizationScreen(),
-                DownloadScreen(),
-                SettingsScreen(),
+    return CommandPaletteShortcut(
+      actions: _actions,
+      child: Scaffold(
+        body: Row(
+          children: [
+            NavigationRail(
+              selectedIndex: _index,
+              onDestinationSelected: (i) => setState(() => _index = i),
+              labelType: NavigationRailLabelType.all,
+              destinations: [
+                for (final d in _destinations)
+                  NavigationRailDestination(
+                    icon: Icon(d.icon),
+                    selectedIcon: Icon(d.selectedIcon),
+                    label: Text(d.label),
+                  ),
               ],
             ),
-          ),
-        ],
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: IndexedStack(
+                index: _index,
+                children: const [
+                  BacktestScreen(),
+                  AnalysisScreen(),
+                  OptimizationScreen(),
+                  DownloadScreen(),
+                  SettingsScreen(),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/database.dart';
 import '../data/downloader.dart';
@@ -14,3 +15,6 @@ final downloaderProvider = Provider<BinanceDownloader>((ref) {
   ref.onDispose(d.dispose);
   return d;
 });
+
+/// Theme mode provider.
+final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.dark);

@@ -6,9 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../analysis/metrics.dart';
 import '../analysis/monte_carlo.dart';
 import '../analysis/stress.dart';
+import '../analysis/walk_forward.dart';
+import '../bots/registry.dart';
+import '../core/config.dart';
 import '../core/models/backtest_result.dart';
 import '../services/export_service.dart';
 import '../state/backtest_state.dart';
+import '../state/providers.dart';
 import '../widgets/equity_curve.dart';
 import '../widgets/trades_table.dart';
 
@@ -28,19 +32,23 @@ class AnalysisScreen extends ConsumerWidget {
     }
 
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: Column(
         children: [
           Row(
             children: [
               const Expanded(
-                child: TabBar(tabs: [
-                  Tab(text: 'Metrics'),
-                  Tab(text: 'Equity'),
-                  Tab(text: 'Trades'),
-                  Tab(text: 'Monte Carlo'),
-                  Tab(text: 'Stress Test'),
-                ]),
+                child: TabBar(
+                  isScrollable: true,
+                  tabs: [
+                    Tab(text: 'Metrics'),
+                    Tab(text: 'Equity'),
+                    Tab(text: 'Trades'),
+                    Tab(text: 'Monte Carlo'),
+                    Tab(text: 'Stress Test'),
+                    Tab(text: 'Walk Forward'),
+                  ],
+                ),
               ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.file_download),
@@ -61,6 +69,7 @@ class AnalysisScreen extends ConsumerWidget {
                 _TradesTab(result: result),
                 _MonteCarloTab(result: result),
                 _StressTab(result: result),
+                _WalkForwardTab(ref: ref),
               ],
             ),
           ),
@@ -364,4 +373,168 @@ class _Item {
   final String label;
   final String value;
   const _Item(this.label, this.value);
+}
+
+class _WalkForwardTab extends StatefulWidget {
+  final WidgetRef ref;
+  const _WalkForwardTab({required this.ref});
+  @override
+  State<_WalkForwardTab> createState() => _WalkForwardTabState();
+}
+
+class _WalkForwardTabState extends State<_WalkForwardTab> {
+  String _symbol = 'BTCUSDT';
+  String _timeframe = '1h';
+  String _bot = 'ema_cross';
+  int _isBars = 500;
+  int _oosBars = 125;
+  int _stepBars = 125;
+  WalkForwardResult? _result;
+  bool _running = false;
+
+  Future<void> _run() async {
+    final db = widget.ref.read(databaseProvider);
+    final candles = await db.candles.queryRange(_symbol, _timeframe);
+    if (!mounted) return;
+    if (candles.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No candles for $_symbol $_timeframe')),
+      );
+      return;
+    }
+
+    setState(() { _running = true; _result = null; });
+
+    final wfa = WalkForwardAnalyzer.analyze(
+      candles: candles,
+      botFactory: () => BotRegistry.create(_bot),
+      config: const BacktestConfig(),
+      inSampleBars: _isBars,
+      outSampleBars: _oosBars,
+      stepBars: _stepBars,
+    );
+
+    if (!mounted) return;
+    setState(() { _running = false; _result = wfa; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.end,
+              children: [
+                SizedBox(
+                  width: 120,
+                  child: TextFormField(
+                    initialValue: _symbol,
+                    decoration: const InputDecoration(labelText: 'Symbol', border: OutlineInputBorder()),
+                    onChanged: (v) => _symbol = v.toUpperCase(),
+                  ),
+                ),
+                SizedBox(
+                  width: 80,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _timeframe,
+                    decoration: const InputDecoration(labelText: 'TF', border: OutlineInputBorder()),
+                    items: ['1m', '5m', '15m', '1h', '4h', '1d']
+                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                        .toList(),
+                    onChanged: (v) => _timeframe = v ?? '1h',
+                  ),
+                ),
+                SizedBox(
+                  width: 150,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _bot,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Bot', border: OutlineInputBorder()),
+                    items: BotRegistry.names
+                        .map((n) => DropdownMenuItem(
+                            value: n,
+                            child: Text(BotRegistry.info(n).displayName, overflow: TextOverflow.ellipsis)))
+                        .toList(),
+                    onChanged: (v) { if (v != null) _bot = v; },
+                  ),
+                ),
+                SizedBox(width: 80, child: TextFormField(
+                  initialValue: '$_isBars',
+                  decoration: const InputDecoration(labelText: 'IS bars', border: OutlineInputBorder()),
+                  onChanged: (v) => _isBars = int.tryParse(v) ?? 500,
+                )),
+                SizedBox(width: 80, child: TextFormField(
+                  initialValue: '$_oosBars',
+                  decoration: const InputDecoration(labelText: 'OOS bars', border: OutlineInputBorder()),
+                  onChanged: (v) => _oosBars = int.tryParse(v) ?? 125,
+                )),
+                SizedBox(width: 80, child: TextFormField(
+                  initialValue: '$_stepBars',
+                  decoration: const InputDecoration(labelText: 'Step', border: OutlineInputBorder()),
+                  onChanged: (v) => _stepBars = int.tryParse(v) ?? 125,
+                )),
+                FilledButton.icon(
+                  onPressed: _running ? null : _run,
+                  icon: _running
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.timeline),
+                  label: Text(_running ? 'Running...' : 'Analyze'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_result != null) ...[
+          const SizedBox(height: 12),
+          _MetricCard(title: 'Walk-Forward Summary', items: [
+            _Item('Windows', '${_result!.windows.length}'),
+            _Item('Avg IS Return', '${_result!.avgInSampleReturn.toStringAsFixed(2)}%'),
+            _Item('Avg OOS Return', '${_result!.avgOutSampleReturn.toStringAsFixed(2)}%'),
+            _Item('Efficiency Ratio', _result!.efficiencyRatio.toStringAsFixed(3)),
+            _Item('Verdict', _result!.verdict.toUpperCase()),
+          ]),
+          const SizedBox(height: 8),
+          if (_result!.windows.isNotEmpty)
+            Card(
+              child: DataTable(
+                columnSpacing: 16,
+                columns: const [
+                  DataColumn(label: Text('#'), numeric: true),
+                  DataColumn(label: Text('IS Start'), numeric: true),
+                  DataColumn(label: Text('IS End'), numeric: true),
+                  DataColumn(label: Text('IS Return %'), numeric: true),
+                  DataColumn(label: Text('OOS Return %'), numeric: true),
+                ],
+                rows: [
+                  for (int i = 0; i < _result!.windows.length; i++)
+                    DataRow(cells: [
+                      DataCell(Text('${i + 1}')),
+                      DataCell(Text('${_result!.windows[i].inSampleStart}')),
+                      DataCell(Text('${_result!.windows[i].inSampleEnd}')),
+                      DataCell(Text(
+                        _result!.windows[i].inSampleReturn.toStringAsFixed(2),
+                        style: TextStyle(
+                          color: _result!.windows[i].inSampleReturn >= 0 ? Colors.green : Colors.red,
+                        ),
+                      )),
+                      DataCell(Text(
+                        _result!.windows[i].outSampleReturn.toStringAsFixed(2),
+                        style: TextStyle(
+                          color: _result!.windows[i].outSampleReturn >= 0 ? Colors.green : Colors.red,
+                        ),
+                      )),
+                    ]),
+                ],
+              ),
+            ),
+        ],
+      ],
+    );
+  }
 }
