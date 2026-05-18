@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import '../../analysis/metrics.dart';
+import '../../core/models/backtest_result.dart';
 import '../../state/backtest_state.dart';
 
-/// Compact results panel — shows summary metrics for the current run.
 class ResultsView extends StatelessWidget {
   final BacktestStatus status;
   const ResultsView({super.key, required this.status});
@@ -41,8 +42,11 @@ class _RunningView extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text('Live', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(value: percent / 100),
           const SizedBox(height: 8),
           _Metric(label: 'Progress', value: '${percent.toStringAsFixed(1)}%'),
           _Metric(label: 'Trades', value: '$tradeCount'),
@@ -52,24 +56,66 @@ class _RunningView extends StatelessWidget {
 }
 
 class _DoneView extends StatelessWidget {
-  final dynamic result;
+  final BacktestResult result;
   const _DoneView({required this.result});
+
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) {
+    final m = MetricsCalculator.compute(result, timeframe: '1h');
+    final theme = Theme.of(context);
+    final returnColor = result.returnPct >= 0 ? Colors.green : Colors.red;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
           children: [
-            Text('Result', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            _Metric(label: 'Return', value: '${result.returnPct.toStringAsFixed(2)}%'),
-            _Metric(label: 'Trades', value: '${result.totalTrades}'),
-            _Metric(label: 'Win rate', value: '${result.winRate.toStringAsFixed(1)}%'),
-            _Metric(label: 'Profit factor', value: result.profitFactor.isFinite ? result.profitFactor.toStringAsFixed(2) : '∞'),
-            _Metric(label: 'Total fees', value: '${result.totalFees.toStringAsFixed(2)} USDT'),
-            _Metric(label: 'Final equity', value: '${result.finalEquity.toStringAsFixed(2)} USDT'),
+            Text('Result', style: theme.textTheme.titleMedium),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: returnColor.withAlpha(30),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${result.returnPct >= 0 ? "+" : ""}${result.returnPct.toStringAsFixed(2)}%',
+                style: TextStyle(color: returnColor, fontWeight: FontWeight.bold),
+              ),
+            ),
           ],
         ),
-      );
+        const Divider(),
+        _SectionHeader(title: 'Performance'),
+        _Metric(label: 'Final equity', value: '${result.finalEquity.toStringAsFixed(2)} USDT'),
+        _Metric(label: 'Trades', value: '${result.totalTrades}'),
+        _Metric(label: 'Win rate', value: '${result.winRate.toStringAsFixed(1)}%'),
+        _Metric(
+          label: 'Profit factor',
+          value: result.profitFactor.isFinite ? result.profitFactor.toStringAsFixed(2) : '∞',
+        ),
+        _Metric(label: 'Expectancy', value: m.expectancy.toStringAsFixed(2)),
+        _Metric(label: 'Total fees', value: '${result.totalFees.toStringAsFixed(2)} USDT'),
+        const SizedBox(height: 8),
+        _SectionHeader(title: 'Risk'),
+        _Metric(label: 'Max drawdown', value: '${m.maxDrawdownPct.toStringAsFixed(2)}%'),
+        _Metric(label: 'Sharpe', value: m.sharpe.toStringAsFixed(2)),
+        _Metric(label: 'Sortino', value: m.sortino.toStringAsFixed(2)),
+        _Metric(label: 'Calmar', value: m.calmar.toStringAsFixed(2)),
+        _Metric(label: 'Ulcer index', value: m.ulcerIndex.toStringAsFixed(2)),
+        _Metric(label: 'Recovery', value: m.recoveryFactor.toStringAsFixed(2)),
+        const SizedBox(height: 8),
+        _SectionHeader(title: 'Streaks & MFE/MAE'),
+        _Metric(label: 'Win streak', value: '${m.longestWinStreak}'),
+        _Metric(label: 'Loss streak', value: '${m.longestLossStreak}'),
+        _Metric(label: 'Avg win', value: m.avgWin.toStringAsFixed(2)),
+        _Metric(label: 'Avg loss', value: m.avgLoss.toStringAsFixed(2)),
+        _Metric(label: 'Avg MFE', value: '${m.avgMfe.toStringAsFixed(2)}%'),
+        _Metric(label: 'Avg MAE', value: '${m.avgMae.toStringAsFixed(2)}%'),
+      ],
+    );
+  }
 }
 
 class _ErrorView extends StatelessWidget {
@@ -78,6 +124,7 @@ class _ErrorView extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           const Row(
             children: [
@@ -92,6 +139,16 @@ class _ErrorView extends StatelessWidget {
       );
 }
 
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  const _SectionHeader({required this.title});
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Text(title, style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+      );
+}
+
 class _Metric extends StatelessWidget {
   final String label;
   final String value;
@@ -102,8 +159,8 @@ class _Metric extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label, style: const TextStyle(color: Colors.grey)),
-            Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+            Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+            Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
           ],
         ),
       );

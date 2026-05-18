@@ -28,6 +28,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Backtest'), findsOneWidget);
+    expect(find.text('Analysis'), findsOneWidget);
     expect(find.text('Data'), findsOneWidget);
     expect(find.text('Settings'), findsOneWidget);
   });

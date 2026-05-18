@@ -2,6 +2,11 @@ import 'bot_base.dart';
 import 'ema_cross.dart';
 import 'rsi_reversion.dart';
 import 'dorothy_dca.dart';
+import 'macd_cross.dart';
+import 'bollinger_reversion.dart';
+import 'elphaba_short.dart';
+import 'donchian_breakout.dart';
+import 'grid_trading.dart';
 
 typedef BotFactory = BotBase Function(Map<String, dynamic> params);
 
@@ -58,6 +63,83 @@ class BotRegistry {
         'profitFactorPct': 5.0,
         'marginDropPct': 0.4,
         'maxPositions': 3,
+      },
+    ),
+    'macd_cross': _BotEntry(
+      displayName: 'MACD Crossover',
+      description: 'BUY on MACD/signal bullish cross, SELL on bearish cross.',
+      factory: (p) => MACDCross(
+        fastPeriod: (p['fastPeriod'] as num?)?.toInt() ?? 12,
+        slowPeriod: (p['slowPeriod'] as num?)?.toInt() ?? 26,
+        signalPeriod: (p['signalPeriod'] as num?)?.toInt() ?? 9,
+        profitFactorPct: (p['profitFactorPct'] as num?)?.toDouble() ?? 3.0,
+        stopLossPct: (p['stopLossPct'] as num?)?.toDouble() ?? 5.0,
+        riskPerTradePct: (p['riskPerTradePct'] as num?)?.toDouble() ?? 2.0,
+      ),
+      defaultParams: const {
+        'fastPeriod': 12,
+        'slowPeriod': 26,
+        'signalPeriod': 9,
+      },
+    ),
+    'bollinger_reversion': _BotEntry(
+      displayName: 'Bollinger Reversion',
+      description: 'Mean-reversion: BUY at lower band, SELL at upper band.',
+      factory: (p) => BollingerReversion(
+        period: (p['period'] as num?)?.toInt() ?? 20,
+        kStd: (p['kStd'] as num?)?.toDouble() ?? 2.0,
+        stopLossPct: (p['stopLossPct'] as num?)?.toDouble() ?? 5.0,
+        riskPerTradePct: (p['riskPerTradePct'] as num?)?.toDouble() ?? 2.0,
+      ),
+      defaultParams: const {
+        'period': 20,
+        'kStd': 2.0,
+      },
+    ),
+    'elphaba_short': _BotEntry(
+      displayName: 'Elphaba Short',
+      description: 'Short-selling: RSI overbought + price below EMA confirms downtrend.',
+      factory: (p) => ElphabaShort(
+        rsiPeriod: (p['rsiPeriod'] as num?)?.toInt() ?? 14,
+        emaPeriod: (p['emaPeriod'] as num?)?.toInt() ?? 50,
+        overboughtLevel: (p['overboughtLevel'] as num?)?.toDouble() ?? 70.0,
+        oversoldLevel: (p['oversoldLevel'] as num?)?.toDouble() ?? 30.0,
+        profitFactorPct: (p['profitFactorPct'] as num?)?.toDouble() ?? 3.0,
+        stopLossPct: (p['stopLossPct'] as num?)?.toDouble() ?? 5.0,
+        riskPerTradePct: (p['riskPerTradePct'] as num?)?.toDouble() ?? 2.0,
+      ),
+      defaultParams: const {
+        'rsiPeriod': 14,
+        'emaPeriod': 50,
+      },
+    ),
+    'donchian_breakout': _BotEntry(
+      displayName: 'Donchian Breakout',
+      description: 'Turtle-trading: BUY on N-bar high breakout, SELL on M-bar low break.',
+      factory: (p) => DonchianBreakout(
+        entryPeriod: (p['entryPeriod'] as num?)?.toInt() ?? 20,
+        exitPeriod: (p['exitPeriod'] as num?)?.toInt() ?? 10,
+        stopLossPct: (p['stopLossPct'] as num?)?.toDouble() ?? 5.0,
+        riskPerTradePct: (p['riskPerTradePct'] as num?)?.toDouble() ?? 2.0,
+      ),
+      defaultParams: const {
+        'entryPeriod': 20,
+        'exitPeriod': 10,
+      },
+    ),
+    'grid_trading': _BotEntry(
+      displayName: 'Grid Trading',
+      description: 'Grid of buy/sell levels for sideways markets.',
+      factory: (p) => GridTrading(
+        gridSpacingPct: (p['gridSpacingPct'] as num?)?.toDouble() ?? 1.0,
+        gridLevels: (p['gridLevels'] as num?)?.toInt() ?? 5,
+        quotePerGrid: (p['quotePerGrid'] as num?)?.toDouble() ?? 100.0,
+        stopLossPct: (p['stopLossPct'] as num?)?.toDouble() ?? 10.0,
+      ),
+      defaultParams: const {
+        'gridSpacingPct': 1.0,
+        'gridLevels': 5,
+        'quotePerGrid': 100.0,
       },
     ),
   };
