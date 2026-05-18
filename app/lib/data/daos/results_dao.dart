@@ -13,7 +13,7 @@ class ResultsDao extends DatabaseAccessor<AppDatabase>
     with _$ResultsDaoMixin {
   ResultsDao(super.db);
 
-  Future<void> saveResult(BacktestResult result) async {
+  Future<void> saveResult(BacktestResult result, {Map<String, dynamic>? config}) async {
     final metricsJson = jsonEncode({
       'return_pct': result.returnPct,
       'total_trades': result.totalTrades,
@@ -32,7 +32,7 @@ class ResultsDao extends DatabaseAccessor<AppDatabase>
       ResultsTableCompanion.insert(
         runId: result.runId,
         createdAt: DateTime.now().millisecondsSinceEpoch,
-        configJson: '{}',
+        configJson: jsonEncode(config ?? {}),
         metricsJson: metricsJson,
         tradesJson: tradesJson,
       ),
@@ -46,12 +46,16 @@ class ResultsDao extends DatabaseAccessor<AppDatabase>
         .get();
     return rows.map((r) {
       final metrics = jsonDecode(r.metricsJson) as Map<String, dynamic>;
+      final config = jsonDecode(r.configJson) as Map<String, dynamic>;
       return ResultSummary(
         runId: r.runId,
         createdAt: DateTime.fromMillisecondsSinceEpoch(r.createdAt),
         returnPct: (metrics['return_pct'] as num).toDouble(),
         totalTrades: metrics['total_trades'] as int,
         winRate: (metrics['win_rate'] as num).toDouble(),
+        botName: config['bot'] as String?,
+        symbol: config['symbol'] as String?,
+        timeframe: config['timeframe'] as String?,
       );
     }).toList();
   }
@@ -107,6 +111,9 @@ class ResultSummary {
   final double returnPct;
   final int totalTrades;
   final double winRate;
+  final String? botName;
+  final String? symbol;
+  final String? timeframe;
 
   const ResultSummary({
     required this.runId,
@@ -114,5 +121,16 @@ class ResultSummary {
     required this.returnPct,
     required this.totalTrades,
     required this.winRate,
+    this.botName,
+    this.symbol,
+    this.timeframe,
   });
+
+  String get displayLabel {
+    final parts = <String>[];
+    if (botName != null) parts.add(botName!);
+    if (symbol != null) parts.add(symbol!);
+    if (timeframe != null) parts.add(timeframe!);
+    return parts.isEmpty ? runId : parts.join(' / ');
+  }
 }

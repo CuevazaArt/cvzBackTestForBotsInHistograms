@@ -18,13 +18,31 @@ class DownloadRunning extends DownloadStatus {
   final String timeframe;
   final int fetched;
   final int? total;
+  final DateTime startedAt;
   const DownloadRunning({
     required this.symbol,
     required this.timeframe,
     required this.fetched,
     this.total,
+    required this.startedAt,
   });
   double get percent => total != null && total! > 0 ? fetched / total! * 100 : 0;
+
+  String get eta {
+    if (total == null || total! <= 0 || fetched <= 0) return '';
+    final elapsed = DateTime.now().difference(startedAt).inSeconds;
+    if (elapsed <= 0) return '';
+    final rate = fetched / elapsed;
+    final remaining = (total! - fetched) / rate;
+    if (remaining < 60) return '~${remaining.toInt()}s';
+    if (remaining < 3600) return '~${(remaining / 60).toInt()}m';
+    return '~${(remaining / 3600).toStringAsFixed(1)}h';
+  }
+
+  double get candlesPerSec {
+    final elapsed = DateTime.now().difference(startedAt).inSeconds;
+    return elapsed > 0 ? fetched / elapsed : 0;
+  }
 }
 
 class DownloadDone extends DownloadStatus {
@@ -63,7 +81,8 @@ class DownloadController extends StateNotifier<DownloadStatus> {
     // Resume from last persisted bar.
     final resumeFrom = await dao.lastTimestampMs(symbol, timeframe);
 
-    state = DownloadRunning(symbol: symbol, timeframe: timeframe, fetched: 0);
+    final startedAt = DateTime.now();
+    state = DownloadRunning(symbol: symbol, timeframe: timeframe, fetched: 0, startedAt: startedAt);
 
     try {
       int totalInserted = 0;
@@ -80,6 +99,7 @@ class DownloadController extends StateNotifier<DownloadStatus> {
             timeframe: timeframe,
             fetched: fetched,
             total: total,
+            startedAt: startedAt,
           );
         },
       );

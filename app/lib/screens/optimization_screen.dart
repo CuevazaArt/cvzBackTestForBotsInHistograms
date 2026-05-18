@@ -7,6 +7,7 @@ import '../core/config.dart';
 import '../core/engine.dart';
 import '../analysis/metrics.dart';
 import '../state/providers.dart';
+import '../widgets/heatmap.dart';
 
 class OptimizationScreen extends ConsumerStatefulWidget {
   const OptimizationScreen({super.key});
@@ -26,6 +27,7 @@ class _OptimizationScreenState extends ConsumerState<OptimizationScreen> {
   bool _running = false;
   List<_OptResult>? _results;
   String _sortMetric = 'sharpe';
+  bool _showHeatmap = false;
 
   List<BotParamSpec> get _specs => BotRegistry.create(_selectedBot).paramSpec();
 
@@ -243,18 +245,65 @@ class _OptimizationScreenState extends ConsumerState<OptimizationScreen> {
                   selected: {_sortMetric},
                   onSelectionChanged: (v) => setState(() => _sortMetric = v.first),
                 ),
+                const Spacer(),
+                if (_param2.isNotEmpty)
+                  IconButton(
+                    icon: Icon(_showHeatmap ? Icons.table_chart : Icons.grid_on),
+                    tooltip: _showHeatmap ? 'Show table' : 'Show heatmap',
+                    onPressed: () => setState(() => _showHeatmap = !_showHeatmap),
+                  ),
               ],
             ),
             const SizedBox(height: 8),
-            Expanded(child: _ResultsTable(
-              results: _sortedResults(),
-              hasParam2: _param2.isNotEmpty,
-              param1Name: _param1,
-              param2Name: _param2,
-            )),
+            Expanded(
+              child: _showHeatmap && _param2.isNotEmpty
+                  ? HeatmapWidget(
+                      data: _buildHeatmapData(),
+                      xLabel: _param1,
+                      yLabel: _param2,
+                      metricLabel: _sortMetric,
+                    )
+                  : _ResultsTable(
+                      results: _sortedResults(),
+                      hasParam2: _param2.isNotEmpty,
+                      param1Name: _param1,
+                      param2Name: _param2,
+                    ),
+            ),
           ],
         ],
       ),
+    );
+  }
+
+  HeatmapData _buildHeatmapData() {
+    final xSet = <double>{};
+    final ySet = <double>{};
+    final cells = <(double, double), double>{};
+
+    for (final r in _results!) {
+      xSet.add(r.p1);
+      if (r.p2 != null) ySet.add(r.p2!);
+      final val = switch (_sortMetric) {
+        'return' => r.returnPct,
+        'maxDd' => -r.maxDd,
+        _ => r.sharpe,
+      };
+      cells[(r.p1, r.p2 ?? 0)] = val;
+    }
+
+    final xs = xSet.toList()..sort();
+    final ys = ySet.toList()..sort();
+    final vals = cells.values;
+    final minV = vals.isEmpty ? 0.0 : vals.reduce((a, b) => a < b ? a : b);
+    final maxV = vals.isEmpty ? 0.0 : vals.reduce((a, b) => a > b ? a : b);
+
+    return HeatmapData(
+      xValues: xs,
+      yValues: ys.isEmpty ? [0] : ys,
+      cells: cells,
+      minValue: minV,
+      maxValue: maxV,
     );
   }
 
