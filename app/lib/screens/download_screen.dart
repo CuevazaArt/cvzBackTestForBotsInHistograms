@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/data_quality.dart';
 import '../state/download_state.dart';
 import '../state/providers.dart';
 
@@ -220,6 +221,13 @@ class _SeriesTile extends StatefulWidget {
 
 class _SeriesTileState extends State<_SeriesTile> {
   int? _count;
+  QualityReport? _quality;
+  bool _checking = false;
+
+  static const Map<String, int> _tfMs = {
+    '1m': 60000, '5m': 300000, '15m': 900000,
+    '1h': 3600000, '4h': 14400000, '1d': 86400000,
+  };
 
   @override
   void initState() {
@@ -230,6 +238,14 @@ class _SeriesTileState extends State<_SeriesTile> {
   Future<void> _loadCount() async {
     final count = await widget.db.candles.countCandles(widget.symbol, widget.timeframe);
     if (mounted) setState(() => _count = count);
+  }
+
+  Future<void> _checkQuality() async {
+    setState(() => _checking = true);
+    final candles = await widget.db.candles.queryRange(widget.symbol, widget.timeframe);
+    final barMs = _tfMs[widget.timeframe] ?? 3600000;
+    final report = DataQualityValidator().validate(candles, expectedBarMs: barMs);
+    if (mounted) setState(() { _quality = report; _checking = false; });
   }
 
   Future<void> _delete() async {
@@ -257,15 +273,94 @@ class _SeriesTileState extends State<_SeriesTile> {
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: ListTile(
-        leading: const Icon(Icons.candlestick_chart),
-        title: Text('${widget.symbol}  ${widget.timeframe}'),
-        subtitle: Text(_count != null ? '$_count candles' : 'loading...'),
-        trailing: IconButton(
-          icon: const Icon(Icons.delete_outline, color: Colors.red),
-          tooltip: 'Delete series',
-          onPressed: _delete,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.candlestick_chart),
+            title: Text('${widget.symbol}  ${widget.timeframe}'),
+            subtitle: Text(_count != null ? '$_count candles' : 'loading...'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: _checking
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.verified_outlined),
+                  tooltip: 'Check data quality',
+                  onPressed: _checking ? null : _checkQuality,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  tooltip: 'Delete series',
+                  onPressed: _delete,
+                ),
+              ],
+            ),
+          ),
+          if (_quality != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Row(
+                children: [
+                  Icon(
+                    _quality!.isClean ? Icons.check_circle : Icons.warning,
+                    size: 16,
+                    color: _quality!.isClean ? Colors.green : Colors.orange,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _quality!.isClean
+                          ? 'Clean — ${_quality!.completenessPercect.toStringAsFixed(1)}% complete'
+                          : '${_quality!.violations.length} issues — ${_quality!.completenessPercect.toStringAsFixed(1)}% complete, ${_quality!.missingBars} gaps',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _quality!.isClean ? Colors.green : Colors.orange,
+                      ),
+                    ),
+                  ),
+                  if (!_quality!.isClean)
+                    TextButton(
+                      onPressed: () => _showViolations(context),
+                      child: const Text('Details', style: TextStyle(fontSize: 12)),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showViolations(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('${widget.symbol} ${widget.timeframe} — Quality Report'),
+        content: SizedBox(
+          width: 500,
+          height: 300,
+          child: ListView(
+            children: [
+              for (final v in _quality!.violations)
+                ListTile(
+                  dense: true,
+                  leading: Icon(
+                    v.type == ViolationType.missingBar ? Icons.timeline :
+                    v.type == ViolationType.outlierReturn ? Icons.trending_up :
+                    Icons.error_outline,
+                    size: 16,
+                  ),
+                  title: Text(v.type.name, style: const TextStyle(fontSize: 12)),
+                  subtitle: Text(v.detail, style: const TextStyle(fontSize: 11)),
+                ),
+            ],
+          ),
         ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
       ),
     );
   }

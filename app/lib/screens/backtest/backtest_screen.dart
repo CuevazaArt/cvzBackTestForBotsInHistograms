@@ -111,6 +111,7 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
                   symbol: _selectedSymbol,
                   timeframe: _selectedTimeframe,
                   selectedBot: _selectedBot,
+                  botParams: _botParams,
                   initialCash: _initialCash,
                   feePct: _takerFeePct,
                   slippagePct: _slippagePct,
@@ -122,6 +123,7 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
                       _botParams = Map<String, dynamic>.from(BotRegistry.info(v).defaultParams);
                     });
                   },
+                  onBotParamsChanged: (v) => setState(() => _botParams = v),
                   onInitialCashChanged: (v) => setState(() => _initialCash = v),
                   onFeeChanged: (v) => setState(() => _takerFeePct = v),
                   onSlippageChanged: (v) => setState(() => _slippagePct = v),

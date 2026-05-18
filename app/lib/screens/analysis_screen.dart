@@ -10,6 +10,7 @@ import '../analysis/walk_forward.dart';
 import '../bots/registry.dart';
 import '../core/config.dart';
 import '../core/models/backtest_result.dart';
+import '../data/daos/results_dao.dart';
 import '../services/export_service.dart';
 import '../state/backtest_state.dart';
 import '../state/providers.dart';
@@ -22,17 +23,13 @@ class AnalysisScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(backtestControllerProvider);
-    final result = status is BacktestDone ? status.result : null;
-
-    if (result == null) {
-      return const Center(
-        child: Text('Run a backtest first, then come here to analyze results.',
-            style: TextStyle(color: Colors.grey)),
-      );
-    }
+    final liveResult = status is BacktestDone ? status.result : null;
+    final viewedResult = ref.watch(viewedResultProvider);
+    final result = liveResult ?? viewedResult;
 
     return DefaultTabController(
-      length: 6,
+      length: 7,
+      initialIndex: result == null ? 6 : 0,
       child: Column(
         children: [
           Row(
@@ -47,29 +44,32 @@ class AnalysisScreen extends ConsumerWidget {
                     Tab(text: 'Monte Carlo'),
                     Tab(text: 'Stress Test'),
                     Tab(text: 'Walk Forward'),
+                    Tab(text: 'History'),
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.file_download),
-                tooltip: 'Export',
-                onSelected: (v) => _export(context, result, v),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'csv', child: Text('Copy trades CSV')),
-                  PopupMenuItem(value: 'json', child: Text('Copy result JSON')),
-                ],
-              ),
+              if (result != null)
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.file_download),
+                  tooltip: 'Export',
+                  onSelected: (v) => _export(context, result, v),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'csv', child: Text('Copy trades CSV')),
+                    PopupMenuItem(value: 'json', child: Text('Copy result JSON')),
+                  ],
+                ),
             ],
           ),
           Expanded(
             child: TabBarView(
               children: [
-                _MetricsTab(result: result),
-                _EquityTab(result: result),
-                _TradesTab(result: result),
-                _MonteCarloTab(result: result),
-                _StressTab(result: result),
+                result != null ? _MetricsTab(result: result) : const _NeedResultPlaceholder(),
+                result != null ? _EquityTab(result: result) : const _NeedResultPlaceholder(),
+                result != null ? _TradesTab(result: result) : const _NeedResultPlaceholder(),
+                result != null ? _MonteCarloTab(result: result) : const _NeedResultPlaceholder(),
+                result != null ? _StressTab(result: result) : const _NeedResultPlaceholder(),
                 _WalkForwardTab(ref: ref),
+                _HistoryTab(ref: ref),
               ],
             ),
           ),
@@ -86,6 +86,138 @@ class AnalysisScreen extends ConsumerWidget {
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${format.toUpperCase()} copied to clipboard')),
+    );
+  }
+}
+
+class _NeedResultPlaceholder extends StatelessWidget {
+  const _NeedResultPlaceholder();
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Text(
+        'Run a backtest or load one from History.',
+        style: TextStyle(color: Colors.grey),
+      ),
+    );
+  }
+}
+
+class _HistoryTab extends StatefulWidget {
+  final WidgetRef ref;
+  const _HistoryTab({required this.ref});
+  @override
+  State<_HistoryTab> createState() => _HistoryTabState();
+}
+
+class _HistoryTabState extends State<_HistoryTab> {
+  late Future<List<ResultSummary>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  void _reload() {
+    final db = widget.ref.read(databaseProvider);
+    _future = db.results.listRecent();
+  }
+
+  Future<void> _loadResult(String runId) async {
+    final db = widget.ref.read(databaseProvider);
+    final result = await db.results.loadResult(runId);
+    if (result != null && mounted) {
+      widget.ref.read(viewedResultProvider.notifier).state = result;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Loaded result $runId')),
+      );
+    }
+  }
+
+  Future<void> _deleteResult(String runId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete result?'),
+        content: Text('Remove result $runId?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      final db = widget.ref.read(databaseProvider);
+      await db.results.deleteResult(runId);
+      if (mounted) setState(() => _reload());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<ResultSummary>>(
+      future: _future,
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final results = snap.data!;
+        if (results.isEmpty) {
+          return const Center(
+            child: Text('No saved results yet.\nRun a backtest to generate history.',
+                textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+          );
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: results.length,
+          itemBuilder: (context, i) {
+            final r = results[i];
+            final returnColor = r.returnPct >= 0 ? Colors.green : Colors.red;
+            return Card(
+              child: ListTile(
+                leading: Icon(
+                  r.returnPct >= 0 ? Icons.trending_up : Icons.trending_down,
+                  color: returnColor,
+                ),
+                title: Text(r.runId, overflow: TextOverflow.ellipsis),
+                subtitle: Text(
+                  '${r.createdAt.toLocal().toString().substring(0, 16)} — '
+                  '${r.totalTrades} trades, ${r.winRate.toStringAsFixed(1)}% WR',
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${r.returnPct >= 0 ? '+' : ''}${r.returnPct.toStringAsFixed(2)}%',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: returnColor,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.open_in_new),
+                      tooltip: 'Load into analysis',
+                      onPressed: () => _loadResult(r.runId),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      tooltip: 'Delete',
+                      onPressed: () => _deleteResult(r.runId),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

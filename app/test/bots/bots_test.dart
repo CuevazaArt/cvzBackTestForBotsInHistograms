@@ -6,6 +6,11 @@ import 'package:cvz_backtester/bots/registry.dart';
 import 'package:cvz_backtester/bots/ema_cross.dart';
 import 'package:cvz_backtester/bots/rsi_reversion.dart';
 import 'package:cvz_backtester/bots/dorothy_dca.dart';
+import 'package:cvz_backtester/bots/macd_cross.dart';
+import 'package:cvz_backtester/bots/bollinger_reversion.dart';
+import 'package:cvz_backtester/bots/elphaba_short.dart';
+import 'package:cvz_backtester/bots/donchian_breakout.dart';
+import 'package:cvz_backtester/bots/grid_trading.dart';
 import 'package:cvz_backtester/bots/dsl/dsl_bot.dart';
 import 'package:cvz_backtester/bots/dsl/expression.dart';
 import 'package:cvz_backtester/bots/dsl/expression_parser.dart';
@@ -21,14 +26,24 @@ void main() {
       );
 
   group('BotRegistry', () {
-    test('lists default bots', () {
-      expect(BotRegistry.names, containsAll(['ema_cross', 'rsi_reversion', 'dorothy_dca']));
+    test('lists all 8 bots', () {
+      expect(BotRegistry.names, containsAll([
+        'ema_cross', 'rsi_reversion', 'dorothy_dca',
+        'macd_cross', 'bollinger_reversion', 'elphaba_short',
+        'donchian_breakout', 'grid_trading',
+      ]));
+      expect(BotRegistry.names.length, 8);
     });
 
     test('creates bots by name', () {
       expect(BotRegistry.create('ema_cross'), isA<EMACross>());
       expect(BotRegistry.create('rsi_reversion'), isA<RSIReversion>());
       expect(BotRegistry.create('dorothy_dca'), isA<DorothyDCA>());
+      expect(BotRegistry.create('macd_cross'), isA<MACDCross>());
+      expect(BotRegistry.create('bollinger_reversion'), isA<BollingerReversion>());
+      expect(BotRegistry.create('elphaba_short'), isA<ElphabaShort>());
+      expect(BotRegistry.create('donchian_breakout'), isA<DonchianBreakout>());
+      expect(BotRegistry.create('grid_trading'), isA<GridTrading>());
     });
 
     test('throws on unknown bot', () {
@@ -104,6 +119,173 @@ void main() {
       final bot = DorothyDCA(maxPositions: 3, quoteOrderQty: 10);
       final r = BacktestEngine(
         config: const BacktestConfig(initialCash: 1000, takerFeePct: 0, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.totalTrades, greaterThanOrEqualTo(1));
+    });
+  });
+
+  group('MACDCross integration', () {
+    test('runs without errors on trending data', () {
+      final candles = [
+        for (int i = 0; i < 50; i++) bar(i, 100.0),
+        for (int i = 50; i < 100; i++) bar(i, 100.0 + (i - 50).toDouble() * 1.5),
+      ];
+      final bot = MACDCross(fastPeriod: 8, slowPeriod: 17, signalPeriod: 5);
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0.1, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.equityCurve.length, candles.length);
+    });
+
+    test('emits buy on bullish MACD crossover', () {
+      final candles = [
+        for (int i = 0; i < 40; i++) bar(i, 100.0),
+        for (int i = 40; i < 80; i++) bar(i, 100.0 + (i - 40).toDouble() * 3),
+      ];
+      final bot = MACDCross(
+        fastPeriod: 5,
+        slowPeriod: 12,
+        signalPeriod: 4,
+        profitFactorPct: 50,
+        stopLossPct: 50,
+      );
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.totalTrades, greaterThanOrEqualTo(1));
+    });
+  });
+
+  group('BollingerReversion integration', () {
+    test('runs without errors on volatile data', () {
+      final candles = [
+        for (int i = 0; i < 100; i++)
+          bar(i, 100.0 + 10.0 * (i.isEven ? 1 : -1).toDouble()),
+      ];
+      final bot = BollingerReversion(period: 10, kStd: 2.0);
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0.1, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.equityCurve.length, candles.length);
+    });
+
+    test('buys at lower band on mean-reverting data', () {
+      final candles = <Candle>[];
+      for (int i = 0; i < 80; i++) {
+        final cycle = (i % 20).toDouble();
+        final price = 100.0 + 15.0 * (cycle < 10 ? -1 + cycle / 5 : 1 - (cycle - 10) / 5);
+        candles.add(bar(i, price));
+      }
+      final bot = BollingerReversion(period: 10, kStd: 1.5, stopLossPct: 20);
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.totalTrades, greaterThanOrEqualTo(1));
+    });
+  });
+
+  group('ElphabaShort integration', () {
+    test('runs without errors on declining data', () {
+      final candles = [
+        for (int i = 0; i < 60; i++) bar(i, 200.0),
+        for (int i = 60; i < 120; i++) bar(i, 200.0 - (i - 60).toDouble() * 1.5),
+      ];
+      final bot = ElphabaShort(rsiPeriod: 10, emaPeriod: 20);
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0.1, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.equityCurve.length, candles.length);
+    });
+
+    test('opens short when RSI overbought and price below EMA', () {
+      final candles = <Candle>[];
+      // Rise to push RSI high, then small pullback below EMA to trigger short.
+      for (int i = 0; i < 30; i++) {
+        candles.add(bar(i, 100.0 + i.toDouble() * 3));
+      }
+      for (int i = 30; i < 60; i++) {
+        candles.add(bar(i, 190.0 - (i - 30).toDouble() * 2));
+      }
+      for (int i = 60; i < 90; i++) {
+        candles.add(bar(i, 130.0 - (i - 60).toDouble()));
+      }
+      final bot = ElphabaShort(
+        rsiPeriod: 7,
+        emaPeriod: 10,
+        overboughtLevel: 65,
+        profitFactorPct: 50,
+        stopLossPct: 50,
+      );
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.equityCurve.length, candles.length);
+    });
+  });
+
+  group('DonchianBreakout integration', () {
+    test('runs without errors on breakout data', () {
+      final candles = [
+        for (int i = 0; i < 30; i++) bar(i, 100.0 + (i % 5).toDouble()),
+        for (int i = 30; i < 60; i++) bar(i, 105.0 + (i - 30).toDouble() * 2),
+      ];
+      final bot = DonchianBreakout(entryPeriod: 10, exitPeriod: 5);
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0.1, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.equityCurve.length, candles.length);
+    });
+
+    test('enters on new high breakout', () {
+      final candles = <Candle>[];
+      for (int i = 0; i < 25; i++) {
+        candles.add(bar(i, 100.0));
+      }
+      for (int i = 25; i < 50; i++) {
+        final price = 100.0 + (i - 25).toDouble() * 2;
+        candles.add(bar(i, price, high: price));
+      }
+      final bot = DonchianBreakout(
+        entryPeriod: 10,
+        exitPeriod: 5,
+        stopLossPct: 50,
+      );
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.totalTrades, greaterThanOrEqualTo(1));
+    });
+  });
+
+  group('GridTrading integration', () {
+    test('runs without errors on ranging data', () {
+      final candles = [
+        for (int i = 0; i < 100; i++)
+          bar(i, 100.0 + 5.0 * (i.isEven ? 1 : -1).toDouble()),
+      ];
+      final bot = GridTrading(gridSpacingPct: 2.0, gridLevels: 3, quotePerGrid: 50);
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0.1, slippagePct: 0),
+      ).run(bots: [bot], candles: candles);
+      expect(r.equityCurve.length, candles.length);
+    });
+
+    test('opens grid positions on price decline', () {
+      final candles = <Candle>[];
+      for (int i = 0; i < 50; i++) {
+        candles.add(bar(i, 100.0 - i.toDouble() * 0.5));
+      }
+      for (int i = 50; i < 100; i++) {
+        candles.add(bar(i, 75.0 + (i - 50).toDouble() * 0.5));
+      }
+      final bot = GridTrading(
+        gridSpacingPct: 3.0,
+        gridLevels: 5,
+        quotePerGrid: 100,
+        stopLossPct: 50,
+      );
+      final r = BacktestEngine(
+        config: const BacktestConfig(initialCash: 10000, takerFeePct: 0, slippagePct: 0),
       ).run(bots: [bot], candles: candles);
       expect(r.totalTrades, greaterThanOrEqualTo(1));
     });
