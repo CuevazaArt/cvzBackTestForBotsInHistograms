@@ -137,6 +137,11 @@ class _FitContentCmd extends _ChartCommand {
   String toJs() => 'window.fitContent();';
 }
 
+class _ScrollToRealTimeCmd extends _ChartCommand {
+  @override
+  String toJs() => 'window.scrollToRealTime();';
+}
+
 class _SetMarkersModeCmd extends _ChartCommand {
   final String mode; // 'full' | 'minimal' | 'off'
   _SetMarkersModeCmd(this.mode);
@@ -228,6 +233,8 @@ class ChartController {
   Future<void> clear() => _execute(_ClearChartCmd());
 
   Future<void> fitContent() => _execute(_FitContentCmd());
+
+  Future<void> scrollToRealTime() => _execute(_ScrollToRealTimeCmd());
 
   Future<void> setMarkersMode(String mode) =>
       _execute(_SetMarkersModeCmd(mode));
