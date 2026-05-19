@@ -201,6 +201,11 @@
         try { chart.timeScale().fitContent(); } catch (_) {}
       };
 
+      // Auto-scroll to keep latest candle visible during progressive rendering.
+      window.scrollToRealTime = function () {
+        try { chart.timeScale().scrollToRealTime(); } catch (_) {}
+      };
+
       // ─── Visibility controls ─────────────────────────────────────
       var _markersMode = 'full'; // 'full' | 'minimal' | 'off'
       var _markersRaw = [];      // original markers with text

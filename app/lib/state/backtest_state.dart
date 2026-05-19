@@ -24,6 +24,7 @@ class BacktestRunning extends BacktestStatus {
   final List<Trade> trades;
   final double? lastEquity;
   final Candle? currentCandle;
+  final int candleIndex;
   const BacktestRunning({
     required this.processed,
     required this.total,
@@ -31,6 +32,7 @@ class BacktestRunning extends BacktestStatus {
     required this.trades,
     this.lastEquity,
     this.currentCandle,
+    this.candleIndex = -1,
   });
   double get percent => total > 0 ? processed / total * 100 : 0;
 }
@@ -55,6 +57,7 @@ class BacktestController extends StateNotifier<BacktestStatus> {
   final List<Trade> _trades = [];
   double? _lastEquity;
   Candle? _currentCandle;
+  int _candleIndex = -1;
 
   BacktestController() : super(const BacktestIdle());
 
@@ -74,13 +77,15 @@ class BacktestController extends StateNotifier<BacktestStatus> {
         _trades.clear();
         _lastEquity = null;
         _currentCandle = null;
+        _candleIndex = -1;
         _emitRunning();
         break;
       case RunProgress(:final processed):
         _processed = processed;
         _emitRunning();
         break;
-      case CandleProcessed(:final equity, :final candle):
+      case CandleProcessed(:final index, :final equity, :final candle):
+        _candleIndex = index;
         _lastEquity = equity;
         _currentCandle = candle;
         _emitRunning();
@@ -117,6 +122,7 @@ class BacktestController extends StateNotifier<BacktestStatus> {
       trades: List<Trade>.unmodifiable(_trades),
       lastEquity: _lastEquity,
       currentCandle: _currentCandle,
+      candleIndex: _candleIndex,
     );
   }
 
