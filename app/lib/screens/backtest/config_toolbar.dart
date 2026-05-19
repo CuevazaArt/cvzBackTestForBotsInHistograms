@@ -8,7 +8,7 @@ import '../../state/backtest_state.dart';
 import '../../state/providers.dart';
 
 /// Compact horizontal toolbar: [Symbol] [TF] [Bot] [Params▼] | [Speed] | [▶ ⏸ ⏭ ⏹] | [progress]
-class ConfigToolbar extends ConsumerWidget {
+class ConfigToolbar extends ConsumerStatefulWidget {
   final String symbol;
   final String timeframe;
   final String selectedBot;
@@ -60,11 +60,28 @@ class ConfigToolbar extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ConfigToolbar> createState() => _ConfigToolbarState();
+}
+
+class _ConfigToolbarState extends ConsumerState<ConfigToolbar> {
+  Future<Map<String, List<String>>>? _symbolsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshSymbols();
+  }
+
+  void _refreshSymbols() {
+    final db = ref.read(databaseProvider);
+    _symbolsFuture = db.candles.availableSymbols();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final running = status is BacktestRunning;
-    final paused = running && (status as BacktestRunning).paused;
-    final db = ref.watch(databaseProvider);
+    final running = widget.status is BacktestRunning;
+    final paused = running && (widget.status as BacktestRunning).paused;
 
     return Container(
       decoration: BoxDecoration(
@@ -76,31 +93,31 @@ class ConfigToolbar extends ConsumerWidget {
         children: [
           // ─── Data selectors ─────────────────────────────
           FutureBuilder<Map<String, List<String>>>(
-            future: db.candles.availableSymbols(),
+            future: _symbolsFuture,
             builder: (context, snap) {
               final symbols =
                   snap.hasData ? (snap.data!.keys.toList()..sort()) : <String>[];
-              final tfs = (snap.hasData && snap.data![symbol] != null)
-                  ? (List<String>.from(snap.data![symbol]!)..sort())
+              final tfs = (snap.hasData && snap.data![widget.symbol] != null)
+                  ? (List<String>.from(snap.data![widget.symbol]!)..sort())
                   : <String>['1h'];
 
               return Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _CompactDropdown(
-                    value: symbols.contains(symbol) ? symbol : null,
+                    value: symbols.contains(widget.symbol) ? widget.symbol : null,
                     items: symbols,
                     hint: 'Symbol',
                     width: 110,
-                    onChanged: (v) => v != null ? onSymbolChanged(v) : null,
+                    onChanged: (v) => v != null ? widget.onSymbolChanged(v) : null,
                   ),
                   const SizedBox(width: 4),
                   _CompactDropdown(
-                    value: tfs.contains(timeframe) ? timeframe : tfs.first,
+                    value: tfs.contains(widget.timeframe) ? widget.timeframe : tfs.first,
                     items: tfs,
                     hint: 'TF',
                     width: 70,
-                    onChanged: (v) => v != null ? onTimeframeChanged(v) : null,
+                    onChanged: (v) => v != null ? widget.onTimeframeChanged(v) : null,
                   ),
                 ],
               );
@@ -111,32 +128,32 @@ class ConfigToolbar extends ConsumerWidget {
 
           // ─── Bot selector + params ──────────────────────
           _CompactDropdown(
-            value: selectedBot,
+            value: widget.selectedBot,
             items: BotRegistry.names,
             labels: {
               for (final b in BotRegistry.all) b.id: b.displayName,
             },
             hint: 'Bot',
             width: 140,
-            onChanged: (v) => v != null ? onBotChanged(v) : null,
+            onChanged: (v) => v != null ? widget.onBotChanged(v) : null,
           ),
           const SizedBox(width: 2),
           _ParamsMenuButton(
-            selectedBot: selectedBot,
-            botParams: botParams,
-            initialCash: initialCash,
-            feePct: feePct,
-            slippagePct: slippagePct,
-            onBotParamsChanged: onBotParamsChanged,
-            onInitialCashChanged: onInitialCashChanged,
-            onFeeChanged: onFeeChanged,
-            onSlippageChanged: onSlippageChanged,
+            selectedBot: widget.selectedBot,
+            botParams: widget.botParams,
+            initialCash: widget.initialCash,
+            feePct: widget.feePct,
+            slippagePct: widget.slippagePct,
+            onBotParamsChanged: widget.onBotParamsChanged,
+            onInitialCashChanged: widget.onInitialCashChanged,
+            onFeeChanged: widget.onFeeChanged,
+            onSlippageChanged: widget.onSlippageChanged,
           ),
           const SizedBox(width: 2),
           _PresetButtons(
-            selectedBot: selectedBot,
-            botParams: botParams,
-            onBotParamsChanged: onBotParamsChanged,
+            selectedBot: widget.selectedBot,
+            botParams: widget.botParams,
+            onBotParamsChanged: widget.onBotParamsChanged,
           ),
 
           _Sep(),
@@ -153,16 +170,16 @@ class ConfigToolbar extends ConsumerWidget {
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
               ),
               child: Slider(
-                value: speedMs.toDouble(),
+                value: widget.speedMs.toDouble(),
                 min: 0,
                 max: 500,
                 divisions: 10,
-                onChanged: (v) => onSpeedChanged(v.toInt()),
+                onChanged: (v) => widget.onSpeedChanged(v.toInt()),
               ),
             ),
           ),
           Text(
-            speedMs == 0 ? 'max' : '${speedMs}ms',
+            widget.speedMs == 0 ? 'max' : '${widget.speedMs}ms',
             style: const TextStyle(fontSize: 11, color: Colors.grey),
           ),
 
@@ -174,7 +191,7 @@ class ConfigToolbar extends ConsumerWidget {
               icon: Icons.play_arrow,
               tooltip: 'Start backtest',
               color: Colors.green,
-              onPressed: onStart,
+              onPressed: widget.onStart,
               filled: true,
             ),
           ] else ...[
@@ -183,32 +200,32 @@ class ConfigToolbar extends ConsumerWidget {
                 icon: Icons.play_arrow,
                 tooltip: 'Resume',
                 color: Colors.green,
-                onPressed: onResume,
+                onPressed: widget.onResume,
               ),
               _ToolbarButton(
                 icon: Icons.skip_next,
                 tooltip: 'Step one candle',
-                onPressed: onStep,
+                onPressed: widget.onStep,
               ),
             ] else
               _ToolbarButton(
                 icon: Icons.pause,
                 tooltip: 'Pause',
                 color: Colors.amber,
-                onPressed: onPause,
+                onPressed: widget.onPause,
               ),
             _ToolbarButton(
               icon: Icons.stop,
               tooltip: 'Cancel',
               color: Colors.red,
-              onPressed: onCancel,
+              onPressed: widget.onCancel,
             ),
           ],
 
           // ─── Live badge ─────────────────────────────────
           if (running) ...[
             const SizedBox(width: 8),
-            _LiveBadge(status: status as BacktestRunning),
+            _LiveBadge(status: widget.status as BacktestRunning),
           ],
 
           const Spacer(),
@@ -221,12 +238,12 @@ class ConfigToolbar extends ConsumerWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   LinearProgressIndicator(
-                    value: (status as BacktestRunning).percent / 100,
+                    value: (widget.status as BacktestRunning).percent / 100,
                     minHeight: 3,
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${(status as BacktestRunning).percent.toStringAsFixed(0)}%',
+                    '${(widget.status as BacktestRunning).percent.toStringAsFixed(0)}%',
                     style: const TextStyle(fontSize: 10, color: Colors.grey),
                   ),
                 ],
@@ -272,28 +289,32 @@ class _CompactDropdown extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
         width: width,
         height: 30,
-        child: DropdownButtonFormField<String>(
-          initialValue: value,
-          isDense: true,
-          isExpanded: true,
+        child: InputDecorator(
           decoration: InputDecoration(
             labelText: hint,
             labelStyle: const TextStyle(fontSize: 11),
             border: const OutlineInputBorder(),
             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
           ),
-          style: const TextStyle(fontSize: 12),
-          items: items
-              .map((i) => DropdownMenuItem(
-                    value: i,
-                    child: Text(
-                      labels?[i] ?? i,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ))
-              .toList(),
-          onChanged: onChanged,
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: value,
+              isDense: true,
+              isExpanded: true,
+              style: const TextStyle(fontSize: 12),
+              items: items
+                  .map((i) => DropdownMenuItem(
+                        value: i,
+                        child: Text(
+                          labels?[i] ?? i,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ))
+                  .toList(),
+              onChanged: onChanged,
+            ),
+          ),
         ),
       );
 }

@@ -331,7 +331,7 @@ class _RunningBar extends StatelessWidget {
   }
 }
 
-class _DoneBar extends StatelessWidget {
+class _DoneBar extends StatefulWidget {
   final BacktestResult result;
   final String timeframe;
   final bool showMarkers;
@@ -353,72 +353,91 @@ class _DoneBar extends StatelessWidget {
   });
 
   @override
+  State<_DoneBar> createState() => _DoneBarState();
+}
+
+class _DoneBarState extends State<_DoneBar> {
+  late final AdvancedMetrics _metrics;
+
+  @override
+  void initState() {
+    super.initState();
+    _metrics = MetricsCalculator.compute(widget.result,
+        timeframe: widget.timeframe);
+  }
+
+  BacktestResult get result => widget.result;
+
+  @override
   Widget build(BuildContext context) {
-    final m = MetricsCalculator.compute(result, timeframe: timeframe);
+    final m = _metrics;
     final returnColor = result.returnPct >= 0 ? Colors.green : Colors.red;
 
-    return Row(
-      children: [
-        _OverlayToggles(
-          showMarkers: showMarkers,
-          showIndicators: showIndicators,
-          showEquity: showEquity,
-          onShowMarkersChanged: onShowMarkersChanged,
-          onShowIndicatorsChanged: onShowIndicatorsChanged,
-          onShowEquityChanged: onShowEquityChanged,
-        ),
-        _Divider(),
-        _MetricPill(
-          label: 'Return',
-          value:
-              '${result.returnPct >= 0 ? "+" : ""}${result.returnPct.toStringAsFixed(2)}%',
-          valueColor: returnColor,
-        ),
-        _MetricPill(
-          label: 'Equity',
-          value: result.finalEquity.toStringAsFixed(0),
-        ),
-        _MetricPill(
-          label: 'Trades',
-          value: '${result.totalTrades}',
-        ),
-        _MetricPill(
-          label: 'Win%',
-          value: result.winRate.toStringAsFixed(1),
-        ),
-        _MetricPill(
-          label: 'Sharpe',
-          value: m.sharpe.toStringAsFixed(2),
-        ),
-        _MetricPill(
-          label: 'MaxDD',
-          value: '${m.maxDrawdownPct.toStringAsFixed(1)}%',
-        ),
-        _MetricPill(
-          label: 'PF',
-          value: result.profitFactor.isFinite
-              ? result.profitFactor.toStringAsFixed(2)
-              : '∞',
-        ),
-        _Divider(),
-        _ActionButton(
-          icon: Icons.list_alt,
-          label: 'Trades',
-          onPressed: () => _showTradesDialog(context),
-        ),
-        const SizedBox(width: 4),
-        _ActionButton(
-          icon: Icons.show_chart,
-          label: 'Equity',
-          onPressed: () => _showEquityDialog(context),
-        ),
-        const SizedBox(width: 4),
-        _ActionButton(
-          icon: Icons.assessment,
-          label: 'Full Report',
-          onPressed: () => _showFullReport(context),
-        ),
-      ],
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _OverlayToggles(
+            showMarkers: widget.showMarkers,
+            showIndicators: widget.showIndicators,
+            showEquity: widget.showEquity,
+            onShowMarkersChanged: widget.onShowMarkersChanged,
+            onShowIndicatorsChanged: widget.onShowIndicatorsChanged,
+            onShowEquityChanged: widget.onShowEquityChanged,
+          ),
+          _Divider(),
+          _MetricPill(
+            label: 'Return',
+            value:
+                '${result.returnPct >= 0 ? "+" : ""}${result.returnPct.toStringAsFixed(2)}%',
+            valueColor: returnColor,
+          ),
+          _MetricPill(
+            label: 'Equity',
+            value: result.finalEquity.toStringAsFixed(0),
+          ),
+          _MetricPill(
+            label: 'Trades',
+            value: '${result.totalTrades}',
+          ),
+          _MetricPill(
+            label: 'Win%',
+            value: result.winRate.toStringAsFixed(1),
+          ),
+          _MetricPill(
+            label: 'Sharpe',
+            value: m.sharpe.toStringAsFixed(2),
+          ),
+          _MetricPill(
+            label: 'MaxDD',
+            value: '${m.maxDrawdownPct.toStringAsFixed(1)}%',
+          ),
+          _MetricPill(
+            label: 'PF',
+            value: result.profitFactor.isFinite
+                ? result.profitFactor.toStringAsFixed(2)
+                : '∞',
+          ),
+          _Divider(),
+          _ActionButton(
+            icon: Icons.list_alt,
+            label: 'Trades',
+            onPressed: () => _showTradesDialog(context),
+          ),
+          const SizedBox(width: 4),
+          _ActionButton(
+            icon: Icons.show_chart,
+            label: 'Equity',
+            onPressed: () => _showEquityDialog(context),
+          ),
+          const SizedBox(width: 4),
+          _ActionButton(
+            icon: Icons.assessment,
+            label: 'Full Report',
+            onPressed: () => _showFullReport(context),
+          ),
+        ],
+      ),
     );
   }
 
@@ -487,7 +506,7 @@ class _DoneBar extends StatelessWidget {
   }
 
   void _showFullReport(BuildContext context) {
-    final m = MetricsCalculator.compute(result, timeframe: timeframe);
+    final m = _metrics;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(

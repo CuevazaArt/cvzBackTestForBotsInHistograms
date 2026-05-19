@@ -148,7 +148,7 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
     }
   }
 
-  void _pushProgressiveCandle(Candle candle, double equity) {
+  void _pushProgressiveCandle(Candle candle) {
     _chartCtrl.upsertCandle(candle);
     _chartCtrl.scrollToRealTime();
   }
@@ -164,7 +164,7 @@ class _BacktestScreenState extends ConsumerState<BacktestScreen> {
         final candle = next.currentCandle;
         if (candle != null && next.candleIndex > _lastRenderedIndex) {
           _lastRenderedIndex = next.candleIndex;
-          _pushProgressiveCandle(candle, next.lastEquity ?? _initialCash);
+          _pushProgressiveCandle(candle);
         }
 
         // Real-time trade markers
