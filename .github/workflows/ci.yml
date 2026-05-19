@@ -12,108 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── Python Lint (ruff) ─────────────────────────────────────────
-  lint-backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - name: Install ruff
-        run: pip install ruff==0.6.9
-      - name: Ruff check
-        run: ruff check backtester/ --output-format=github
-      - name: Ruff format check
-        run: ruff format --check backtester/
-
-  # ── Python Type Check (mypy) ───────────────────────────────────
-  typecheck-backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: backtester/requirements*.txt
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backtester/requirements.txt
-          pip install mypy==1.11.2 types-requests
-      - name: Mypy
-        run: mypy backtester --ignore-missing-imports --no-strict-optional
-
-  # ── Python Backend Tests ───────────────────────────────────────
-  test-backend:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
-          cache-dependency-path: backtester/requirements*.txt
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backtester/requirements.txt
-          pip install -r backtester/requirements-optimize.txt
-          pip install pytest pytest-cov pytest-asyncio
-      - name: Run Tests
-        shell: bash
-        env:
-          PYTHONPATH: .
-        run: |
-          pytest backtester/tests/ -v \
-            --cov=backtester \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            --junitxml=pytest-report.xml
-      - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml
-          path: coverage.xml
-      - name: Upload test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: pytest-report.xml
-
-  # ── SDK packaging smoke test ───────────────────────────────────
-  # Ensures pyproject.toml stays in sync with the actual code: a fresh
-  # ``pip install -e .`` succeeds and the top-level re-exports are importable
-  # from a directory that doesn't contain the source tree.
-  sdk-packaging:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install package (editable)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-      - name: Import re-exports from a foreign cwd
-        run: |
-          mkdir -p /tmp/sdk-smoke
-          cd /tmp/sdk-smoke
-          python -c "from backtester import BacktestEngine, BacktestConfig, BOT_REGISTRY, DSLBot, __version__; print('SDK', __version__, sorted(BOT_REGISTRY))"
-
-  # ── Flutter Desktop Analysis + Tests ───────────────────────────
-  flutter:
+  # ── Flutter Desktop: analyze + unit tests ──────────────────────
+  flutter-analyze-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,63 +23,48 @@ jobs:
           channel: stable
           cache: true
       - name: Install dependencies
-        working-directory: flutter_app
+        working-directory: app
         run: flutter pub get
       - name: Analyze
-        working-directory: flutter_app
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        working-directory: app
+        run: flutter analyze --no-fatal-infos
       - name: Test
-        working-directory: flutter_app
+        working-directory: app
         run: flutter test --reporter=expanded
 
-  # ── Docker image smoke test ────────────────────────────────────
-  docker-smoke:
-    runs-on: ubuntu-latest
+  # ── Flutter Desktop: Windows build smoke ───────────────────────
+  flutter-build-windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t cvz-backtester:ci .
-      - name: Import smoke inside image
-        run: |
-          docker run --rm cvz-backtester:ci \
-            python -c "from backtester import BacktestEngine, BacktestConfig, BOT_REGISTRY, __version__; print('SDK', __version__, len(BOT_REGISTRY))"
-
-  # ── pre-commit hooks ────────────────────────────────────────────
-  pre-commit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
-          python-version: "3.12"
-          cache: "pip"
-      - name: Install pre-commit
-        run: pip install pre-commit==4.0.1
-      - name: Cache pre-commit envs
-        uses: actions/cache@v4
+          channel: stable
+          cache: true
+      - name: Install dependencies
+        working-directory: app
+        run: flutter pub get
+      - name: Build Windows (release)
+        working-directory: app
+        run: flutter build windows --release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
-      - name: Run hooks
-        run: pre-commit run --all-files --show-diff-on-failure
+          name: cvz-backtester-windows
+          path: app/build/windows/x64/runner/Release/
 
   # ── Aggregate gate ─────────────────────────────────────────────
-  # Required for branch protection. flutter promoted to required after B5
-  # migrated widget tests to fakeAsync + cancellable Timer in home_screen.
+  # Required for branch protection.
   ci-gate:
-    needs: [lint-backend, typecheck-backend, test-backend, sdk-packaging, flutter, docker-smoke, pre-commit]
+    needs: [flutter-analyze-test, flutter-build-windows]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Verify required jobs succeeded
         run: |
-          if [ "${{ needs.lint-backend.result }}" != "success" ] || \
-             [ "${{ needs.typecheck-backend.result }}" != "success" ] || \
-             [ "${{ needs.test-backend.result }}" != "success" ] || \
-             [ "${{ needs.sdk-packaging.result }}" != "success" ] || \
-             [ "${{ needs.flutter.result }}" != "success" ] || \
-             [ "${{ needs.docker-smoke.result }}" != "success" ] || \
-             [ "${{ needs.pre-commit.result }}" != "success" ]; then
+          if [ "${{ needs.flutter-analyze-test.result }}" != "success" ] || \
+             [ "${{ needs.flutter-build-windows.result }}" != "success" ]; then
             echo "One or more required jobs failed"
             exit 1
           fi

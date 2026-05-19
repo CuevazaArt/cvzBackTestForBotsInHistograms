@@ -1,5 +1,0 @@
-# Optional: hyperparameter optimization backends
-# Install with: pip install -r backtester/requirements-optimize.txt
-
-optuna==4.0.0
-nevergrad==1.0.5
