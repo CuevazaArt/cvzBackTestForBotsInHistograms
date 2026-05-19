@@ -1,36 +1,12 @@
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
+# Flutter / Dart build artifacts (app/.gitignore covers the rest)
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/build/
+app/windows/flutter/ephemeral/
+app/.idea/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-dist/
-*.egg-info/
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Backtester runtime artifacts
-backtester/.vault/
-backtester/data/
-backtester/results/
-*.duckdb
-backtester/web/assets/js/lightweight-charts.standalone.production.js
-
-# Flutter
-flutter_app/.dart_tool/
-flutter_app/.flutter-plugins
-flutter_app/.flutter-plugins-dependencies
-flutter_app/build/
-flutter_app/windows/flutter/ephemeral/
-flutter_app/.idea/
+# Note: generated *.g.dart / *.freezed.dart are committed (built once per change)
 
 # Env / secrets
 .env
@@ -43,6 +19,7 @@ flutter_app/.idea/
 *.swp
 *.swo
 *~
+.cursor/
 
 # OS
 .DS_Store
@@ -51,13 +28,4 @@ desktop.ini
 
 # Scratch / temp
 temp_repos/
-scratch_test.py
-apply_sdk_patch.bat
-*.scratch.py
-
-scratch_pecunator/
-flutter_app/test_syntax.dart
-.cursor/
-.mypy_cache/
-.ruff_cache/
-.benchmarks/
+*.scratch.dart
