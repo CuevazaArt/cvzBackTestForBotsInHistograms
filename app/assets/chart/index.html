@@ -201,6 +201,72 @@
         try { chart.timeScale().fitContent(); } catch (_) {}
       };
 
+      // ─── Visibility controls ─────────────────────────────────────
+      var _markersMode = 'full'; // 'full' | 'minimal' | 'off'
+      var _markersRaw = [];      // original markers with text
+
+      window.setMarkersMode = function (mode) {
+        try {
+          _markersMode = mode;
+          if (mode === 'off') {
+            markersPrimitive.setMarkers([]);
+            return;
+          }
+          var visible = _markersRaw.map(function (m) {
+            if (mode === 'minimal') {
+              return { _key: m._key, time: m.time, position: m.position, color: m.color, shape: m.shape, text: '' };
+            }
+            return m;
+          });
+          markersPrimitive.setMarkers(visible);
+        } catch (e) { showError('setMarkersMode: ' + e.message); }
+      };
+
+      // Patch addMarker to track raw markers separately
+      var _origAddMarker = window.addMarker;
+      window.addMarker = function (m) {
+        try {
+          var dedupKey = m.time + '_' + (m.botId || '');
+          if (_markersRaw.some(function (x) { return x._key === dedupKey; })) return;
+          var marker = {
+            _key: dedupKey,
+            time: Math.floor(m.time / 1000),
+            position: m.position || 'belowBar',
+            color: m.color || '#22c55e',
+            shape: m.shape || 'arrowUp',
+            text: m.text || '',
+          };
+          _markersRaw.push(marker);
+          _markersRaw.sort(function (a, b) { return a.time - b.time; });
+          _markers = _markersRaw;
+          window.setMarkersMode(_markersMode);
+        } catch (e) { showError('addMarker: ' + e.message); }
+      };
+
+      window.setIndicatorsVisible = function (visible) {
+        try {
+          Object.keys(_overlays).forEach(function (k) {
+            _overlays[k].applyOptions({ visible: visible });
+          });
+        } catch (e) { showError('setIndicatorsVisible: ' + e.message); }
+      };
+
+      window.setEquityVisible = function (visible) {
+        try {
+          if (equitySeries) {
+            equitySeries.applyOptions({ visible: visible });
+          }
+        } catch (e) { showError('setEquityVisible: ' + e.message); }
+      };
+
+      // Patch clearChart to reset raw markers too
+      var _origClearChart = window.clearChart;
+      window.clearChart = function () {
+        _markersRaw = [];
+        _markersMode = 'full';
+        _origClearChart();
+      };
+
       // Mark ready — Dart side polls or listens for this message.
       window.__chartReady = true;
       window.__post('chart:ready');

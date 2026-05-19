@@ -8,6 +8,9 @@ app/.idea/
 
 # Note: generated *.g.dart / *.freezed.dart are committed (built once per change)
 
+# Candle backup CSVs — tracked intentionally (do NOT ignore)
+!data/candles/
+
 # Env / secrets
 .env
 *.key

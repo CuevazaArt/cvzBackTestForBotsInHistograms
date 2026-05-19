@@ -137,6 +137,27 @@ class _FitContentCmd extends _ChartCommand {
   String toJs() => 'window.fitContent();';
 }
 
+class _SetMarkersModeCmd extends _ChartCommand {
+  final String mode; // 'full' | 'minimal' | 'off'
+  _SetMarkersModeCmd(this.mode);
+  @override
+  String toJs() => 'window.setMarkersMode(${jsonEncode(mode)});';
+}
+
+class _SetIndicatorsVisibleCmd extends _ChartCommand {
+  final bool visible;
+  _SetIndicatorsVisibleCmd(this.visible);
+  @override
+  String toJs() => 'window.setIndicatorsVisible($visible);';
+}
+
+class _SetEquityVisibleCmd extends _ChartCommand {
+  final bool visible;
+  _SetEquityVisibleCmd(this.visible);
+  @override
+  String toJs() => 'window.setEquityVisible($visible);';
+}
+
 /// Typed wrapper over the WebView's JS bridge.
 ///
 /// Critical guarantee: commands sent BEFORE the chart is ready are buffered
@@ -207,6 +228,15 @@ class ChartController {
   Future<void> clear() => _execute(_ClearChartCmd());
 
   Future<void> fitContent() => _execute(_FitContentCmd());
+
+  Future<void> setMarkersMode(String mode) =>
+      _execute(_SetMarkersModeCmd(mode));
+
+  Future<void> setIndicatorsVisible(bool visible) =>
+      _execute(_SetIndicatorsVisibleCmd(visible));
+
+  Future<void> setEquityVisible(bool visible) =>
+      _execute(_SetEquityVisibleCmd(visible));
 
   Future<void> dispose() => _readyController.close();
 }

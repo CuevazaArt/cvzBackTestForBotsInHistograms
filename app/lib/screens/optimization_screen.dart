@@ -160,9 +160,10 @@ class _OptimizationScreenState extends ConsumerState<OptimizationScreen> {
                     ),
                   ),
                   SizedBox(
-                    width: 100,
+                    width: 110,
                     child: DropdownButtonFormField<String>(
                       initialValue: _timeframe,
+                      isExpanded: true,
                       decoration: const InputDecoration(labelText: 'TF', border: OutlineInputBorder()),
                       items: ['1m', '5m', '15m', '1h', '4h', '1d']
                           .map((t) => DropdownMenuItem(value: t, child: Text(t)))
@@ -188,9 +189,10 @@ class _OptimizationScreenState extends ConsumerState<OptimizationScreen> {
                   ),
                   if (paramNames.isNotEmpty)
                     SizedBox(
-                      width: 140,
+                      width: 150,
                       child: DropdownButtonFormField<String>(
                         initialValue: paramNames.contains(_param1) ? _param1 : paramNames.first,
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Param 1', border: OutlineInputBorder()),
                         items: paramNames.map((n) => DropdownMenuItem(value: n, child: Text(n))).toList(),
                         onChanged: (v) { if (v != null) setState(() => _param1 = v); },
@@ -201,9 +203,10 @@ class _OptimizationScreenState extends ConsumerState<OptimizationScreen> {
                   _RangeField(label: 'Step', value: _p1Step, onChanged: (v) => _p1Step = v),
                   if (paramNames.length >= 2) ...[
                     SizedBox(
-                      width: 140,
+                      width: 150,
                       child: DropdownButtonFormField<String>(
                         initialValue: paramNames.contains(_param2) ? _param2 : paramNames[1],
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Param 2', border: OutlineInputBorder()),
                         items: [
                           const DropdownMenuItem(value: '', child: Text('(none)')),
